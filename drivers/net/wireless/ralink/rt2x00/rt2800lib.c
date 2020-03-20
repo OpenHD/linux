@@ -4163,6 +4163,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE0);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE0, txpower);
 
 		/*
@@ -4174,6 +4175,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE1);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE1, txpower);
 
 		/*
@@ -4185,6 +4187,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE2);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE2, txpower);
 
 		/*
@@ -4196,6 +4199,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE3);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE3, txpower);
 
 		/* read the next four txpower values */
@@ -4212,6 +4216,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE0);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE4, txpower);
 
 		/*
@@ -4223,6 +4228,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE1);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE5, txpower);
 
 		/*
@@ -4234,6 +4240,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE2);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE6, txpower);
 
 		/*
@@ -4245,6 +4252,7 @@ static void rt2800_config_txpower_rt28xx(struct rt2x00_dev *rt2x00dev,
 					     EEPROM_TXPOWER_BYRATE_RATE3);
 		txpower = rt2800_compensate_txpower(rt2x00dev, is_rate_b, band,
 					     power_level, txpower, delta);
+		txpower += rt2800_txpower(rt2x00dev);
 		rt2x00_set_field32(&reg, TX_PWR_CFG_RATE7, txpower);
 
 		rt2800_register_write(rt2x00dev, offset, reg);

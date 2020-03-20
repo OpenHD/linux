@@ -23,7 +23,11 @@ ifeq ($(CONFIG_MEDIA_CONTROLLER),y)
 endif
 
 obj-$(CONFIG_VIDEO_DEV) += v4l2-core/
+<<<<<<< HEAD
 #obj-$(CONFIG_VIDEO_LOOPBACK) += v4l2loopback/
+=======
+obj-$(CONFIG_VIDEO_LOOPBACK) += v4l2loopback/
+>>>>>>> 604f6c55fb1c... Enable building v4l2loopback driver
 obj-$(CONFIG_DVB_CORE)  += dvb-core/
 
 # There are both core and drivers at RC subtree - merge before drivers

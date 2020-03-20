@@ -29,9 +29,10 @@
  * Interval defines
  */
 #define WATCHDOG_INTERVAL	round_jiffies_relative(HZ)
-#define LINK_TUNE_INTERVAL	round_jiffies_relative(HZ)
+#define LINK_TUNE_SECONDS	2
+#define LINK_TUNE_INTERVAL	round_jiffies_relative(LINK_TUNE_SECONDS * HZ)
 #define AGC_INTERVAL		round_jiffies_relative(4 * HZ)
-#define VCO_INTERVAL		round_jiffies_relative(10 * HZ) /* 10 sec */
+#define VCO_INTERVAL		round_jiffies_relative(180 * HZ) /* 180 sec */
 
 /*
  * rt2x00_rate: Per rate device information

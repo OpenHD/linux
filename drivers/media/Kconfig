@@ -127,6 +127,16 @@ config VIDEO_V4L2_SUBDEV_API
 
 source "drivers/media/v4l2-core/Kconfig"
 
+
+config VIDEO_LOOPBACK
+	tristate
+	depends on MEDIA_SUPPORT
+	depends on MEDIA_CAMERA_SUPPORT || MEDIA_ANALOG_TV_SUPPORT || MEDIA_RADIO_SUPPORT || MEDIA_SDR_SUPPORT
+	default y
+
+source "drivers/media/v4l2loopback/Kconfig"
+
+
 #
 # DVB Core
 #	Only enables if one of DTV is selected

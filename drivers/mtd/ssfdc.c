@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux driver for SSFDC Flash Translation Layer (Read only)
  * © 2005 Eptar srl
  * Author: Claudio Lanconelli <lanconelli.claudio@eptar.com>
  *
  * Based on NTFL and MTDBLOCK_RO drivers
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -16,7 +13,7 @@
 #include <linux/slab.h>
 #include <linux/hdreg.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/mtd/blktrans.h>
 
 struct ssfdcr_record {
@@ -122,9 +119,9 @@ static int get_valid_cis_sector(struct mtd_info *mtd)
 	 * is not SSFDC formatted
 	 */
 	for (k = 0, offset = 0; k < 4; k++, offset += mtd->erasesize) {
-		if (!mtd->block_isbad(mtd, offset)) {
-			ret = mtd->read(mtd, offset, SECTOR_SIZE, &retlen,
-				sect_buf);
+		if (mtd_block_isbad(mtd, offset)) {
+			ret = mtd_read(mtd, offset, SECTOR_SIZE, &retlen,
+				       sect_buf);
 
 			/* CIS pattern match on the sector buffer */
 			if (ret < 0 || retlen != SECTOR_SIZE) {
@@ -156,7 +153,7 @@ static int read_physical_sector(struct mtd_info *mtd, uint8_t *sect_buf,
 	size_t retlen;
 	loff_t offset = (loff_t)sect_no << SECTOR_SHIFT;
 
-	ret = mtd->read(mtd, offset, SECTOR_SIZE, &retlen, sect_buf);
+	ret = mtd_read(mtd, offset, SECTOR_SIZE, &retlen, sect_buf);
 	if (ret < 0 || retlen != SECTOR_SIZE)
 		return -1;
 
@@ -175,7 +172,7 @@ static int read_raw_oob(struct mtd_info *mtd, loff_t offs, uint8_t *buf)
 	ops.oobbuf = buf;
 	ops.datbuf = NULL;
 
-	ret = mtd->read_oob(mtd, offs, &ops);
+	ret = mtd_read_oob(mtd, offs, &ops);
 	if (ret < 0 || ops.oobretlen != OOB_SIZE)
 		return -1;
 
@@ -255,7 +252,7 @@ static int build_logical_block_map(struct ssfdcr_record *ssfdc)
 	for (phys_block = ssfdc->cis_block + 1; phys_block < ssfdc->map_len;
 			phys_block++) {
 		offset = (unsigned long)phys_block * ssfdc->erase_size;
-		if (mtd->block_isbad(mtd, offset))
+		if (mtd_block_isbad(mtd, offset))
 			continue;	/* skip bad blocks */
 
 		ret = read_raw_oob(mtd, offset, oob_buf);
@@ -290,7 +287,7 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	int cis_sector;
 
 	/* Check for small page NAND flash */
-	if (mtd->type != MTD_NANDFLASH || mtd->oobsize != OOB_SIZE ||
+	if (!mtd_type_is_nand(mtd) || mtd->oobsize != OOB_SIZE ||
 	    mtd->size > UINT_MAX)
 		return;
 
@@ -332,8 +329,9 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 				(long)ssfdc->sectors;
 
 	/* Allocate logical block map */
-	ssfdc->logic_block_map = kmalloc(sizeof(ssfdc->logic_block_map[0]) *
-					 ssfdc->map_len, GFP_KERNEL);
+	ssfdc->logic_block_map =
+		kmalloc_array(ssfdc->map_len,
+			      sizeof(ssfdc->logic_block_map[0]), GFP_KERNEL);
 	if (!ssfdc->logic_block_map)
 		goto out_err;
 	memset(ssfdc->logic_block_map, 0xff, sizeof(ssfdc->logic_block_map[0]) *
@@ -380,8 +378,7 @@ static int ssfdcr_readsect(struct mtd_blktrans_dev *dev,
 		" block_addr=%d\n", logic_sect_no, sectors_per_block, offset,
 		block_address);
 
-	if (block_address >= ssfdc->map_len)
-		BUG();
+	BUG_ON(block_address >= ssfdc->map_len);
 
 	block_address = ssfdc->logic_block_map[block_address];
 

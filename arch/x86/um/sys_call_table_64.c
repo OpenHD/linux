@@ -1,11 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * System call table for UML/x86-64, copied from arch/x86_64/kernel/syscall.c
+ * System call table for UML/x86-64, copied from arch/x86/kernel/syscall_*.c
  * with some changes for UML.
  */
 
 #include <linux/linkage.h>
 #include <linux/sys.h>
 #include <linux/cache.h>
+#include <asm/unistd.h>
+#include <asm/syscall.h>
 
 #define __NO_STUBS
 
@@ -15,7 +18,7 @@
  */
 
 /* Not going to be implemented by UML, since we have no hardware. */
-#define stub_iopl sys_ni_syscall
+#define sys_iopl sys_ni_syscall
 #define sys_ioperm sys_ni_syscall
 
 /*
@@ -30,35 +33,27 @@
 #define stub_fork sys_fork
 #define stub_vfork sys_vfork
 #define stub_execve sys_execve
-#define stub_rt_sigsuspend sys_rt_sigsuspend
-#define stub_sigaltstack sys_sigaltstack
+#define stub_execveat sys_execveat
 #define stub_rt_sigreturn sys_rt_sigreturn
 
-#define __SYSCALL(nr, sym) extern asmlinkage void sym(void) ;
-#undef _ASM_X86_UNISTD_64_H
-#include "../../x86/include/asm/unistd_64.h"
+#define __SYSCALL_X32(nr, sym)
+#define __SYSCALL_COMMON(nr, sym) __SYSCALL_64(nr, sym)
 
-#undef __SYSCALL
-#define __SYSCALL(nr, sym) [ nr ] = sym,
-#undef _ASM_X86_UNISTD_64_H
+#define __SYSCALL_64(nr, sym) extern asmlinkage long sym(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long) ;
+#include <asm/syscalls_64.h>
 
-typedef void (*sys_call_ptr_t)(void);
+#undef __SYSCALL_64
+#define __SYSCALL_64(nr, sym) [ nr ] = sym,
 
-extern void sys_ni_syscall(void);
+extern asmlinkage long sys_ni_syscall(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long);
 
-/*
- * We used to have a trick here which made sure that holes in the
- * x86_64 table were filled in with sys_ni_syscall, but a comment in
- * unistd_64.h says that holes aren't allowed, so the trick was
- * removed.
- * The trick looked like this
- *	[0 ... UM_NR_syscall_max] = &sys_ni_syscall
- * before including unistd_64.h - the later initializations overwrote
- * the sys_ni_syscall filler.
- */
-
-sys_call_ptr_t sys_call_table[] __cacheline_aligned = {
-#include <asm/unistd_64.h>
+const sys_call_ptr_t sys_call_table[] ____cacheline_aligned = {
+	/*
+	 * Smells like a compiler bug -- it doesn't work
+	 * when the & below is removed.
+	 */
+	[0 ... __NR_syscall_max] = &sys_ni_syscall,
+#include <asm/syscalls_64.h>
 };
 
 int syscall_table_size = sizeof(sys_call_table);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  This code exports profiling data as debugfs files to userspace.
  *
@@ -57,13 +58,12 @@ struct gcov_node {
 	struct dentry *dentry;
 	struct dentry **links;
 	int num_loaded;
-	char name[0];
+	char name[];
 };
 
 static const char objtree[] = OBJTREE;
 static const char srctree[] = SRCTREE;
 static struct gcov_node root_node;
-static struct dentry *reset_dentry;
 static LIST_HEAD(all_head);
 static DEFINE_MUTEX(node_lock);
 
@@ -74,8 +74,8 @@ static int __init gcov_persist_setup(char *str)
 {
 	unsigned long val;
 
-	if (strict_strtoul(str, 0, &val)) {
-		pr_warning("invalid gcov_persist parameter '%s'\n", str);
+	if (kstrtoul(str, 0, &val)) {
+		pr_warn("invalid gcov_persist parameter '%s'\n", str);
 		return 0;
 	}
 	gcov_persist = val;
@@ -108,9 +108,9 @@ static void *gcov_seq_next(struct seq_file *seq, void *data, loff_t *pos)
 {
 	struct gcov_iterator *iter = data;
 
+	(*pos)++;
 	if (gcov_iter_next(iter))
 		return NULL;
-	(*pos)++;
 
 	return iter;
 }
@@ -242,7 +242,7 @@ static struct gcov_node *get_node_by_name(const char *name)
 
 	list_for_each_entry(node, &all_head, all) {
 		info = get_node_info(node);
-		if (info && (strcmp(info->filename, name) == 0))
+		if (info && (strcmp(gcov_info_filename(info), name) == 0))
 			return node;
 	}
 
@@ -279,7 +279,7 @@ static ssize_t gcov_seq_write(struct file *file, const char __user *addr,
 	seq = file->private_data;
 	info = gcov_iter_get_info(seq->private);
 	mutex_lock(&node_lock);
-	node = get_node_by_name(info->filename);
+	node = get_node_by_name(gcov_info_filename(info));
 	if (node) {
 		/* Reset counts or remove node for unloaded modules. */
 		if (node->num_loaded == 0)
@@ -365,7 +365,7 @@ static const char *deskew(const char *basename)
  */
 static void add_links(struct gcov_node *node, struct dentry *parent)
 {
-	char *basename;
+	const char *basename;
 	char *target;
 	int num;
 	int i;
@@ -376,18 +376,16 @@ static void add_links(struct gcov_node *node, struct dentry *parent)
 	if (!node->links)
 		return;
 	for (i = 0; i < num; i++) {
-		target = get_link_target(get_node_info(node)->filename,
-					 &gcov_link[i]);
+		target = get_link_target(
+				gcov_info_filename(get_node_info(node)),
+				&gcov_link[i]);
 		if (!target)
 			goto out_err;
-		basename = strrchr(target, '/');
-		if (!basename)
+		basename = kbasename(target);
+		if (basename == target)
 			goto out_err;
-		basename++;
 		node->links[i] = debugfs_create_symlink(deskew(basename),
 							parent,	target);
-		if (!node->links[i])
-			goto out_err;
 		kfree(target);
 	}
 
@@ -449,11 +447,6 @@ static struct gcov_node *new_node(struct gcov_node *parent,
 					parent->dentry, node, &gcov_data_fops);
 	} else
 		node->dentry = debugfs_create_dir(node->name, parent->dentry);
-	if (!node->dentry) {
-		pr_warning("could not create file\n");
-		kfree(node);
-		return NULL;
-	}
 	if (info)
 		add_links(node, parent->dentry);
 	list_add(&node->list, &parent->children);
@@ -463,7 +456,7 @@ static struct gcov_node *new_node(struct gcov_node *parent,
 
 err_nomem:
 	kfree(node);
-	pr_warning("out of memory\n");
+	pr_warn("out of memory\n");
 	return NULL;
 }
 
@@ -576,7 +569,7 @@ static void add_node(struct gcov_info *info)
 	struct gcov_node *parent;
 	struct gcov_node *node;
 
-	filename = kstrdup(info->filename, GFP_KERNEL);
+	filename = kstrdup(gcov_info_filename(info), GFP_KERNEL);
 	if (!filename)
 		return;
 	parent = &root_node;
@@ -630,8 +623,8 @@ static void add_info(struct gcov_node *node, struct gcov_info *info)
 	 */
 	loaded_info = kcalloc(num + 1, sizeof(struct gcov_info *), GFP_KERNEL);
 	if (!loaded_info) {
-		pr_warning("could not add '%s' (out of memory)\n",
-			   info->filename);
+		pr_warn("could not add '%s' (out of memory)\n",
+			gcov_info_filename(info));
 		return;
 	}
 	memcpy(loaded_info, node->loaded_info,
@@ -644,8 +637,9 @@ static void add_info(struct gcov_node *node, struct gcov_info *info)
 		 * data set replaces the copy of the last one.
 		 */
 		if (!gcov_info_is_compatible(node->unloaded_info, info)) {
-			pr_warning("discarding saved data for %s "
-				   "(incompatible version)\n", info->filename);
+			pr_warn("discarding saved data for %s "
+				"(incompatible version)\n",
+				gcov_info_filename(info));
 			gcov_info_free(node->unloaded_info);
 			node->unloaded_info = NULL;
 		}
@@ -655,8 +649,8 @@ static void add_info(struct gcov_node *node, struct gcov_info *info)
 		 * The initial one takes precedence.
 		 */
 		if (!gcov_info_is_compatible(node->loaded_info[0], info)) {
-			pr_warning("could not add '%s' (incompatible "
-				   "version)\n", info->filename);
+			pr_warn("could not add '%s' (incompatible "
+				"version)\n", gcov_info_filename(info));
 			kfree(loaded_info);
 			return;
 		}
@@ -691,8 +685,9 @@ static void save_info(struct gcov_node *node, struct gcov_info *info)
 	else {
 		node->unloaded_info = gcov_info_dup(info);
 		if (!node->unloaded_info) {
-			pr_warning("could not save data for '%s' "
-				   "(out of memory)\n", info->filename);
+			pr_warn("could not save data for '%s' "
+				"(out of memory)\n",
+				gcov_info_filename(info));
 		}
 	}
 }
@@ -707,8 +702,8 @@ static void remove_info(struct gcov_node *node, struct gcov_info *info)
 
 	i = get_info_index(node, info);
 	if (i < 0) {
-		pr_warning("could not remove '%s' (not found)\n",
-			   info->filename);
+		pr_warn("could not remove '%s' (not found)\n",
+			gcov_info_filename(info));
 		return;
 	}
 	if (gcov_persist)
@@ -735,7 +730,7 @@ void gcov_event(enum gcov_action action, struct gcov_info *info)
 	struct gcov_node *node;
 
 	mutex_lock(&node_lock);
-	node = get_node_by_name(info->filename);
+	node = get_node_by_name(gcov_info_filename(info));
 	switch (action) {
 	case GCOV_ADD:
 		if (node)
@@ -747,8 +742,8 @@ void gcov_event(enum gcov_action action, struct gcov_info *info)
 		if (node)
 			remove_info(node, info);
 		else {
-			pr_warning("could not remove '%s' (not found)\n",
-				   info->filename);
+			pr_warn("could not remove '%s' (not found)\n",
+				gcov_info_filename(info));
 		}
 		break;
 	}
@@ -758,33 +753,20 @@ void gcov_event(enum gcov_action action, struct gcov_info *info)
 /* Create debugfs entries. */
 static __init int gcov_fs_init(void)
 {
-	int rc = -EIO;
-
 	init_node(&root_node, NULL, NULL, NULL);
 	/*
 	 * /sys/kernel/debug/gcov will be parent for the reset control file
 	 * and all profiling files.
 	 */
 	root_node.dentry = debugfs_create_dir("gcov", NULL);
-	if (!root_node.dentry)
-		goto err_remove;
 	/*
 	 * Create reset file which resets all profiling counts when written
 	 * to.
 	 */
-	reset_dentry = debugfs_create_file("reset", 0600, root_node.dentry,
-					   NULL, &gcov_reset_fops);
-	if (!reset_dentry)
-		goto err_remove;
+	debugfs_create_file("reset", 0600, root_node.dentry, NULL,
+			    &gcov_reset_fops);
 	/* Replay previous events to get our fs hierarchy up-to-date. */
 	gcov_enable_events();
 	return 0;
-
-err_remove:
-	pr_err("init failed\n");
-	if (root_node.dentry)
-		debugfs_remove(root_node.dentry);
-
-	return rc;
 }
 device_initcall(gcov_fs_init);

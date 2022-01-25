@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux WiMAX
  * Initialization, addition and removal of wimax devices
  *
- *
  * Copyright (C) 2005-2006 Intel Corporation <linux-wimax@intel.com>
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * This implements:
  *
@@ -116,8 +101,9 @@ struct sk_buff *wimax_gnl_re_state_change_alloc(
 		dev_err(dev, "RE_STCH: can't create message\n");
 		goto error_new;
 	}
-	data = genlmsg_put(report_skb, 0, wimax_gnl_mcg.id, &wimax_gnl_family,
-			   0, WIMAX_GNL_RE_STATE_CHANGE);
+	/* FIXME: sending a group ID as the seq is wrong */
+	data = genlmsg_put(report_skb, 0, wimax_gnl_family.mcgrp_offset,
+			   &wimax_gnl_family, 0, WIMAX_GNL_RE_STATE_CHANGE);
 	if (data == NULL) {
 		dev_err(dev, "RE_STCH: can't put data into message\n");
 		goto error_put;
@@ -177,7 +163,7 @@ int wimax_gnl_re_state_change_send(
 		goto out;
 	}
 	genlmsg_end(report_skb, header);
-	genlmsg_multicast(report_skb, 0, wimax_gnl_mcg.id, GFP_KERNEL);
+	genlmsg_multicast(&wimax_gnl_family, report_skb, 0, 0, GFP_KERNEL);
 out:
 	d_fnend(3, dev, "(wimax_dev %p report_skb %p) = %d\n",
 		wimax_dev, report_skb, result);
@@ -187,11 +173,11 @@ out:
 
 static
 void __check_new_state(enum wimax_st old_state, enum wimax_st new_state,
-		       unsigned allowed_states_bm)
+		       unsigned int allowed_states_bm)
 {
 	if (WARN_ON(((1 << new_state) & allowed_states_bm) == 0)) {
-		printk(KERN_ERR "SW BUG! Forbidden state change %u -> %u\n",
-			old_state, new_state);
+		pr_err("SW BUG! Forbidden state change %u -> %u\n",
+		       old_state, new_state);
 	}
 }
 
@@ -402,22 +388,44 @@ void wimax_dev_init(struct wimax_dev *wimax_dev)
 }
 EXPORT_SYMBOL_GPL(wimax_dev_init);
 
-/*
- * This extern is declared here because it's easier to keep track --
- * both declarations are a list of the same
- */
-extern struct genl_ops
-	wimax_gnl_msg_from_user,
-	wimax_gnl_reset,
-	wimax_gnl_rfkill,
-	wimax_gnl_state_get;
+static const struct nla_policy wimax_gnl_policy[WIMAX_GNL_ATTR_MAX + 1] = {
+	[WIMAX_GNL_RESET_IFIDX] = { .type = NLA_U32, },
+	[WIMAX_GNL_RFKILL_IFIDX] = { .type = NLA_U32, },
+	[WIMAX_GNL_RFKILL_STATE] = {
+		.type = NLA_U32		/* enum wimax_rf_state */
+	},
+	[WIMAX_GNL_STGET_IFIDX] = { .type = NLA_U32, },
+	[WIMAX_GNL_MSG_IFIDX] = { .type = NLA_U32, },
+	[WIMAX_GNL_MSG_DATA] = {
+		.type = NLA_UNSPEC,	/* libnl doesn't grok BINARY yet */
+	},
+};
 
-static
-struct genl_ops *wimax_gnl_ops[] = {
-	&wimax_gnl_msg_from_user,
-	&wimax_gnl_reset,
-	&wimax_gnl_rfkill,
-	&wimax_gnl_state_get,
+static const struct genl_small_ops wimax_gnl_ops[] = {
+	{
+		.cmd = WIMAX_GNL_OP_MSG_FROM_USER,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+		.flags = GENL_ADMIN_PERM,
+		.doit = wimax_gnl_doit_msg_from_user,
+	},
+	{
+		.cmd = WIMAX_GNL_OP_RESET,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+		.flags = GENL_ADMIN_PERM,
+		.doit = wimax_gnl_doit_reset,
+	},
+	{
+		.cmd = WIMAX_GNL_OP_RFKILL,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+		.flags = GENL_ADMIN_PERM,
+		.doit = wimax_gnl_doit_rfkill,
+	},
+	{
+		.cmd = WIMAX_GNL_OP_STATE_GET,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+		.flags = GENL_ADMIN_PERM,
+		.doit = wimax_gnl_doit_state_get,
+	},
 };
 
 
@@ -425,7 +433,8 @@ static
 size_t wimax_addr_scnprint(char *addr_str, size_t addr_str_size,
 			   unsigned char *addr, size_t addr_len)
 {
-	unsigned cnt, total;
+	unsigned int cnt, total;
+
 	for (total = cnt = 0; cnt < addr_len; cnt++)
 		total += scnprintf(addr_str + total, addr_str_size - total,
 				   "%02x%c", addr[cnt],
@@ -462,7 +471,8 @@ int wimax_dev_add(struct wimax_dev *wimax_dev, struct net_device *net_dev)
 	d_fnstart(3, dev, "(wimax_dev %p net_dev %p)\n", wimax_dev, net_dev);
 
 	/* Do the RFKILL setup before locking, as RFKILL will call
-	 * into our functions. */
+	 * into our functions.
+	 */
 	wimax_dev->net_dev = net_dev;
 	result = wimax_rfkill_add(wimax_dev);
 	if (result < 0)
@@ -471,12 +481,7 @@ int wimax_dev_add(struct wimax_dev *wimax_dev, struct net_device *net_dev)
 	/* Set up user-space interaction */
 	mutex_lock(&wimax_dev->mutex);
 	wimax_id_table_add(wimax_dev);
-	result = wimax_debugfs_add(wimax_dev);
-	if (result < 0) {
-		dev_err(dev, "cannot initialize debugfs: %d\n",
-			result);
-		goto error_debugfs_add;
-	}
+	wimax_debugfs_add(wimax_dev);
 
 	__wimax_state_set(wimax_dev, WIMAX_ST_DOWN);
 	mutex_unlock(&wimax_dev->mutex);
@@ -488,10 +493,6 @@ int wimax_dev_add(struct wimax_dev *wimax_dev, struct net_device *net_dev)
 	d_fnend(3, dev, "(wimax_dev %p net_dev %p) = 0\n", wimax_dev, net_dev);
 	return 0;
 
-error_debugfs_add:
-	wimax_id_table_rm(wimax_dev);
-	mutex_unlock(&wimax_dev->mutex);
-	wimax_rfkill_rm(wimax_dev);
 error_rfkill_add:
 	d_fnend(3, dev, "(wimax_dev %p net_dev %p) = %d\n",
 		wimax_dev, net_dev, result);
@@ -548,16 +549,21 @@ struct d_level D_LEVEL[] = {
 size_t D_LEVEL_SIZE = ARRAY_SIZE(D_LEVEL);
 
 
-struct genl_family wimax_gnl_family = {
-	.id = GENL_ID_GENERATE,
+static const struct genl_multicast_group wimax_gnl_mcgrps[] = {
+	{ .name = "msg", },
+};
+
+struct genl_family wimax_gnl_family __ro_after_init = {
 	.name = "WiMAX",
 	.version = WIMAX_GNL_VERSION,
 	.hdrsize = 0,
 	.maxattr = WIMAX_GNL_ATTR_MAX,
-};
-
-struct genl_multicast_group wimax_gnl_mcg = {
-	.name = "msg",
+	.policy = wimax_gnl_policy,
+	.module = THIS_MODULE,
+	.small_ops = wimax_gnl_ops,
+	.n_small_ops = ARRAY_SIZE(wimax_gnl_ops),
+	.mcgrps = wimax_gnl_mcgrps,
+	.n_mcgrps = ARRAY_SIZE(wimax_gnl_mcgrps),
 };
 
 
@@ -566,46 +572,21 @@ struct genl_multicast_group wimax_gnl_mcg = {
 static
 int __init wimax_subsys_init(void)
 {
-	int result, cnt;
+	int result;
 
 	d_fnstart(4, NULL, "()\n");
 	d_parse_params(D_LEVEL, D_LEVEL_SIZE, wimax_debug_params,
 		       "wimax.debug");
 
-	snprintf(wimax_gnl_family.name, sizeof(wimax_gnl_family.name),
-		 "WiMAX");
 	result = genl_register_family(&wimax_gnl_family);
 	if (unlikely(result < 0)) {
-		printk(KERN_ERR "cannot register generic netlink family: %d\n",
-		       result);
+		pr_err("cannot register generic netlink family: %d\n", result);
 		goto error_register_family;
 	}
 
-	for (cnt = 0; cnt < ARRAY_SIZE(wimax_gnl_ops); cnt++) {
-		result = genl_register_ops(&wimax_gnl_family,
-					   wimax_gnl_ops[cnt]);
-		d_printf(4, NULL, "registering generic netlink op code "
-			 "%u: %d\n", wimax_gnl_ops[cnt]->cmd, result);
-		if (unlikely(result < 0)) {
-			printk(KERN_ERR "cannot register generic netlink op "
-			       "code %u: %d\n",
-			       wimax_gnl_ops[cnt]->cmd, result);
-			goto error_register_ops;
-		}
-	}
-
-	result = genl_register_mc_group(&wimax_gnl_family, &wimax_gnl_mcg);
-	if (result < 0)
-		goto error_mc_group;
 	d_fnend(4, NULL, "() = 0\n");
 	return 0;
 
-error_mc_group:
-error_register_ops:
-	for (cnt--; cnt >= 0; cnt--)
-		genl_unregister_ops(&wimax_gnl_family,
-				    wimax_gnl_ops[cnt]);
-	genl_unregister_family(&wimax_gnl_family);
 error_register_family:
 	d_fnend(4, NULL, "() = %d\n", result);
 	return result;
@@ -618,12 +599,7 @@ module_init(wimax_subsys_init);
 static
 void __exit wimax_subsys_exit(void)
 {
-	int cnt;
 	wimax_id_table_release();
-	genl_unregister_mc_group(&wimax_gnl_family, &wimax_gnl_mcg);
-	for (cnt = ARRAY_SIZE(wimax_gnl_ops) - 1; cnt >= 0; cnt--)
-		genl_unregister_ops(&wimax_gnl_family,
-				    wimax_gnl_ops[cnt]);
 	genl_unregister_family(&wimax_gnl_family);
 }
 module_exit(wimax_subsys_exit);
@@ -631,4 +607,3 @@ module_exit(wimax_subsys_exit);
 MODULE_AUTHOR("Intel Corporation <linux-wimax@intel.com>");
 MODULE_DESCRIPTION("Linux WiMAX stack");
 MODULE_LICENSE("GPL");
-

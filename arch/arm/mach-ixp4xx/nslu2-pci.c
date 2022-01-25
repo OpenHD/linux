@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ixp4xx/nslu2-pci.c
  *
@@ -8,11 +9,6 @@
  *	Copyright (C) 2003-2004 MontaVista Software, Inc.
  *
  * Maintainer: http://www.nslu2-linux.org/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/pci.h>
@@ -20,6 +16,8 @@
 #include <linux/irq.h>
 #include <asm/mach/pci.h>
 #include <asm/mach-types.h>
+
+#include "irqs.h"
 
 #define MAX_DEV		3
 #define IRQ_LINES	3
@@ -54,10 +52,9 @@ static int __init nslu2_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci __initdata nslu2_pci = {
 	.nr_controllers = 1,
+	.ops		= &ixp4xx_ops,
 	.preinit	= nslu2_pci_preinit,
-	.swizzle	= pci_std_swizzle,
 	.setup		= ixp4xx_setup,
-	.scan		= ixp4xx_scan_bus,
 	.map_irq	= nslu2_map_irq,
 };
 

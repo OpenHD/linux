@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 1995-2000  Linus Torvalds & author (see below)
  */
@@ -309,7 +310,7 @@ static void __init ht6560b_init_dev(ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = drive->hwif;
 	/* Setting default configurations for drives. */
-	int t = (HT_CONFIG_DEFAULT << 8) | HT_TIMING_DEFAULT;
+	unsigned long t = (HT_CONFIG_DEFAULT << 8) | HT_TIMING_DEFAULT;
 
 	if (hwif->channel)
 		t |= (HT_SECONDARY_IF << 8);
@@ -317,7 +318,7 @@ static void __init ht6560b_init_dev(ide_drive_t *drive)
 	ide_set_drivedata(drive, (void *)t);
 }
 
-static int probe_ht6560b;
+static bool probe_ht6560b;
 
 module_param_named(probe, probe_ht6560b, bool, 0);
 MODULE_PARM_DESC(probe, "probe for HT6560B chipset");
@@ -341,7 +342,7 @@ static const struct ide_port_ops ht6560b_port_ops = {
 	.set_pio_mode		= ht6560b_set_pio_mode,
 };
 
-static const struct ide_port_info ht6560b_port_info __initdata = {
+static const struct ide_port_info ht6560b_port_info __initconst = {
 	.name			= DRV_NAME,
 	.chipset		= ide_ht6560b,
 	.tp_ops 		= &ht6560b_tp_ops,

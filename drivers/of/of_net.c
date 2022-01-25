@@ -1,66 +1,91 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OF helpers for network devices.
- *
- * This file is released under the GPLv2
  *
  * Initially copied out of arch/powerpc/kernel/prom_parse.c
  */
 #include <linux/etherdevice.h>
 #include <linux/kernel.h>
 #include <linux/of_net.h>
+#include <linux/of_platform.h>
 #include <linux/phy.h>
 #include <linux/export.h>
-
-/**
- * It maps 'enum phy_interface_t' found in include/linux/phy.h
- * into the device tree binding of 'phy-mode', so that Ethernet
- * device driver can get phy interface from device tree.
- */
-static const char *phy_modes[] = {
-	[PHY_INTERFACE_MODE_NA]		= "",
-	[PHY_INTERFACE_MODE_MII]	= "mii",
-	[PHY_INTERFACE_MODE_GMII]	= "gmii",
-	[PHY_INTERFACE_MODE_SGMII]	= "sgmii",
-	[PHY_INTERFACE_MODE_TBI]	= "tbi",
-	[PHY_INTERFACE_MODE_RMII]	= "rmii",
-	[PHY_INTERFACE_MODE_RGMII]	= "rgmii",
-	[PHY_INTERFACE_MODE_RGMII_ID]	= "rgmii-id",
-	[PHY_INTERFACE_MODE_RGMII_RXID]	= "rgmii-rxid",
-	[PHY_INTERFACE_MODE_RGMII_TXID] = "rgmii-txid",
-	[PHY_INTERFACE_MODE_RTBI]	= "rtbi",
-	[PHY_INTERFACE_MODE_SMII]	= "smii",
-};
+#include <linux/device.h>
 
 /**
  * of_get_phy_mode - Get phy mode for given device_node
  * @np:	Pointer to the given device_node
+ * @interface: Pointer to the result
  *
- * The function gets phy interface string from property 'phy-mode',
- * and return its index in phy_modes table, or errno in error case.
+ * The function gets phy interface string from property 'phy-mode' or
+ * 'phy-connection-type'. The index in phy_modes table is set in
+ * interface and 0 returned. In case of error interface is set to
+ * PHY_INTERFACE_MODE_NA and an errno is returned, e.g. -ENODEV.
  */
-const int of_get_phy_mode(struct device_node *np)
+int of_get_phy_mode(struct device_node *np, phy_interface_t *interface)
 {
 	const char *pm;
 	int err, i;
 
+	*interface = PHY_INTERFACE_MODE_NA;
+
 	err = of_property_read_string(np, "phy-mode", &pm);
+	if (err < 0)
+		err = of_property_read_string(np, "phy-connection-type", &pm);
 	if (err < 0)
 		return err;
 
-	for (i = 0; i < ARRAY_SIZE(phy_modes); i++)
-		if (!strcasecmp(pm, phy_modes[i]))
-			return i;
+	for (i = 0; i < PHY_INTERFACE_MODE_MAX; i++)
+		if (!strcasecmp(pm, phy_modes(i))) {
+			*interface = i;
+			return 0;
+		}
 
 	return -ENODEV;
 }
 EXPORT_SYMBOL_GPL(of_get_phy_mode);
 
+static const void *of_get_mac_addr(struct device_node *np, const char *name)
+{
+	struct property *pp = of_find_property(np, name, NULL);
+
+	if (pp && pp->length == ETH_ALEN && is_valid_ether_addr(pp->value))
+		return pp->value;
+	return NULL;
+}
+
+static const void *of_get_mac_addr_nvmem(struct device_node *np)
+{
+	int ret;
+	const void *mac;
+	u8 nvmem_mac[ETH_ALEN];
+	struct platform_device *pdev = of_find_device_by_node(np);
+
+	if (!pdev)
+		return ERR_PTR(-ENODEV);
+
+	ret = nvmem_get_mac_address(&pdev->dev, &nvmem_mac);
+	if (ret) {
+		put_device(&pdev->dev);
+		return ERR_PTR(ret);
+	}
+
+	mac = devm_kmemdup(&pdev->dev, nvmem_mac, ETH_ALEN, GFP_KERNEL);
+	put_device(&pdev->dev);
+	if (!mac)
+		return ERR_PTR(-ENOMEM);
+
+	return mac;
+}
+
 /**
  * Search the device tree for the best MAC address to use.  'mac-address' is
  * checked first, because that is supposed to contain to "most recent" MAC
  * address. If that isn't set, then 'local-mac-address' is checked next,
- * because that is the default address.  If that isn't set, then the obsolete
- * 'address' is checked, just in case we're using an old device tree.
+ * because that is the default address. If that isn't set, then the obsolete
+ * 'address' is checked, just in case we're using an old device tree. If any
+ * of the above isn't set, then try to get MAC address from nvmem cell named
+ * 'mac-address'.
  *
  * Note that the 'address' property is supposed to contain a virtual address of
  * the register set, but some DTS files have redefined that property to be the
@@ -72,23 +97,25 @@ EXPORT_SYMBOL_GPL(of_get_phy_mode);
  * addresses.  Some older U-Boots only initialized 'local-mac-address'.  In
  * this case, the real MAC is in 'local-mac-address', and 'mac-address' exists
  * but is all zeros.
+ *
+ * Return: Will be a valid pointer on success and ERR_PTR in case of error.
 */
 const void *of_get_mac_address(struct device_node *np)
 {
-	struct property *pp;
+	const void *addr;
 
-	pp = of_find_property(np, "mac-address", NULL);
-	if (pp && (pp->length == 6) && is_valid_ether_addr(pp->value))
-		return pp->value;
+	addr = of_get_mac_addr(np, "mac-address");
+	if (addr)
+		return addr;
 
-	pp = of_find_property(np, "local-mac-address", NULL);
-	if (pp && (pp->length == 6) && is_valid_ether_addr(pp->value))
-		return pp->value;
+	addr = of_get_mac_addr(np, "local-mac-address");
+	if (addr)
+		return addr;
 
-	pp = of_find_property(np, "address", NULL);
-	if (pp && (pp->length == 6) && is_valid_ether_addr(pp->value))
-		return pp->value;
+	addr = of_get_mac_addr(np, "address");
+	if (addr)
+		return addr;
 
-	return NULL;
+	return of_get_mac_addr_nvmem(np);
 }
 EXPORT_SYMBOL(of_get_mac_address);

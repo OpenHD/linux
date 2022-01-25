@@ -1,18 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/sound/wm8903.h -- Platform data for WM8903
  *
  * Copyright 2010 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_SND_WM8903_H
 #define __LINUX_SND_WM8903_H
 
-/* Used to enable configuration of a GPIO to all zeros */
-#define WM8903_GPIO_NO_CONFIG 0x8000
+/*
+ * Used to enable configuration of a GPIO to all zeros; a gpio_cfg value of
+ * zero in platform data means "don't touch this pin".
+ */
+#define WM8903_GPIO_CONFIG_ZERO 0x8000
 
 /*
  * R6 (0x06) - Mic Bias Control 0

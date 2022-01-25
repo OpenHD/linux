@@ -1,15 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2004 PathScale, Inc
  * Copyright (C) 2004 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <errno.h>
 #include <string.h>
 #include <sys/ptrace.h>
-#include "sysdep/ptrace.h"
-#include "sysdep/ptrace_user.h"
-#include "registers.h"
+#include <sysdep/ptrace.h>
+#include <sysdep/ptrace_user.h>
+#include <registers.h>
 
 int save_registers(int pid, struct uml_pt_regs *regs)
 {

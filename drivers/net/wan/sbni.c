@@ -57,12 +57,13 @@
 
 #include <net/net_namespace.h>
 #include <net/arp.h>
+#include <net/Space.h>
 
 #include <asm/io.h>
 #include <asm/types.h>
 #include <asm/byteorder.h>
 #include <asm/irq.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "sbni.h"
 
@@ -70,6 +71,7 @@
 
 struct net_local {
 	struct timer_list	watchdog;
+	struct net_device	*watchdog_dev;
 
 	spinlock_t	lock;
 	struct sk_buff  *rx_buf_p;		/* receive buffer ptr */
@@ -127,7 +129,7 @@ static void  send_frame( struct net_device * );
 static int   upload_data( struct net_device *,
 			  unsigned, unsigned, unsigned, u32 );
 static void  download_data( struct net_device *, u32 * );
-static void  sbni_watchdog( unsigned long );
+static void  sbni_watchdog(struct timer_list *);
 static void  interpret_ack( struct net_device *, unsigned );
 static int   append_frame_to_pkt( struct net_device *, unsigned, u32 );
 static void  indicate_pkt( struct net_device * );
@@ -146,10 +148,6 @@ static int  sbni_init( struct net_device * );
 #ifdef CONFIG_SBNI_MULTILINE
 static int  enslave( struct net_device *, struct net_device * );
 static int  emancipate( struct net_device * );
-#endif
-
-#ifdef __i386__
-#define ASM_CRC 1
 #endif
 
 static const char  version[] =
@@ -176,7 +174,7 @@ static u32	mac[  SBNI_MAX_NUM_CARDS ] __initdata;
 
 #ifndef MODULE
 typedef u32  iarr[];
-static iarr __initdata *dest[5] = { &io, &irq, &baud, &rxl, &mac };
+static iarr *dest[5] __initdata = { &io, &irq, &baud, &rxl, &mac };
 #endif
 
 /* A zero-terminated list of I/O addresses to be probed on ISA bus */
@@ -214,7 +212,6 @@ static const struct net_device_ops sbni_netdev_ops = {
 	.ndo_start_xmit		= sbni_start_xmit,
 	.ndo_set_rx_mode	= set_multicast_list,
 	.ndo_do_ioctl		= sbni_ioctl,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -230,7 +227,8 @@ int __init sbni_probe(int unit)
 	struct net_device *dev;
 	int err;
 
-	dev = alloc_netdev(sizeof(struct net_local), "sbni", sbni_devsetup);
+	dev = alloc_netdev(sizeof(struct net_local), "sbni",
+			   NET_NAME_UNKNOWN, sbni_devsetup);
 	if (!dev)
 		return -ENOMEM;
 
@@ -262,11 +260,12 @@ static int __init sbni_init(struct net_device *dev)
 		return  sbni_isa_probe( dev );
 	/* otherwise we have to perform search our adapter */
 
-	if( io[ num ] != -1 )
-		dev->base_addr	= io[ num ],
+	if( io[ num ] != -1 ) {
+		dev->base_addr	= io[ num ];
 		dev->irq	= irq[ num ];
-	else if( scandone  ||  io[ 0 ] != -1 )
+	} else if( scandone  ||  io[ 0 ] != -1 ) {
 		return  -ENODEV;
+	}
 
 	/* if io[ num ] contains non-zero address, then that is on ISA bus */
 	if( dev->base_addr )
@@ -401,12 +400,13 @@ sbni_probe1( struct net_device  *dev,  unsigned long  ioaddr,  int  irq )
 	nl->maxframe  = DEFAULT_FRAME_LEN;
 	nl->csr1.rate = baud[ num ];
 
-	if( (nl->cur_rxl_index = rxl[ num ]) == -1 )
+	if( (nl->cur_rxl_index = rxl[ num ]) == -1 ) {
 		/* autotune rxl */
-		nl->cur_rxl_index = DEF_RXL,
+		nl->cur_rxl_index = DEF_RXL;
 		nl->delta_rxl = DEF_RXL_DELTA;
-	else
+	} else {
 		nl->delta_rxl = 0;
+	}
 	nl->csr1.rxl  = rxl_tab[ nl->cur_rxl_index ];
 	if( inb( ioaddr + CSR0 ) & 0x01 )
 		nl->state |= FL_SLOW_MODE;
@@ -514,13 +514,15 @@ sbni_interrupt( int  irq,  void  *dev_id )
 
 	do {
 		repeat = 0;
-		if( inb( dev->base_addr + CSR0 ) & (RC_RDY | TR_RDY) )
-			handle_channel( dev ),
+		if( inb( dev->base_addr + CSR0 ) & (RC_RDY | TR_RDY) ) {
+			handle_channel( dev );
 			repeat = 1;
+		}
 		if( nl->second  && 	/* second channel present */
-		    (inb( nl->second->base_addr+CSR0 ) & (RC_RDY | TR_RDY)) )
-			handle_channel( nl->second ),
+		    (inb( nl->second->base_addr+CSR0 ) & (RC_RDY | TR_RDY)) ) {
+			handle_channel( nl->second );
 			repeat = 1;
+		}
 	} while( repeat );
 
 	if( nl->second )
@@ -584,8 +586,8 @@ handle_channel( struct net_device  *dev )
 
 
 /*
- * Routine returns 1 if it need to acknoweledge received frame.
- * Empty frame received without errors won't be acknoweledged.
+ * Routine returns 1 if it needs to acknowledge received frame.
+ * Empty frame received without errors won't be acknowledged.
  */
 
 static int
@@ -612,11 +614,12 @@ recv_frame( struct net_device  *dev )
 		nl->state |= FL_PREV_OK;
 		if( framelen > 4 )
 			nl->in_stats.all_rx_number++;
-	} else
-		nl->state &= ~FL_PREV_OK,
-		change_level( dev ),
-		nl->in_stats.all_rx_number++,
+	} else {
+		nl->state &= ~FL_PREV_OK;
+		change_level( dev );
+		nl->in_stats.all_rx_number++;
 		nl->in_stats.bad_rx_number++;
+	}
 
 	return  !frame_ok  ||  framelen > 4;
 }
@@ -691,9 +694,10 @@ download_data( struct net_device  *dev,  u32  *crc_p )
 	*crc_p = calc_crc32( *crc_p, skb->data + nl->outpos, len );
 
 	/* if packet too short we should write some more bytes to pad */
-	for( len = nl->framelen - len;  len--; )
-		outb( 0, dev->base_addr + DAT ),
+	for( len = nl->framelen - len;  len--; ) {
+		outb( 0, dev->base_addr + DAT );
 		*crc_p = CRC32( 0, *crc_p );
+	}
 }
 
 
@@ -705,9 +709,10 @@ upload_data( struct net_device  *dev,  unsigned  framelen,  unsigned  frameno,
 
 	int  frame_ok;
 
-	if( is_first )
-		nl->wait_frameno = frameno,
+	if( is_first ) {
+		nl->wait_frameno = frameno;
 		nl->inppos = 0;
+	}
 
 	if( nl->wait_frameno == frameno ) {
 
@@ -719,33 +724,35 @@ upload_data( struct net_device  *dev,  unsigned  framelen,  unsigned  frameno,
 		 * error was occurred... drop entire packet
 		 */
 		else if( (frame_ok = skip_tail( dev->base_addr, framelen, crc ))
-			 != 0 )
-			nl->wait_frameno = 0,
-			nl->inppos = 0,
+			 != 0 ) {
+			nl->wait_frameno = 0;
+			nl->inppos = 0;
 #ifdef CONFIG_SBNI_MULTILINE
-			nl->master->stats.rx_errors++,
+			nl->master->stats.rx_errors++;
 			nl->master->stats.rx_missed_errors++;
 #else
-		        dev->stats.rx_errors++,
+		        dev->stats.rx_errors++;
 			dev->stats.rx_missed_errors++;
 #endif
+		}
 			/* now skip all frames until is_first != 0 */
 	} else
 		frame_ok = skip_tail( dev->base_addr, framelen, crc );
 
-	if( is_first  &&  !frame_ok )
+	if( is_first  &&  !frame_ok ) {
 		/*
 		 * Frame has been broken, but we had already stored
 		 * is_first... Drop entire packet.
 		 */
-		nl->wait_frameno = 0,
+		nl->wait_frameno = 0;
 #ifdef CONFIG_SBNI_MULTILINE
-		nl->master->stats.rx_errors++,
+		nl->master->stats.rx_errors++;
 		nl->master->stats.rx_crc_errors++;
 #else
-		dev->stats.rx_errors++,
+		dev->stats.rx_errors++;
 		dev->stats.rx_crc_errors++;
 #endif
+	}
 
 	return  frame_ok;
 }
@@ -763,7 +770,7 @@ send_complete( struct net_device *dev )
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += nl->tx_buf_p->len;
 #endif
-	dev_kfree_skb_irq( nl->tx_buf_p );
+	dev_consume_skb_irq(nl->tx_buf_p);
 
 	nl->tx_buf_p = NULL;
 
@@ -784,17 +791,18 @@ interpret_ack( struct net_device  *dev,  unsigned  ack )
 		if( nl->state & FL_WAIT_ACK ) {
 			nl->outpos += nl->framelen;
 
-			if( --nl->tx_frameno )
+			if( --nl->tx_frameno ) {
 				nl->framelen = min_t(unsigned int,
 						   nl->maxframe,
 						   nl->tx_buf_p->len - nl->outpos);
-			else
-				send_complete( dev ),
+			} else {
+				send_complete( dev );
 #ifdef CONFIG_SBNI_MULTILINE
 				netif_wake_queue( nl->master );
 #else
 				netif_wake_queue( dev );
 #endif
+			}
 		}
 	}
 
@@ -862,9 +870,9 @@ prepare_to_send( struct sk_buff  *skb,  struct net_device  *dev )
 
 	outb( inb( dev->base_addr + CSR0 ) | TR_REQ,  dev->base_addr + CSR0 );
 #ifdef CONFIG_SBNI_MULTILINE
-	nl->master->trans_start = jiffies;
+	netif_trans_update(nl->master);
 #else
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 #endif
 }
 
@@ -874,16 +882,17 @@ drop_xmit_queue( struct net_device  *dev )
 {
 	struct net_local  *nl = netdev_priv(dev);
 
-	if( nl->tx_buf_p )
-		dev_kfree_skb_any( nl->tx_buf_p ),
-		nl->tx_buf_p = NULL,
+	if( nl->tx_buf_p ) {
+		dev_kfree_skb_any( nl->tx_buf_p );
+		nl->tx_buf_p = NULL;
 #ifdef CONFIG_SBNI_MULTILINE
-		nl->master->stats.tx_errors++,
+		nl->master->stats.tx_errors++;
 		nl->master->stats.tx_carrier_errors++;
 #else
-		dev->stats.tx_errors++,
+		dev->stats.tx_errors++;
 		dev->stats.tx_carrier_errors++;
 #endif
+	}
 
 	nl->tx_frameno	= 0;
 	nl->framelen	= 0;
@@ -891,10 +900,10 @@ drop_xmit_queue( struct net_device  *dev )
 	nl->state &= ~(FL_WAIT_ACK | FL_NEED_RESEND);
 #ifdef CONFIG_SBNI_MULTILINE
 	netif_start_queue( nl->master );
-	nl->master->trans_start = jiffies;
+	netif_trans_update(nl->master);
 #else
 	netif_start_queue( dev );
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 #endif
 }
 
@@ -1032,11 +1041,10 @@ indicate_pkt( struct net_device  *dev )
  */
 
 static void
-sbni_watchdog( unsigned long  arg )
+sbni_watchdog(struct timer_list *t)
 {
-	struct net_device  *dev = (struct net_device *) arg;
-	struct net_local   *nl  = netdev_priv(dev);
-	struct timer_list  *w   = &nl->watchdog; 
+	struct net_local   *nl  = from_timer(nl, t, watchdog);
+	struct net_device  *dev = nl->watchdog_dev;
 	unsigned long	   flags;
 	unsigned char	   csr0;
 
@@ -1063,11 +1071,7 @@ sbni_watchdog( unsigned long  arg )
 
 	outb( csr0 | RC_CHK, dev->base_addr + CSR0 ); 
 
-	init_timer( w );
-	w->expires	= jiffies + SBNI_TIMEOUT;
-	w->data		= arg;
-	w->function	= sbni_watchdog;
-	add_timer( w );
+	mod_timer(t, jiffies + SBNI_TIMEOUT);
 
 	spin_unlock_irqrestore( &nl->lock, flags );
 }
@@ -1198,10 +1202,9 @@ handler_attached:
 	netif_start_queue( dev );
 
 	/* set timer watchdog */
-	init_timer( w );
+	nl->watchdog_dev = dev;
+	timer_setup(w, sbni_watchdog, 0);
 	w->expires	= jiffies + SBNI_TIMEOUT;
-	w->data		= (unsigned long) dev;
-	w->function	= sbni_watchdog;
 	add_timer( w );
    
 	spin_unlock( &nl->lock );
@@ -1335,12 +1338,13 @@ sbni_ioctl( struct net_device  *dev,  struct ifreq  *ifr,  int  cmd )
 
 		spin_lock( &nl->lock );
 		flags = *(struct sbni_flags*) &ifr->ifr_ifru;
-		if( flags.fixed_rxl )
-			nl->delta_rxl = 0,
+		if( flags.fixed_rxl ) {
+			nl->delta_rxl = 0;
 			nl->cur_rxl_index = flags.rxl;
-		else
-			nl->delta_rxl = DEF_RXL_DELTA,
+		} else {
+			nl->delta_rxl = DEF_RXL_DELTA;
 			nl->cur_rxl_index = DEF_RXL;
+		}
 
 		nl->csr1.rxl = rxl_tab[ nl->cur_rxl_index ];
 		nl->csr1.rate = flags.rate;
@@ -1360,6 +1364,8 @@ sbni_ioctl( struct net_device  *dev,  struct ifreq  *ifr,  int  cmd )
 		if( !slave_dev  ||  !(slave_dev->flags & IFF_UP) ) {
 			netdev_err(dev, "trying to enslave non-active device %s\n",
 				   slave_name);
+			if (slave_dev)
+				dev_put(slave_dev);
 			return  -EPERM;
 		}
 
@@ -1464,8 +1470,8 @@ set_multicast_list( struct net_device  *dev )
 
 
 #ifdef MODULE
-module_param_array(io, int, NULL, 0);
-module_param_array(irq, int, NULL, 0);
+module_param_hw_array(io, int, ioport, NULL, 0);
+module_param_hw_array(irq, int, irq, NULL, 0);
 module_param_array(baud, int, NULL, 0);
 module_param_array(rxl, int, NULL, 0);
 module_param_array(mac, int, NULL, 0);
@@ -1480,8 +1486,8 @@ int __init init_module( void )
 	int err;
 
 	while( num < SBNI_MAX_NUM_CARDS ) {
-		dev = alloc_netdev(sizeof(struct net_local), 
-				   "sbni%d", sbni_devsetup);
+		dev = alloc_netdev(sizeof(struct net_local), "sbni%d",
+				   NET_NAME_UNKNOWN, sbni_devsetup);
 		if( !dev)
 			break;
 
@@ -1532,13 +1538,16 @@ sbni_setup( char  *p )
 		(*dest[ parm ])[ n ] = simple_strtol( p, &p, 0 );
 		if( !*p  ||  *p == ')' )
 			return 1;
-		if( *p == ';' )
-			++p, ++n, parm = 0;
-		else if( *p++ != ',' )
+		if( *p == ';' ) {
+			++p;
+			++n;
+			parm = 0;
+		} else if( *p++ != ',' ) {
 			break;
-		else
+		} else {
 			if( ++parm >= 5 )
 				break;
+		}
 	}
 bad_param:
 	pr_err("Error in sbni kernel parameter!\n");
@@ -1551,88 +1560,6 @@ __setup( "sbni=", sbni_setup );
 
 /* -------------------------------------------------------------------------- */
 
-#ifdef ASM_CRC
-
-static u32
-calc_crc32( u32  crc,  u8  *p,  u32  len )
-{
-	register u32  _crc;
-	_crc = crc;
-	
-	__asm__ __volatile__ (
-		"xorl	%%ebx, %%ebx\n"
-		"movl	%2, %%esi\n" 
-		"movl	%3, %%ecx\n" 
-		"movl	$crc32tab, %%edi\n"
-		"shrl	$2, %%ecx\n"
-		"jz	1f\n"
-
-		".align 4\n"
-	"0:\n"
-		"movb	%%al, %%bl\n"
-		"movl	(%%esi), %%edx\n"
-		"shrl	$8, %%eax\n"
-		"xorb	%%dl, %%bl\n"
-		"shrl	$8, %%edx\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	%%dl, %%bl\n"
-		"shrl	$8, %%edx\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	%%dl, %%bl\n"
-		"movb	%%dh, %%dl\n" 
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	%%dl, %%bl\n"
-		"addl	$4, %%esi\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"decl	%%ecx\n"
-		"jnz	0b\n"
-
-	"1:\n"
-		"movl	%3, %%ecx\n"
-		"andl	$3, %%ecx\n"
-		"jz	2f\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	(%%esi), %%bl\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"decl	%%ecx\n"
-		"jz	2f\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	1(%%esi), %%bl\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-
-		"decl	%%ecx\n"
-		"jz	2f\n"
-
-		"movb	%%al, %%bl\n"
-		"shrl	$8, %%eax\n"
-		"xorb	2(%%esi), %%bl\n"
-		"xorl	(%%edi,%%ebx,4), %%eax\n"
-	"2:\n"
-		: "=a" (_crc)
-		: "0" (_crc), "g" (p), "g" (len)
-		: "bx", "cx", "dx", "si", "di"
-	);
-
-	return  _crc;
-}
-
-#else	/* ASM_CRC */
-
 static u32
 calc_crc32( u32  crc,  u8  *p,  u32  len )
 {
@@ -1641,9 +1568,6 @@ calc_crc32( u32  crc,  u8  *p,  u32  len )
 
 	return  crc;
 }
-
-#endif	/* ASM_CRC */
-
 
 static u32  crc32tab[] __attribute__ ((aligned(8))) = {
 	0xD202EF8D,  0xA505DF1B,  0x3C0C8EA1,  0x4B0BBE37,

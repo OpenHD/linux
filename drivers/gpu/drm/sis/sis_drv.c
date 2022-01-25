@@ -26,12 +26,14 @@
  */
 
 #include <linux/module.h>
+#include <linux/pci.h>
 
-#include "drmP.h"
-#include "sis_drm.h"
+#include <drm/drm_drv.h>
+#include <drm/drm_file.h>
+#include <drm/drm_pciids.h>
+#include <drm/sis_drm.h>
+
 #include "sis_drv.h"
-
-#include "drm_pciids.h"
 
 static struct pci_device_id pciidlist[] = {
 	sisdrv_PCI_IDS
@@ -40,51 +42,74 @@ static struct pci_device_id pciidlist[] = {
 static int sis_driver_load(struct drm_device *dev, unsigned long chipset)
 {
 	drm_sis_private_t *dev_priv;
-	int ret;
+
+	pci_set_master(dev->pdev);
 
 	dev_priv = kzalloc(sizeof(drm_sis_private_t), GFP_KERNEL);
 	if (dev_priv == NULL)
 		return -ENOMEM;
 
+	idr_init(&dev_priv->object_idr);
 	dev->dev_private = (void *)dev_priv;
 	dev_priv->chipset = chipset;
-	ret = drm_sman_init(&dev_priv->sman, 2, 12, 8);
-	if (ret)
-		kfree(dev_priv);
-
-	return ret;
-}
-
-static int sis_driver_unload(struct drm_device *dev)
-{
-	drm_sis_private_t *dev_priv = dev->dev_private;
-
-	drm_sman_takedown(&dev_priv->sman);
-	kfree(dev_priv);
 
 	return 0;
 }
 
+static void sis_driver_unload(struct drm_device *dev)
+{
+	drm_sis_private_t *dev_priv = dev->dev_private;
+
+	idr_destroy(&dev_priv->object_idr);
+
+	kfree(dev_priv);
+}
+
+static const struct file_operations sis_driver_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.mmap = drm_legacy_mmap,
+	.poll = drm_poll,
+	.compat_ioctl = drm_compat_ioctl,
+	.llseek = noop_llseek,
+};
+
+static int sis_driver_open(struct drm_device *dev, struct drm_file *file)
+{
+	struct sis_file_private *file_priv;
+
+	DRM_DEBUG_DRIVER("\n");
+	file_priv = kmalloc(sizeof(*file_priv), GFP_KERNEL);
+	if (!file_priv)
+		return -ENOMEM;
+
+	file->driver_priv = file_priv;
+
+	INIT_LIST_HEAD(&file_priv->obj_list);
+
+	return 0;
+}
+
+static void sis_driver_postclose(struct drm_device *dev, struct drm_file *file)
+{
+	struct sis_file_private *file_priv = file->driver_priv;
+
+	kfree(file_priv);
+}
+
 static struct drm_driver driver = {
-	.driver_features = DRIVER_USE_AGP | DRIVER_USE_MTRR,
+	.driver_features = DRIVER_USE_AGP | DRIVER_LEGACY,
 	.load = sis_driver_load,
 	.unload = sis_driver_unload,
+	.open = sis_driver_open,
+	.preclose = sis_reclaim_buffers_locked,
+	.postclose = sis_driver_postclose,
 	.dma_quiescent = sis_idle,
-	.reclaim_buffers = NULL,
-	.reclaim_buffers_idlelocked = sis_reclaim_buffers_locked,
 	.lastclose = sis_lastclose,
 	.ioctls = sis_ioctls,
-	.fops = {
-		 .owner = THIS_MODULE,
-		 .open = drm_open,
-		 .release = drm_release,
-		 .unlocked_ioctl = drm_ioctl,
-		 .mmap = drm_mmap,
-		 .poll = drm_poll,
-		 .fasync = drm_fasync,
-		 .llseek = noop_llseek,
-	},
-
+	.fops = &sis_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
 	.date = DRIVER_DATE,
@@ -101,12 +126,12 @@ static struct pci_driver sis_pci_driver = {
 static int __init sis_init(void)
 {
 	driver.num_ioctls = sis_max_ioctl;
-	return drm_pci_init(&driver, &sis_pci_driver);
+	return drm_legacy_pci_init(&driver, &sis_pci_driver);
 }
 
 static void __exit sis_exit(void)
 {
-	drm_pci_exit(&driver, &sis_pci_driver);
+	drm_legacy_pci_exit(&driver, &sis_pci_driver);
 }
 
 module_init(sis_init);

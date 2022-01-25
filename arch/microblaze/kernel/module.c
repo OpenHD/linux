@@ -1,21 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007-2009 Michal Simek <monstr@monstr.eu>
  * Copyright (C) 2007-2009 PetaLogix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/moduleloader.h>
 #include <linux/kernel.h>
 #include <linux/elf.h>
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/string.h>
+#include <linux/pgtable.h>
 
-#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 
 int apply_relocate_add(Elf32_Shdr *sechdrs, const char *strtab,
@@ -100,7 +97,7 @@ int apply_relocate_add(Elf32_Shdr *sechdrs, const char *strtab,
 			break;
 
 		case R_MICROBLAZE_64_NONE:
-			pr_debug("R_MICROBLAZE_NONE\n");
+			pr_debug("R_MICROBLAZE_64_NONE\n");
 			break;
 
 		case R_MICROBLAZE_NONE:
@@ -108,8 +105,7 @@ int apply_relocate_add(Elf32_Shdr *sechdrs, const char *strtab,
 			break;
 
 		default:
-			printk(KERN_ERR "module %s: "
-				"Unknown relocation: %u\n",
+			pr_err("module %s: Unknown relocation: %u\n",
 				module->name,
 				ELF32_R_TYPE(rela[i].r_info));
 			return -ENOEXEC;

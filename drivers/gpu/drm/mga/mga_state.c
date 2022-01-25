@@ -32,9 +32,6 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
-#include "drmP.h"
-#include "drm.h"
-#include "mga_drm.h"
 #include "mga_drv.h"
 
 /* ================================================================
@@ -1006,7 +1003,7 @@ static int mga_dma_blit(struct drm_device *dev, void *data, struct drm_file *fil
 	return 0;
 }
 
-static int mga_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int mga_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	drm_mga_private_t *dev_priv = dev->dev_private;
 	drm_mga_getparam_t *param = data;
@@ -1017,11 +1014,11 @@ static int mga_getparam(struct drm_device *dev, void *data, struct drm_file *fil
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
+	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
 
 	switch (param->param) {
 	case MGA_PARAM_IRQ_NR:
-		value = drm_dev_to_irq(dev);
+		value = dev->pdev->irq;
 		break;
 	case MGA_PARAM_CARD_TYPE:
 		value = dev_priv->chipset;
@@ -1030,7 +1027,7 @@ static int mga_getparam(struct drm_device *dev, void *data, struct drm_file *fil
 		return -EINVAL;
 	}
 
-	if (DRM_COPY_TO_USER(param->value, &value, sizeof(int))) {
+	if (copy_to_user(param->value, &value, sizeof(int))) {
 		DRM_ERROR("copy_to_user\n");
 		return -EFAULT;
 	}
@@ -1049,7 +1046,7 @@ static int mga_set_fence(struct drm_device *dev, void *data, struct drm_file *fi
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
+	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
 
 	/* I would normal do this assignment in the declaration of fence,
 	 * but dev_priv may be NULL.
@@ -1078,13 +1075,13 @@ file_priv)
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
+	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
 
 	mga_driver_fence_wait(dev, fence);
 	return 0;
 }
 
-struct drm_ioctl_desc mga_ioctls[] = {
+const struct drm_ioctl_desc mga_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA_INIT, mga_dma_init, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF_DRV(MGA_FLUSH, mga_dma_flush, DRM_AUTH),
 	DRM_IOCTL_DEF_DRV(MGA_RESET, mga_dma_reset, DRM_AUTH),
@@ -1100,4 +1097,4 @@ struct drm_ioctl_desc mga_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA_DMA_BOOTSTRAP, mga_dma_bootstrap, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 };
 
-int mga_max_ioctl = DRM_ARRAY_SIZE(mga_ioctls);
+int mga_max_ioctl = ARRAY_SIZE(mga_ioctls);

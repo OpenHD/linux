@@ -1,5 +1,5 @@
 /*
-	drivers/net/tulip/media.c
+	drivers/net/ethernet/dec/tulip/media.c
 
 	Copyright 2000,2001  The Linux Kernel Team
 	Written/copyright 1994-2001 by Donald Becker.
@@ -12,7 +12,6 @@
 
 #include <linux/kernel.h>
 #include <linux/mii.h>
-#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include "tulip.h"
@@ -320,12 +319,7 @@ void tulip_select_media(struct net_device *dev, int startup)
 			break;
 		}
 		case 5: case 6: {
-			u16 setup[5];
-
 			new_csr6 = 0; /* FIXME */
-
-			for (i = 0; i < 5; i++)
-				setup[i] = get_u16(&p[i*2 + 1]);
 
 			if (startup && mtable->has_reset) {
 				struct medialeaf *rleaf = &mtable->mleaf[mtable->has_reset];
@@ -447,7 +441,7 @@ int tulip_check_duplex(struct net_device *dev)
 	return 0;
 }
 
-void __devinit tulip_find_mii (struct net_device *dev, int board_idx)
+void tulip_find_mii(struct net_device *dev, int board_idx)
 {
 	struct tulip_private *tp = netdev_priv(dev);
 	int phyn, phy_idx = 0;
@@ -458,7 +452,7 @@ void __devinit tulip_find_mii (struct net_device *dev, int board_idx)
 	/* Find the connected MII xcvrs.
 	   Doing this in open() would allow detecting external xcvrs later,
 	   but takes much time. */
-	for (phyn = 1; phyn <= 32 && phy_idx < sizeof (tp->phys); phyn++) {
+	for (phyn = 1; phyn <= 32 && phy_idx < ARRAY_SIZE(tp->phys); phyn++) {
 		int phy = phyn & 0x1f;
 		int mii_status = tulip_mdio_read (dev, phy, MII_BMSR);
 		if ((mii_status & 0x8301) == 0x8001 ||

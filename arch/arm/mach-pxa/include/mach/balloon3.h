@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/include/asm-arm/arch-pxa/balloon3.h
  *
@@ -5,14 +6,12 @@
  *  Created:	Oct, 2005
  *  Copyright:	Toby Churchill Ltd
  *  Cribbed from mainstone.c, by Nicholas Pitre
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef ASM_ARCH_BALLOON3_H
 #define ASM_ARCH_BALLOON3_H
+
+#include "irqs.h" /* PXA_NR_BUILTIN_GPIO */
 
 enum balloon3_features {
 	BALLOON3_FEATURE_OHCI,
@@ -172,9 +171,8 @@ enum balloon3_features {
 /* Balloon3 Interrupts */
 #define BALLOON3_IRQ(x)		(IRQ_BOARD_START + (x))
 
-#define BALLOON3_AUX_NIRQ	IRQ_GPIO(BALLOON3_GPIO_AUX_NIRQ)
-#define BALLOON3_CODEC_IRQ	IRQ_GPIO(BALLOON3_GPIO_CODEC_IRQ)
-#define BALLOON3_S0_CD_IRQ	IRQ_GPIO(BALLOON3_GPIO_S0_CD)
+#define BALLOON3_AUX_NIRQ	PXA_GPIO_TO_IRQ(BALLOON3_GPIO_AUX_NIRQ)
+#define BALLOON3_CODEC_IRQ	PXA_GPIO_TO_IRQ(BALLOON3_GPIO_CODEC_IRQ)
 
 #define BALLOON3_NR_IRQS	(IRQ_BOARD_START + 16)
 

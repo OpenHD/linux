@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SDLA		An implementation of a driver for the Sangoma S502/S508 series
  *		multi-protocol PC interface card.  Initial offering is with 
@@ -25,11 +26,6 @@
  *					from non DLCI devices.
  *		0.30	Mike McLagan	Fixed kernel panic when used with modified
  *					ifconfig
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -54,10 +50,9 @@
 #include <linux/sdla.h>
 #include <linux/bitops.h>
 
-#include <asm/system.h>
 #include <asm/io.h>
 #include <asm/dma.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 static const char* version = "SDLA driver v0.30, 12 Sep 1996, mike.mclagan@linux.org";
 
@@ -418,6 +413,7 @@ static void sdla_errors(struct net_device *dev, int cmd, int dlci, int ret, int 
 		case SDLA_RET_NO_BUFS:
 			if (cmd == SDLA_INFORMATION_WRITE)
 				break;
+			fallthrough;
 
 		default: 
 			netdev_dbg(dev, "Cmd 0x%02X generated return code 0x%02X\n",
@@ -712,7 +708,7 @@ static netdev_tx_t sdla_transmit(struct sk_buff *skb,
 
 					spin_lock_irqsave(&sdla_lock, flags);
 					SDLA_WINDOW(dev, addr);
-					pbuf = (void *)(((int) dev->mem_start) + (addr & SDLA_ADDR_MASK));
+					pbuf = (void *)(dev->mem_start + (addr & SDLA_ADDR_MASK));
 					__sdla_write(dev, pbuf->buf_addr, skb->data, skb->len);
 					SDLA_WINDOW(dev, addr);
 					pbuf->opp_flag = 1;
@@ -928,13 +924,10 @@ static irqreturn_t sdla_isr(int dummy, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void sdla_poll(unsigned long device)
+static void sdla_poll(struct timer_list *t)
 {
-	struct net_device	  *dev;
-	struct frad_local *flp;
-
-	dev = (struct net_device *) device;
-	flp = netdev_priv(dev);
+	struct frad_local *flp = from_timer(flp, t, timer);
+	struct net_device *dev = flp->dev;
 
 	if (sdla_byte(dev, SDLA_502_RCV_BUF))
 		sdla_receive(dev);
@@ -1323,10 +1316,6 @@ NOTE:  This is rather a useless action right now, as the
 
 static int sdla_change_mtu(struct net_device *dev, int new_mtu)
 {
-	struct frad_local *flp;
-
-	flp = netdev_priv(dev);
-
 	if (netif_running(dev))
 		return -EBUSY;
 
@@ -1621,11 +1610,10 @@ static void setup_sdla(struct net_device *dev)
 	flp->assoc		= sdla_assoc;
 	flp->deassoc		= sdla_deassoc;
 	flp->dlci_conf		= sdla_dlci_conf;
+	flp->dev		= dev;
 
-	init_timer(&flp->timer);
+	timer_setup(&flp->timer, sdla_poll, 0);
 	flp->timer.expires	= 1;
-	flp->timer.data		= (unsigned long) dev;
-	flp->timer.function	= sdla_poll;
 }
 
 static struct net_device *sdla;
@@ -1636,7 +1624,8 @@ static int __init init_sdla(void)
 
 	printk("%s.\n", version);
 
-	sdla = alloc_netdev(sizeof(struct frad_local), "sdla0", setup_sdla);
+	sdla = alloc_netdev(sizeof(struct frad_local), "sdla0",
+			    NET_NAME_UNKNOWN, setup_sdla);
 	if (!sdla) 
 		return -ENOMEM;
 

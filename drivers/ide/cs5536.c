@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CS5536 PATA support
  * (C) 2007 Martin K. Petersen <mkp@mkp.net>
  * (C) 2009 Bartlomiej Zolnierkiewicz
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Documentation:
  *	Available from AMD web site.
@@ -295,15 +283,7 @@ static struct pci_driver cs5536_pci_driver = {
 	.resume		= ide_pci_resume,
 };
 
-static int __init cs5536_init(void)
-{
-	return pci_register_driver(&cs5536_pci_driver);
-}
-
-static void __exit cs5536_exit(void)
-{
-	pci_unregister_driver(&cs5536_pci_driver);
-}
+module_pci_driver(cs5536_pci_driver);
 
 MODULE_AUTHOR("Martin K. Petersen, Bartlomiej Zolnierkiewicz");
 MODULE_DESCRIPTION("low-level driver for the CS5536 IDE controller");
@@ -312,6 +292,3 @@ MODULE_DEVICE_TABLE(pci, cs5536_pci_tbl);
 
 module_param_named(msr, use_msr, int, 0644);
 MODULE_PARM_DESC(msr, "Force using MSR to configure IDE function (Default: 0)");
-
-module_init(cs5536_init);
-module_exit(cs5536_exit);

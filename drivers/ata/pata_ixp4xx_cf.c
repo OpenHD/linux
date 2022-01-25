@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ixp4xx PATA/Compact Flash driver
  * Copyright (C) 2006-07 Tower Technologies
@@ -9,11 +10,6 @@
  * on the ixp4xx. In the irq is not available, you might
  * want to modify both this driver and libata to run in
  * polling mode.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -40,15 +36,15 @@ static int ixp4xx_set_mode(struct ata_link *link, struct ata_device **error)
 	return 0;
 }
 
-static unsigned int ixp4xx_mmio_data_xfer(struct ata_device *dev,
+static unsigned int ixp4xx_mmio_data_xfer(struct ata_queued_cmd *qc,
 				unsigned char *buf, unsigned int buflen, int rw)
 {
 	unsigned int i;
 	unsigned int words = buflen >> 1;
 	u16 *buf16 = (u16 *) buf;
-	struct ata_port *ap = dev->link->ap;
+	struct ata_port *ap = qc->dev->link->ap;
 	void __iomem *mmio = ap->ioaddr.data_addr;
-	struct ixp4xx_pata_data *data = ap->host->dev->platform_data;
+	struct ixp4xx_pata_data *data = dev_get_platdata(ap->host->dev);
 
 	/* set the expansion bus in 16bit mode and restore
 	 * 8 bit mode after the transaction.
@@ -137,13 +133,14 @@ static void ixp4xx_setup_port(struct ata_port *ap,
 	ata_port_desc(ap, "cmd 0x%lx ctl 0x%lx", raw_cmd, raw_ctl);
 }
 
-static __devinit int ixp4xx_pata_probe(struct platform_device *pdev)
+static int ixp4xx_pata_probe(struct platform_device *pdev)
 {
 	unsigned int irq;
 	struct resource *cs0, *cs1;
 	struct ata_host *host;
 	struct ata_port *ap;
-	struct ixp4xx_pata_data *data = pdev->dev.platform_data;
+	struct ixp4xx_pata_data *data = dev_get_platdata(&pdev->dev);
+	int ret;
 
 	cs0 = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	cs1 = platform_get_resource(pdev, IORESOURCE_MEM, 1);
@@ -157,7 +154,9 @@ static __devinit int ixp4xx_pata_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* acquire resources and fill host */
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
+	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
 
 	data->cs0 = devm_ioremap(&pdev->dev, cs0->start, 0x1000);
 	data->cs1 = devm_ioremap(&pdev->dev, cs1->start, 0x1000);
@@ -166,8 +165,12 @@ static __devinit int ixp4xx_pata_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq)
+	if (irq > 0)
 		irq_set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
+	else if (irq < 0)
+		return irq;
+	else
+		return -EINVAL;
 
 	/* Setup expansion bus chip selects */
 	*data->cs0_cfg = data->cs0_bits;
@@ -187,39 +190,18 @@ static __devinit int ixp4xx_pata_probe(struct platform_device *pdev)
 	return ata_host_activate(host, irq, ata_sff_interrupt, 0, &ixp4xx_sht);
 }
 
-static __devexit int ixp4xx_pata_remove(struct platform_device *dev)
-{
-	struct ata_host *host = platform_get_drvdata(dev);
-
-	ata_host_detach(host);
-
-	return 0;
-}
-
 static struct platform_driver ixp4xx_pata_platform_driver = {
 	.driver	 = {
 		.name   = DRV_NAME,
-		.owner  = THIS_MODULE,
 	},
 	.probe		= ixp4xx_pata_probe,
-	.remove		= __devexit_p(ixp4xx_pata_remove),
+	.remove		= ata_platform_remove_one,
 };
 
-static int __init ixp4xx_pata_init(void)
-{
-	return platform_driver_register(&ixp4xx_pata_platform_driver);
-}
-
-static void __exit ixp4xx_pata_exit(void)
-{
-	platform_driver_unregister(&ixp4xx_pata_platform_driver);
-}
+module_platform_driver(ixp4xx_pata_platform_driver);
 
 MODULE_AUTHOR("Alessandro Zummo <a.zummo@towertech.it>");
 MODULE_DESCRIPTION("low-level driver for ixp4xx Compact Flash PATA");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:" DRV_NAME);
-
-module_init(ixp4xx_pata_init);
-module_exit(ixp4xx_pata_exit);

@@ -1,27 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * LPC32xx built-in touchscreen driver
  *
  * Copyright (C) 2010 NXP Semiconductors
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/platform_device.h>
-#include <linux/init.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <linux/of.h>
 
 /*
  * Touchscreen controller register offsets
@@ -139,14 +130,17 @@ static void lpc32xx_stop_tsc(struct lpc32xx_tsc *tsc)
 		   tsc_readl(tsc, LPC32XX_TSC_CON) &
 			     ~LPC32XX_TSC_ADCCON_AUTO_EN);
 
-	clk_disable(tsc->clk);
+	clk_disable_unprepare(tsc->clk);
 }
 
-static void lpc32xx_setup_tsc(struct lpc32xx_tsc *tsc)
+static int lpc32xx_setup_tsc(struct lpc32xx_tsc *tsc)
 {
 	u32 tmp;
+	int err;
 
-	clk_enable(tsc->clk);
+	err = clk_prepare_enable(tsc->clk);
+	if (err)
+		return err;
 
 	tmp = tsc_readl(tsc, LPC32XX_TSC_CON) & ~LPC32XX_TSC_ADCCON_POWER_UP;
 
@@ -184,15 +178,15 @@ static void lpc32xx_setup_tsc(struct lpc32xx_tsc *tsc)
 
 	/* Enable automatic ts event capture */
 	tsc_writel(tsc, LPC32XX_TSC_CON, tmp | LPC32XX_TSC_ADCCON_AUTO_EN);
+
+	return 0;
 }
 
 static int lpc32xx_ts_open(struct input_dev *dev)
 {
 	struct lpc32xx_tsc *tsc = input_get_drvdata(dev);
 
-	lpc32xx_setup_tsc(tsc);
-
-	return 0;
+	return lpc32xx_setup_tsc(tsc);
 }
 
 static void lpc32xx_ts_close(struct input_dev *dev)
@@ -202,7 +196,7 @@ static void lpc32xx_ts_close(struct input_dev *dev)
 	lpc32xx_stop_tsc(tsc);
 }
 
-static int __devinit lpc32xx_ts_probe(struct platform_device *pdev)
+static int lpc32xx_ts_probe(struct platform_device *pdev)
 {
 	struct lpc32xx_tsc *tsc;
 	struct input_dev *input;
@@ -218,10 +212,8 @@ static int __devinit lpc32xx_ts_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "Can't get interrupt resource\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	tsc = kzalloc(sizeof(*tsc), GFP_KERNEL);
 	input = input_allocate_device();
@@ -308,12 +300,11 @@ err_free_mem:
 	return error;
 }
 
-static int __devexit lpc32xx_ts_remove(struct platform_device *pdev)
+static int lpc32xx_ts_remove(struct platform_device *pdev)
 {
 	struct lpc32xx_tsc *tsc = platform_get_drvdata(pdev);
 	struct resource *res;
 
-	device_init_wakeup(&pdev->dev, 0);
 	free_irq(tsc->irq, tsc);
 
 	input_unregister_device(tsc->dev);
@@ -383,27 +374,24 @@ static const struct dev_pm_ops lpc32xx_ts_pm_ops = {
 #define LPC32XX_TS_PM_OPS NULL
 #endif
 
+#ifdef CONFIG_OF
+static const struct of_device_id lpc32xx_tsc_of_match[] = {
+	{ .compatible = "nxp,lpc3220-tsc", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, lpc32xx_tsc_of_match);
+#endif
+
 static struct platform_driver lpc32xx_ts_driver = {
 	.probe		= lpc32xx_ts_probe,
-	.remove		= __devexit_p(lpc32xx_ts_remove),
+	.remove		= lpc32xx_ts_remove,
 	.driver		= {
 		.name	= MOD_NAME,
-		.owner	= THIS_MODULE,
 		.pm	= LPC32XX_TS_PM_OPS,
+		.of_match_table = of_match_ptr(lpc32xx_tsc_of_match),
 	},
 };
-
-static int __init lpc32xx_ts_init(void)
-{
-	return platform_driver_register(&lpc32xx_ts_driver);
-}
-module_init(lpc32xx_ts_init);
-
-static void __exit lpc32xx_ts_exit(void)
-{
-	platform_driver_unregister(&lpc32xx_ts_driver);
-}
-module_exit(lpc32xx_ts_exit);
+module_platform_driver(lpc32xx_ts_driver);
 
 MODULE_AUTHOR("Kevin Wells <kevin.wells@nxp.com");
 MODULE_DESCRIPTION("LPC32XX TSC Driver");

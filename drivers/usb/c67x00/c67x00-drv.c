@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * c67x00-drv.c: Cypress C67X00 USB Common infrastructure
  *
  * Copyright (C) 2006-2008 Barco N.V.
  *    Derived from the Cypress cy7c67200/300 ezusb linux driver and
  *    based on multiple host controller drivers inside the linux kernel.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- * MA  02110-1301  USA.
  */
 
 /*
@@ -116,7 +102,7 @@ static irqreturn_t c67x00_irq(int irq, void *__dev)
 
 /* ------------------------------------------------------------------------- */
 
-static int __devinit c67x00_drv_probe(struct platform_device *pdev)
+static int c67x00_drv_probe(struct platform_device *pdev)
 {
 	struct c67x00_device *c67x00;
 	struct c67x00_platform_data *pdata;
@@ -131,7 +117,7 @@ static int __devinit c67x00_drv_probe(struct platform_device *pdev)
 	if (!res2)
 		return -ENODEV;
 
-	pdata = pdev->dev.platform_data;
+	pdata = dev_get_platdata(&pdev->dev);
 	if (!pdata)
 		return -ENODEV;
 
@@ -154,7 +140,7 @@ static int __devinit c67x00_drv_probe(struct platform_device *pdev)
 
 	spin_lock_init(&c67x00->hpi.lock);
 	c67x00->hpi.regstep = pdata->hpi_regstep;
-	c67x00->pdata = pdev->dev.platform_data;
+	c67x00->pdata = dev_get_platdata(&pdev->dev);
 	c67x00->pdev = pdev;
 
 	c67x00_ll_init(c67x00);
@@ -191,7 +177,7 @@ static int __devinit c67x00_drv_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int __devexit c67x00_drv_remove(struct platform_device *pdev)
+static int c67x00_drv_remove(struct platform_device *pdev)
 {
 	struct c67x00_device *c67x00 = platform_get_drvdata(pdev);
 	struct resource *res;
@@ -219,27 +205,15 @@ static int __devexit c67x00_drv_remove(struct platform_device *pdev)
 
 static struct platform_driver c67x00_driver = {
 	.probe	= c67x00_drv_probe,
-	.remove	= __devexit_p(c67x00_drv_remove),
+	.remove	= c67x00_drv_remove,
 	.driver	= {
-		.owner = THIS_MODULE,
 		.name = "c67x00",
 	},
 };
-MODULE_ALIAS("platform:c67x00");
 
-static int __init c67x00_init(void)
-{
-	return platform_driver_register(&c67x00_driver);
-}
-
-static void __exit c67x00_exit(void)
-{
-	platform_driver_unregister(&c67x00_driver);
-}
-
-module_init(c67x00_init);
-module_exit(c67x00_exit);
+module_platform_driver(c67x00_driver);
 
 MODULE_AUTHOR("Peter Korsgaard, Jan Veldeman, Grant Likely");
 MODULE_DESCRIPTION("Cypress C67X00 USB Controller Driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:c67x00");

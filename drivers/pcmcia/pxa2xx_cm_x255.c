@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/pcmcia/pxa/pxa_cm_x255.c
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Compulab Ltd., 2003, 2007, 2008
  * Mike Rapoport <mike@compulab.co.il>
- *
  */
 
 #include <linux/platform_device.h>
@@ -15,8 +11,6 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/export.h>
-
-#include <asm/mach-types.h>
 
 #include "soc_common.h"
 
@@ -27,17 +21,6 @@
 #define GPIO_PCMCIA_S1_RDYINT	(8)
 #define GPIO_PCMCIA_RESET	(9)
 
-#define PCMCIA_S0_CD_VALID	IRQ_GPIO(GPIO_PCMCIA_S0_CD_VALID)
-#define PCMCIA_S1_CD_VALID	IRQ_GPIO(GPIO_PCMCIA_S1_CD_VALID)
-#define PCMCIA_S0_RDYINT	IRQ_GPIO(GPIO_PCMCIA_S0_RDYINT)
-#define PCMCIA_S1_RDYINT	IRQ_GPIO(GPIO_PCMCIA_S1_RDYINT)
-
-
-static struct pcmcia_irqs irqs[] = {
-	{ 0, PCMCIA_S0_CD_VALID, "PCMCIA0 CD" },
-	{ 1, PCMCIA_S1_CD_VALID, "PCMCIA1 CD" },
-};
-
 static int cmx255_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 {
 	int ret = gpio_request(GPIO_PCMCIA_RESET, "PCCard reset");
@@ -45,17 +28,23 @@ static int cmx255_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 		return ret;
 	gpio_direction_output(GPIO_PCMCIA_RESET, 0);
 
-	skt->socket.pci_irq = skt->nr == 0 ? PCMCIA_S0_RDYINT : PCMCIA_S1_RDYINT;
-	ret = soc_pcmcia_request_irqs(skt, irqs, ARRAY_SIZE(irqs));
-	if (!ret)
-		gpio_free(GPIO_PCMCIA_RESET);
+	if (skt->nr == 0) {
+		skt->stat[SOC_STAT_CD].gpio = GPIO_PCMCIA_S0_CD_VALID;
+		skt->stat[SOC_STAT_CD].name = "PCMCIA0 CD";
+		skt->stat[SOC_STAT_RDY].gpio = GPIO_PCMCIA_S0_RDYINT;
+		skt->stat[SOC_STAT_RDY].name = "PCMCIA0 RDY";
+	} else {
+		skt->stat[SOC_STAT_CD].gpio = GPIO_PCMCIA_S1_CD_VALID;
+		skt->stat[SOC_STAT_CD].name = "PCMCIA1 CD";
+		skt->stat[SOC_STAT_RDY].gpio = GPIO_PCMCIA_S1_RDYINT;
+		skt->stat[SOC_STAT_RDY].name = "PCMCIA1 RDY";
+	}
 
-	return ret;
+	return 0;
 }
 
 static void cmx255_pcmcia_shutdown(struct soc_pcmcia_socket *skt)
 {
-	soc_pcmcia_free_irqs(skt, irqs, ARRAY_SIZE(irqs));
 	gpio_free(GPIO_PCMCIA_RESET);
 }
 
@@ -63,16 +52,8 @@ static void cmx255_pcmcia_shutdown(struct soc_pcmcia_socket *skt)
 static void cmx255_pcmcia_socket_state(struct soc_pcmcia_socket *skt,
 				       struct pcmcia_state *state)
 {
-	int cd = skt->nr ? GPIO_PCMCIA_S1_CD_VALID : GPIO_PCMCIA_S0_CD_VALID;
-	int rdy = skt->nr ? GPIO_PCMCIA_S1_RDYINT : GPIO_PCMCIA_S0_RDYINT;
-
-	state->detect = !gpio_get_value(cd);
-	state->ready  = !!gpio_get_value(rdy);
-	state->bvd1   = 1;
-	state->bvd2   = 1;
 	state->vs_3v  = 0;
 	state->vs_Xv  = 0;
-	state->wrprot = 0;  /* not available */
 }
 
 

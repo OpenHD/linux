@@ -1,14 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * QLogic QLA3xxx NIC HBA Driver
  * Copyright (c)  2003-2006 QLogic Corporation
- *
- * See LICENSE.qla3xxx for copyright and licensing details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/list.h>
@@ -66,7 +64,7 @@ static int msi;
 module_param(msi, int, 0);
 MODULE_PARM_DESC(msi, "Turn on Message Signaled Interrupts.");
 
-static DEFINE_PCI_DEVICE_TABLE(ql3xxx_pci_tbl) = {
+static const struct pci_device_id ql3xxx_pci_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, QL3022_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, QL3032_DEVICE_ID)},
 	/* required last entry */
@@ -116,7 +114,7 @@ static int ql_sem_spinlock(struct ql3_adapter *qdev,
 		value = readl(&port_regs->CommonRegs.semaphoreReg);
 		if ((value & (sem_mask >> 16)) == sem_bits)
 			return 0;
-		ssleep(1);
+		mdelay(1000);
 	} while (--seconds);
 	return -1;
 }
@@ -147,10 +145,7 @@ static int ql_wait_for_drvr_lock(struct ql3_adapter *qdev)
 {
 	int i = 0;
 
-	while (i < 10) {
-		if (i)
-			ssleep(1);
-
+	do {
 		if (ql_sem_lock(qdev,
 				QL_DRVR_SEM_MASK,
 				(QL_RESOURCE_BITS_BASE_CODE | (qdev->mac_index)
@@ -159,7 +154,8 @@ static int ql_wait_for_drvr_lock(struct ql3_adapter *qdev)
 				      "driver lock acquired\n");
 			return 1;
 		}
-	}
+		mdelay(1000);
+	} while (++i < 10);
 
 	netdev_err(qdev->ndev, "Timed out waiting for driver lock...\n");
 	return 0;
@@ -312,7 +308,6 @@ static void ql_release_to_lrg_buf_free_list(struct ql3_adapter *qdev,
 		lrg_buf_cb->skb = netdev_alloc_skb(qdev->ndev,
 						   qdev->lrg_buffer_len);
 		if (unlikely(!lrg_buf_cb->skb)) {
-			netdev_err(qdev->ndev, "failed netdev_alloc_skb()\n");
 			qdev->lrg_buf_skb_check++;
 		} else {
 			/*
@@ -384,8 +379,6 @@ static void fm93c56a_select(struct ql3_adapter *qdev)
 
 	qdev->eeprom_cmd_data = AUBURN_EEPROM_CS_1;
 	ql_write_nvram_reg(qdev, spir, ISP_NVRAM_MASK | qdev->eeprom_cmd_data);
-	ql_write_nvram_reg(qdev, spir,
-			   ((ISP_NVRAM_MASK << 16) | qdev->eeprom_cmd_data));
 }
 
 /*
@@ -1548,7 +1541,7 @@ static void ql_link_state_machine_work(struct work_struct *work)
 		if (test_bit(QL_LINK_MASTER, &qdev->flags))
 			ql_port_start(qdev);
 		qdev->port_link_state = LS_DOWN;
-		/* Fall Through */
+		fallthrough;
 
 	case LS_DOWN:
 		if (curr_link_state == LS_UP) {
@@ -1711,23 +1704,30 @@ static int ql_get_full_dup(struct ql3_adapter *qdev)
 	return status;
 }
 
-static int ql_get_settings(struct net_device *ndev, struct ethtool_cmd *ecmd)
+static int ql_get_link_ksettings(struct net_device *ndev,
+				 struct ethtool_link_ksettings *cmd)
 {
 	struct ql3_adapter *qdev = netdev_priv(ndev);
+	u32 supported, advertising;
 
-	ecmd->transceiver = XCVR_INTERNAL;
-	ecmd->supported = ql_supported_modes(qdev);
+	supported = ql_supported_modes(qdev);
 
 	if (test_bit(QL_LINK_OPTICAL, &qdev->flags)) {
-		ecmd->port = PORT_FIBRE;
+		cmd->base.port = PORT_FIBRE;
 	} else {
-		ecmd->port = PORT_TP;
-		ecmd->phy_address = qdev->PHYAddr;
+		cmd->base.port = PORT_TP;
+		cmd->base.phy_address = qdev->PHYAddr;
 	}
-	ecmd->advertising = ql_supported_modes(qdev);
-	ecmd->autoneg = ql_get_auto_cfg_status(qdev);
-	ethtool_cmd_speed_set(ecmd, ql_get_speed(qdev));
-	ecmd->duplex = ql_get_full_dup(qdev);
+	advertising = ql_supported_modes(qdev);
+	cmd->base.autoneg = ql_get_auto_cfg_status(qdev);
+	cmd->base.speed = ql_get_speed(qdev);
+	cmd->base.duplex = ql_get_full_dup(qdev);
+
+	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
+						supported);
+	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.advertising,
+						advertising);
+
 	return 0;
 }
 
@@ -1740,8 +1740,6 @@ static void ql_get_drvinfo(struct net_device *ndev,
 		sizeof(drvinfo->version));
 	strlcpy(drvinfo->bus_info, pci_name(qdev->pdev),
 		sizeof(drvinfo->bus_info));
-	drvinfo->regdump_len = 0;
-	drvinfo->eedump_len = 0;
 }
 
 static u32 ql_get_msglevel(struct net_device *ndev)
@@ -1775,12 +1773,12 @@ static void ql_get_pauseparam(struct net_device *ndev,
 }
 
 static const struct ethtool_ops ql3xxx_ethtool_ops = {
-	.get_settings = ql_get_settings,
 	.get_drvinfo = ql_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 	.get_msglevel = ql_get_msglevel,
 	.set_msglevel = ql_set_msglevel,
 	.get_pauseparam = ql_get_pauseparam,
+	.get_link_ksettings = ql_get_link_ksettings,
 };
 
 static int ql_populate_free_queue(struct ql3_adapter *qdev)
@@ -1857,8 +1855,8 @@ static void ql_update_small_bufq_prod_index(struct ql3_adapter *qdev)
 			qdev->small_buf_release_cnt -= 8;
 		}
 		wmb();
-		writel(qdev->small_buf_q_producer_index,
-			&port_regs->CommonRegs.rxSmallQProducerIndex);
+		writel_relaxed(qdev->small_buf_q_producer_index,
+			       &port_regs->CommonRegs.rxSmallQProducerIndex);
 	}
 }
 
@@ -1920,7 +1918,6 @@ static void ql_process_mac_tx_intr(struct ql3_adapter *qdev,
 {
 	struct ql_tx_buf_cb *tx_cb;
 	int i;
-	int retval = 0;
 
 	if (mac_rsp->flags & OB_MAC_IOCB_RSP_S) {
 		netdev_warn(qdev->ndev,
@@ -1935,7 +1932,6 @@ static void ql_process_mac_tx_intr(struct ql3_adapter *qdev,
 			   "Frame too short to be legal, frame not sent\n");
 
 		qdev->ndev->stats.tx_errors++;
-		retval = -EIO;
 		goto frame_not_sent;
 	}
 
@@ -1944,7 +1940,6 @@ static void ql_process_mac_tx_intr(struct ql3_adapter *qdev,
 			   mac_rsp->transaction_id);
 
 		qdev->ndev->stats.tx_errors++;
-		retval = -EIO;
 		goto invalid_seg_count;
 	}
 
@@ -2034,7 +2029,7 @@ static void ql_process_mac_rx_intr(struct ql3_adapter *qdev,
 	skb_checksum_none_assert(skb);
 	skb->protocol = eth_type_trans(skb, qdev->ndev);
 
-	netif_receive_skb(skb);
+	napi_gro_receive(&qdev->napi, skb);
 	lrg_buf_cb2->skb = NULL;
 
 	if (qdev->device_id == QL3022_DEVICE_ID)
@@ -2104,7 +2099,7 @@ static void ql_process_macip_rx_intr(struct ql3_adapter *qdev,
 	}
 	skb2->protocol = eth_type_trans(skb2, qdev->ndev);
 
-	netif_receive_skb(skb2);
+	napi_gro_receive(&qdev->napi, skb2);
 	ndev->stats.rx_packets++;
 	ndev->stats.rx_bytes += length;
 	lrg_buf_cb2->skb = NULL;
@@ -2114,8 +2109,7 @@ static void ql_process_macip_rx_intr(struct ql3_adapter *qdev,
 	ql_release_to_lrg_buf_free_list(qdev, lrg_buf_cb2);
 }
 
-static int ql_tx_rx_clean(struct ql3_adapter *qdev,
-			  int *tx_cleaned, int *rx_cleaned, int work_to_do)
+static int ql_tx_rx_clean(struct ql3_adapter *qdev, int budget)
 {
 	struct net_rsp_iocb *net_rsp;
 	struct net_device *ndev = qdev->ndev;
@@ -2123,7 +2117,7 @@ static int ql_tx_rx_clean(struct ql3_adapter *qdev,
 
 	/* While there are entries in the completion queue. */
 	while ((le32_to_cpu(*(qdev->prsp_producer_index)) !=
-		qdev->rsp_consumer_index) && (work_done < work_to_do)) {
+		qdev->rsp_consumer_index) && (work_done < budget)) {
 
 		net_rsp = qdev->rsp_current;
 		rmb();
@@ -2139,21 +2133,20 @@ static int ql_tx_rx_clean(struct ql3_adapter *qdev,
 		case OPCODE_OB_MAC_IOCB_FN2:
 			ql_process_mac_tx_intr(qdev, (struct ob_mac_iocb_rsp *)
 					       net_rsp);
-			(*tx_cleaned)++;
 			break;
 
 		case OPCODE_IB_MAC_IOCB:
 		case OPCODE_IB_3032_MAC_IOCB:
 			ql_process_mac_rx_intr(qdev, (struct ib_mac_iocb_rsp *)
 					       net_rsp);
-			(*rx_cleaned)++;
+			work_done++;
 			break;
 
 		case OPCODE_IB_IP_IOCB:
 		case OPCODE_IB_3032_IP_IOCB:
 			ql_process_macip_rx_intr(qdev, (struct ib_ip_iocb_rsp *)
 						 net_rsp);
-			(*rx_cleaned)++;
+			work_done++;
 			break;
 		default: {
 			u32 *tmp = (u32 *)net_rsp;
@@ -2178,7 +2171,6 @@ static int ql_tx_rx_clean(struct ql3_adapter *qdev,
 			qdev->rsp_current++;
 		}
 
-		work_done = *tx_cleaned + *rx_cleaned;
 	}
 
 	return work_done;
@@ -2187,25 +2179,25 @@ static int ql_tx_rx_clean(struct ql3_adapter *qdev,
 static int ql_poll(struct napi_struct *napi, int budget)
 {
 	struct ql3_adapter *qdev = container_of(napi, struct ql3_adapter, napi);
-	int rx_cleaned = 0, tx_cleaned = 0;
-	unsigned long hw_flags;
 	struct ql3xxx_port_registers __iomem *port_regs =
 		qdev->mem_map_registers;
+	int work_done;
 
-	ql_tx_rx_clean(qdev, &tx_cleaned, &rx_cleaned, budget);
+	work_done = ql_tx_rx_clean(qdev, budget);
 
-	if (tx_cleaned + rx_cleaned != budget) {
-		spin_lock_irqsave(&qdev->hw_lock, hw_flags);
-		__napi_complete(napi);
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&qdev->hw_lock, flags);
 		ql_update_small_bufq_prod_index(qdev);
 		ql_update_lrg_bufq_prod_index(qdev);
 		writel(qdev->rsp_consumer_index,
 			    &port_regs->CommonRegs.rspQConsumerIndex);
-		spin_unlock_irqrestore(&qdev->hw_lock, hw_flags);
+		spin_unlock_irqrestore(&qdev->hw_lock, flags);
 
 		ql_enable_interrupts(qdev);
 	}
-	return tx_cleaned + rx_cleaned;
+	return work_done;
 }
 
 static irqreturn_t ql3xxx_isr(int irq, void *dev_id)
@@ -2525,6 +2517,13 @@ static int ql_alloc_net_req_rsp_queues(struct ql3_adapter *qdev)
 	qdev->req_q_size =
 	    (u32) (NUM_REQ_Q_ENTRIES * sizeof(struct ob_mac_iocb_req));
 
+	qdev->rsp_q_size = NUM_RSP_Q_ENTRIES * sizeof(struct net_rsp_iocb);
+
+	/* The barrier is required to ensure request and response queue
+	 * addr writes to the registers.
+	 */
+	wmb();
+
 	qdev->req_q_virt_addr =
 	    pci_alloc_consistent(qdev->pdev,
 				 (size_t) qdev->req_q_size,
@@ -2535,8 +2534,6 @@ static int ql_alloc_net_req_rsp_queues(struct ql3_adapter *qdev)
 		netdev_err(qdev->ndev, "reqQ failed\n");
 		return -ENOMEM;
 	}
-
-	qdev->rsp_q_size = NUM_RSP_Q_ENTRIES * sizeof(struct net_rsp_iocb);
 
 	qdev->rsp_q_virt_addr =
 	    pci_alloc_consistent(qdev->pdev,
@@ -2589,13 +2586,11 @@ static int ql_alloc_buffer_queues(struct ql3_adapter *qdev)
 	else
 		qdev->lrg_buf_q_alloc_size = qdev->lrg_buf_q_size * 2;
 
-	qdev->lrg_buf =
-		kmalloc(qdev->num_large_buffers * sizeof(struct ql_rcv_buf_cb),
-			GFP_KERNEL);
-	if (qdev->lrg_buf == NULL) {
-		netdev_err(qdev->ndev, "qdev->lrg_buf alloc failed\n");
+	qdev->lrg_buf = kmalloc_array(qdev->num_large_buffers,
+				      sizeof(struct ql_rcv_buf_cb),
+				      GFP_KERNEL);
+	if (qdev->lrg_buf == NULL)
 		return -ENOMEM;
-	}
 
 	qdev->lrg_buf_q_alloc_virt_addr =
 		pci_alloc_consistent(qdev->pdev,
@@ -2760,6 +2755,9 @@ static int ql_alloc_large_buffers(struct ql3_adapter *qdev)
 	int err;
 
 	for (i = 0; i < qdev->num_large_buffers; i++) {
+		lrg_buf_cb = &qdev->lrg_buf[i];
+		memset(lrg_buf_cb, 0, sizeof(struct ql_rcv_buf_cb));
+
 		skb = netdev_alloc_skb(qdev->ndev,
 				       qdev->lrg_buffer_len);
 		if (unlikely(!skb)) {
@@ -2770,11 +2768,7 @@ static int ql_alloc_large_buffers(struct ql3_adapter *qdev)
 			ql_free_large_buffers(qdev);
 			return -ENOMEM;
 		} else {
-
-			lrg_buf_cb = &qdev->lrg_buf[i];
-			memset(lrg_buf_cb, 0, sizeof(struct ql_rcv_buf_cb));
 			lrg_buf_cb->index = i;
-			lrg_buf_cb->skb = skb;
 			/*
 			 * We save some space to copy the ethhdr from first
 			 * buffer
@@ -2791,10 +2785,12 @@ static int ql_alloc_large_buffers(struct ql3_adapter *qdev)
 				netdev_err(qdev->ndev,
 					   "PCI mapping failed with error: %d\n",
 					   err);
+				dev_kfree_skb_irq(skb);
 				ql_free_large_buffers(qdev);
 				return -ENOMEM;
 			}
 
+			lrg_buf_cb->skb = skb;
 			dma_unmap_addr_set(lrg_buf_cb, mapaddr, map);
 			dma_unmap_len_set(lrg_buf_cb, maplen,
 					  qdev->lrg_buffer_len -
@@ -2836,7 +2832,7 @@ static int ql_create_send_free_list(struct ql3_adapter *qdev)
 		req_q_curr++;
 		tx_cb->oal = kmalloc(512, GFP_KERNEL);
 		if (tx_cb->oal == NULL)
-			return -1;
+			return -ENOMEM;
 	}
 	return 0;
 }
@@ -3017,7 +3013,6 @@ static int ql_adapter_initialize(struct ql3_adapter *qdev)
 		(void __iomem *)port_regs;
 	u32 delay = 10;
 	int status = 0;
-	unsigned long hw_flags = 0;
 
 	if (ql_mii_setup(qdev))
 		return -1;
@@ -3228,9 +3223,9 @@ static int ql_adapter_initialize(struct ql3_adapter *qdev)
 		value = ql_read_page0_reg(qdev, &port_regs->portStatus);
 		if (value & PORT_STATUS_IC)
 			break;
-		spin_unlock_irqrestore(&qdev->hw_lock, hw_flags);
+		spin_unlock_irq(&qdev->hw_lock);
 		msleep(500);
-		spin_lock_irqsave(&qdev->hw_lock, hw_flags);
+		spin_lock_irq(&qdev->hw_lock);
 	} while (--delay);
 
 	if (delay == 0) {
@@ -3295,7 +3290,7 @@ static int ql_adapter_reset(struct ql3_adapter *qdev)
 		if ((value & ISP_CONTROL_SR) == 0)
 			break;
 
-		ssleep(1);
+		mdelay(1000);
 	} while ((--max_wait_time));
 
 	/*
@@ -3331,7 +3326,7 @@ static int ql_adapter_reset(struct ql3_adapter *qdev)
 						   ispControlStatus);
 			if ((value & ISP_CONTROL_FSR) == 0)
 				break;
-			ssleep(1);
+			mdelay(1000);
 		} while ((--max_wait_time));
 	}
 	if (max_wait_time == 0)
@@ -3499,19 +3494,18 @@ static int ql_adapter_up(struct ql3_adapter *qdev)
 
 	spin_lock_irqsave(&qdev->hw_lock, hw_flags);
 
-	err = ql_wait_for_drvr_lock(qdev);
-	if (err) {
-		err = ql_adapter_initialize(qdev);
-		if (err) {
-			netdev_err(ndev, "Unable to initialize adapter\n");
-			goto err_init;
-		}
-		netdev_err(ndev, "Releasing driver lock\n");
-		ql_sem_unlock(qdev, QL_DRVR_SEM_MASK);
-	} else {
+	if (!ql_wait_for_drvr_lock(qdev)) {
 		netdev_err(ndev, "Could not acquire driver lock\n");
+		err = -ENODEV;
 		goto err_lock;
 	}
+
+	err = ql_adapter_initialize(qdev);
+	if (err) {
+		netdev_err(ndev, "Unable to initialize adapter\n");
+		goto err_init;
+	}
+	ql_sem_unlock(qdev, QL_DRVR_SEM_MASK);
 
 	spin_unlock_irqrestore(&qdev->hw_lock, hw_flags);
 
@@ -3606,7 +3600,7 @@ static int ql3xxx_set_mac_address(struct net_device *ndev, void *p)
 	return 0;
 }
 
-static void ql3xxx_tx_timeout(struct net_device *ndev)
+static void ql3xxx_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 {
 	struct ql3_adapter *qdev = netdev_priv(ndev);
 
@@ -3752,9 +3746,9 @@ static void ql_get_board_info(struct ql3_adapter *qdev)
 	qdev->pci_slot = (u8) PCI_SLOT(qdev->pdev->devfn);
 }
 
-static void ql3xxx_timer(unsigned long ptr)
+static void ql3xxx_timer(struct timer_list *t)
 {
-	struct ql3_adapter *qdev = (struct ql3_adapter *)ptr;
+	struct ql3_adapter *qdev = from_timer(qdev, t, adapter_timer);
 	queue_delayed_work(qdev->workqueue, &qdev->link_state_work, 0);
 }
 
@@ -3762,19 +3756,18 @@ static const struct net_device_ops ql3xxx_netdev_ops = {
 	.ndo_open		= ql3xxx_open,
 	.ndo_start_xmit		= ql3xxx_send,
 	.ndo_stop		= ql3xxx_close,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= ql3xxx_set_mac_address,
 	.ndo_tx_timeout		= ql3xxx_tx_timeout,
 };
 
-static int __devinit ql3xxx_probe(struct pci_dev *pdev,
-				  const struct pci_device_id *pci_entry)
+static int ql3xxx_probe(struct pci_dev *pdev,
+			const struct pci_device_id *pci_entry)
 {
 	struct net_device *ndev = NULL;
 	struct ql3_adapter *qdev = NULL;
 	static int cards_found;
-	int uninitialized_var(pci_using_dac), err;
+	int pci_using_dac, err;
 
 	err = pci_enable_device(pdev);
 	if (err) {
@@ -3805,7 +3798,6 @@ static int __devinit ql3xxx_probe(struct pci_dev *pdev,
 
 	ndev = alloc_etherdev(sizeof(struct ql3_adapter));
 	if (!ndev) {
-		pr_err("%s could not alloc etherdev\n", pci_name(pdev));
 		err = -ENOMEM;
 		goto err_out_free_regions;
 	}
@@ -3842,7 +3834,7 @@ static int __devinit ql3xxx_probe(struct pci_dev *pdev,
 
 	/* Set driver entry points */
 	ndev->netdev_ops = &ql3xxx_netdev_ops;
-	SET_ETHTOOL_OPS(ndev, &ql3xxx_ethtool_ops);
+	ndev->ethtool_ops = &ql3xxx_ethtool_ops;
 	ndev->watchdog_timeo = 5 * HZ;
 
 	netif_napi_add(ndev, &qdev->napi, ql_poll, 64);
@@ -3867,7 +3859,6 @@ static int __devinit ql3xxx_probe(struct pci_dev *pdev,
 		ndev->mtu = qdev->nvram_data.macCfg_port0.etherMtu_mac ;
 		ql_set_mac_addr(ndev, qdev->nvram_data.funcCfg_fn0.macAddress);
 	}
-	memcpy(ndev->perm_addr, ndev->dev_addr, ndev->addr_len);
 
 	ndev->tx_queue_len = NUM_REQ_Q_ENTRIES;
 
@@ -3893,14 +3884,18 @@ static int __devinit ql3xxx_probe(struct pci_dev *pdev,
 	netif_stop_queue(ndev);
 
 	qdev->workqueue = create_singlethread_workqueue(ndev->name);
+	if (!qdev->workqueue) {
+		unregister_netdev(ndev);
+		err = -ENOMEM;
+		goto err_out_iounmap;
+	}
+
 	INIT_DELAYED_WORK(&qdev->reset_work, ql_reset_work);
 	INIT_DELAYED_WORK(&qdev->tx_timeout_work, ql_tx_timeout_work);
 	INIT_DELAYED_WORK(&qdev->link_state_work, ql_link_state_machine_work);
 
-	init_timer(&qdev->adapter_timer);
-	qdev->adapter_timer.function = ql3xxx_timer;
+	timer_setup(&qdev->adapter_timer, ql3xxx_timer, 0);
 	qdev->adapter_timer.expires = jiffies + HZ * 2;	/* two second delay */
-	qdev->adapter_timer.data = (unsigned long)qdev;
 
 	if (!cards_found) {
 		pr_alert("%s\n", DRV_STRING);
@@ -3920,12 +3915,11 @@ err_out_free_regions:
 	pci_release_regions(pdev);
 err_out_disable_pdev:
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 err_out:
 	return err;
 }
 
-static void __devexit ql3xxx_remove(struct pci_dev *pdev)
+static void ql3xxx_remove(struct pci_dev *pdev)
 {
 	struct net_device *ndev = pci_get_drvdata(pdev);
 	struct ql3_adapter *qdev = netdev_priv(ndev);
@@ -3943,7 +3937,6 @@ static void __devexit ql3xxx_remove(struct pci_dev *pdev)
 
 	iounmap(qdev->mem_map_registers);
 	pci_release_regions(pdev);
-	pci_set_drvdata(pdev, NULL);
 	free_netdev(ndev);
 }
 
@@ -3952,18 +3945,7 @@ static struct pci_driver ql3xxx_driver = {
 	.name = DRV_NAME,
 	.id_table = ql3xxx_pci_tbl,
 	.probe = ql3xxx_probe,
-	.remove = __devexit_p(ql3xxx_remove),
+	.remove = ql3xxx_remove,
 };
 
-static int __init ql3xxx_init_module(void)
-{
-	return pci_register_driver(&ql3xxx_driver);
-}
-
-static void __exit ql3xxx_exit(void)
-{
-	pci_unregister_driver(&ql3xxx_driver);
-}
-
-module_init(ql3xxx_init_module);
-module_exit(ql3xxx_exit);
+module_pci_driver(ql3xxx_driver);

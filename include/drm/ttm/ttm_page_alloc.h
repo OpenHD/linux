@@ -26,38 +26,11 @@
 #ifndef TTM_PAGE_ALLOC
 #define TTM_PAGE_ALLOC
 
-#include "ttm_bo_driver.h"
-#include "ttm_memory.h"
+#include <drm/ttm/ttm_bo_driver.h>
+#include <drm/ttm/ttm_memory.h>
 
-/**
- * Get count number of pages from pool to pages list.
- *
- * @pages: head of empty linked list where pages are filled.
- * @flags: ttm flags for page allocation.
- * @cstate: ttm caching state for the page.
- * @count: number of pages to allocate.
- * @dma_address: The DMA (bus) address of pages (if TTM_PAGE_FLAG_DMA32 set).
- */
-int ttm_get_pages(struct list_head *pages,
-		  int flags,
-		  enum ttm_caching_state cstate,
-		  unsigned count,
-		  dma_addr_t *dma_address);
-/**
- * Put linked list of pages to pool.
- *
- * @pages: list of pages to free.
- * @page_count: number of pages in the list. Zero can be passed for unknown
- * count.
- * @flags: ttm flags for page allocation.
- * @cstate: ttm caching state.
- * @dma_address: The DMA (bus) address of pages (if TTM_PAGE_FLAG_DMA32 set).
- */
-void ttm_put_pages(struct list_head *pages,
-		   unsigned page_count,
-		   int flags,
-		   enum ttm_caching_state cstate,
-		   dma_addr_t *dma_address);
+struct device;
+
 /**
  * Initialize pool allocator.
  */
@@ -68,7 +41,82 @@ int ttm_page_alloc_init(struct ttm_mem_global *glob, unsigned max_pages);
 void ttm_page_alloc_fini(void);
 
 /**
+ * ttm_pool_populate:
+ *
+ * @ttm: The struct ttm_tt to contain the backing pages.
+ *
+ * Add backing pages to all of @ttm
+ */
+int ttm_pool_populate(struct ttm_tt *ttm, struct ttm_operation_ctx *ctx);
+
+/**
+ * ttm_pool_unpopulate:
+ *
+ * @ttm: The struct ttm_tt which to free backing pages.
+ *
+ * Free all pages of @ttm
+ */
+void ttm_pool_unpopulate(struct ttm_tt *ttm);
+
+/**
+ * Populates and DMA maps pages to fullfil a ttm_dma_populate() request
+ */
+int ttm_populate_and_map_pages(struct device *dev, struct ttm_dma_tt *tt,
+				struct ttm_operation_ctx *ctx);
+
+/**
+ * Unpopulates and DMA unmaps pages as part of a
+ * ttm_dma_unpopulate() request */
+void ttm_unmap_and_unpopulate_pages(struct device *dev, struct ttm_dma_tt *tt);
+
+/**
  * Output the state of pools to debugfs file
  */
-extern int ttm_page_alloc_debugfs(struct seq_file *m, void *data);
+int ttm_page_alloc_debugfs(struct seq_file *m, void *data);
+
+#if defined(CONFIG_DRM_TTM_DMA_PAGE_POOL)
+/**
+ * Initialize pool allocator.
+ */
+int ttm_dma_page_alloc_init(struct ttm_mem_global *glob, unsigned max_pages);
+
+/**
+ * Free pool allocator.
+ */
+void ttm_dma_page_alloc_fini(void);
+
+/**
+ * Output the state of pools to debugfs file
+ */
+int ttm_dma_page_alloc_debugfs(struct seq_file *m, void *data);
+
+int ttm_dma_populate(struct ttm_dma_tt *ttm_dma, struct device *dev,
+			struct ttm_operation_ctx *ctx);
+void ttm_dma_unpopulate(struct ttm_dma_tt *ttm_dma, struct device *dev);
+
+#else
+static inline int ttm_dma_page_alloc_init(struct ttm_mem_global *glob,
+					  unsigned max_pages)
+{
+	return -ENODEV;
+}
+
+static inline void ttm_dma_page_alloc_fini(void) { return; }
+
+static inline int ttm_dma_page_alloc_debugfs(struct seq_file *m, void *data)
+{
+	return 0;
+}
+static inline int ttm_dma_populate(struct ttm_dma_tt *ttm_dma,
+				struct device *dev,
+				struct ttm_operation_ctx *ctx)
+{
+	return -ENOMEM;
+}
+static inline void ttm_dma_unpopulate(struct ttm_dma_tt *ttm_dma,
+				      struct device *dev)
+{
+}
+#endif
+
 #endif

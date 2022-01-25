@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ixp4xx/miccpt-pci.c
  *
@@ -8,11 +9,6 @@
  * Copyright (C) 2006 OMICRON electronics GmbH
  *
  * Author: Michael Jochum <michael.jochum@omicron.at>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -24,6 +20,8 @@
 #include <asm/irq.h>
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
+
+#include "irqs.h"
 
 #define MAX_DEV		4
 #define IRQ_LINES	4
@@ -61,10 +59,9 @@ static int __init miccpt_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci miccpt_pci __initdata = {
 	.nr_controllers = 1,
+	.ops		= &ixp4xx_ops,
 	.preinit	= miccpt_pci_preinit,
-	.swizzle	= pci_std_swizzle,
 	.setup		= ixp4xx_setup,
-	.scan		= ixp4xx_scan_bus,
 	.map_irq	= miccpt_map_irq,
 };
 

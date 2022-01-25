@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef _INPUT_POLLDEV_H
 #define _INPUT_POLLDEV_H
 
 /*
  * Copyright (c) 2007 Dmitry Torokhov
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/input.h>
@@ -48,9 +45,12 @@ struct input_polled_dev {
 
 /* private: */
 	struct delayed_work work;
+
+	bool devres_managed;
 };
 
 struct input_polled_dev *input_allocate_polled_device(void);
+struct input_polled_dev *devm_input_allocate_polled_device(struct device *dev);
 void input_free_polled_device(struct input_polled_dev *dev);
 int input_register_polled_device(struct input_polled_dev *dev);
 void input_unregister_polled_device(struct input_polled_dev *dev);

@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MTD Oops/Panic logger
  *
  * Copyright © 2007 Nokia Corporation. All rights reserved.
  *
  * Author: Richard Purdie <rpurdie@openedhand.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/kernel.h>
@@ -84,12 +70,6 @@ static int page_is_used(struct mtdoops_context *cxt, int page)
 	return test_bit(page, cxt->oops_page_used);
 }
 
-static void mtdoops_erase_callback(struct erase_info *done)
-{
-	wait_queue_head_t *wait_q = (wait_queue_head_t *)done->priv;
-	wake_up(wait_q);
-}
-
 static int mtdoops_erase_block(struct mtdoops_context *cxt, int offset)
 {
 	struct mtd_info *mtd = cxt->mtd;
@@ -97,33 +77,19 @@ static int mtdoops_erase_block(struct mtdoops_context *cxt, int offset)
 	u32 start_page = start_page_offset / record_size;
 	u32 erase_pages = mtd->erasesize / record_size;
 	struct erase_info erase;
-	DECLARE_WAITQUEUE(wait, current);
-	wait_queue_head_t wait_q;
 	int ret;
 	int page;
 
-	init_waitqueue_head(&wait_q);
-	erase.mtd = mtd;
-	erase.callback = mtdoops_erase_callback;
 	erase.addr = offset;
 	erase.len = mtd->erasesize;
-	erase.priv = (u_long)&wait_q;
 
-	set_current_state(TASK_INTERRUPTIBLE);
-	add_wait_queue(&wait_q, &wait);
-
-	ret = mtd->erase(mtd, &erase);
+	ret = mtd_erase(mtd, &erase);
 	if (ret) {
-		set_current_state(TASK_RUNNING);
-		remove_wait_queue(&wait_q, &wait);
 		printk(KERN_WARNING "mtdoops: erase of region [0x%llx, 0x%llx] on \"%s\" failed\n",
 		       (unsigned long long)erase.addr,
 		       (unsigned long long)erase.len, mtddev);
 		return ret;
 	}
-
-	schedule();  /* Wait for erase to finish. */
-	remove_wait_queue(&wait_q, &wait);
 
 	/* Mark pages as unused */
 	for (page = start_page; page < start_page + erase_pages; page++)
@@ -169,14 +135,7 @@ static void mtdoops_workfunc_erase(struct work_struct *work)
 			cxt->nextpage = 0;
 	}
 
-	while (mtd->block_isbad) {
-		ret = mtd->block_isbad(mtd, cxt->nextpage * record_size);
-		if (!ret)
-			break;
-		if (ret < 0) {
-			printk(KERN_ERR "mtdoops: block_isbad failed, aborting\n");
-			return;
-		}
+	while ((ret = mtd_block_isbad(mtd, cxt->nextpage * record_size)) > 0) {
 badblock:
 		printk(KERN_WARNING "mtdoops: bad block at %08lx\n",
 		       cxt->nextpage * record_size);
@@ -190,6 +149,11 @@ badblock:
 		}
 	}
 
+	if (ret < 0) {
+		printk(KERN_ERR "mtdoops: mtd_block_isbad failed, aborting\n");
+		return;
+	}
+
 	for (j = 0, ret = -1; (j < 3) && (ret < 0); j++)
 		ret = mtdoops_erase_block(cxt, cxt->nextpage * record_size);
 
@@ -199,9 +163,9 @@ badblock:
 		return;
 	}
 
-	if (mtd->block_markbad && ret == -EIO) {
-		ret = mtd->block_markbad(mtd, cxt->nextpage * record_size);
-		if (ret < 0) {
+	if (ret == -EIO) {
+		ret = mtd_block_markbad(mtd, cxt->nextpage * record_size);
+		if (ret < 0 && ret != -EOPNOTSUPP) {
 			printk(KERN_ERR "mtdoops: block_markbad failed, aborting\n");
 			return;
 		}
@@ -221,12 +185,16 @@ static void mtdoops_write(struct mtdoops_context *cxt, int panic)
 	hdr[0] = cxt->nextcount;
 	hdr[1] = MTDOOPS_KERNMSG_MAGIC;
 
-	if (panic)
-		ret = mtd->panic_write(mtd, cxt->nextpage * record_size,
-					record_size, &retlen, cxt->oops_buf);
-	else
-		ret = mtd->write(mtd, cxt->nextpage * record_size,
-					record_size, &retlen, cxt->oops_buf);
+	if (panic) {
+		ret = mtd_panic_write(mtd, cxt->nextpage * record_size,
+				      record_size, &retlen, cxt->oops_buf);
+		if (ret == -EOPNOTSUPP) {
+			printk(KERN_ERR "mtdoops: Cannot write from panic without panic_write\n");
+			return;
+		}
+	} else
+		ret = mtd_write(mtd, cxt->nextpage * record_size,
+				record_size, &retlen, cxt->oops_buf);
 
 	if (retlen != record_size || ret < 0)
 		printk(KERN_ERR "mtdoops: write failure at %ld (%td of %ld written), error %d\n",
@@ -253,10 +221,12 @@ static void find_next_position(struct mtdoops_context *cxt)
 	size_t retlen;
 
 	for (page = 0; page < cxt->oops_pages; page++) {
+		if (mtd_block_isbad(mtd, page * record_size))
+			continue;
 		/* Assume the page is used */
 		mark_page_used(cxt, page);
-		ret = mtd->read(mtd, page * record_size, MTDOOPS_HEADER_SIZE,
-				&retlen, (u_char *) &count[0]);
+		ret = mtd_read(mtd, page * record_size, MTDOOPS_HEADER_SIZE,
+			       &retlen, (u_char *)&count[0]);
 		if (retlen != MTDOOPS_HEADER_SIZE ||
 				(ret < 0 && !mtd_is_bitflip(ret))) {
 			printk(KERN_ERR "mtdoops: read failure at %ld (%td of %d read), err %d\n",
@@ -267,7 +237,7 @@ static void find_next_position(struct mtdoops_context *cxt)
 
 		if (count[0] == 0xffffffff && count[1] == 0xffffffff)
 			mark_page_unused(cxt, page);
-		if (count[0] == 0xffffffff)
+		if (count[0] == 0xffffffff || count[1] != MTDOOPS_KERNMSG_MAGIC)
 			continue;
 		if (maxcount == 0xffffffff) {
 			maxcount = count[0];
@@ -285,58 +255,37 @@ static void find_next_position(struct mtdoops_context *cxt)
 		}
 	}
 	if (maxcount == 0xffffffff) {
-		cxt->nextpage = 0;
-		cxt->nextcount = 1;
-		schedule_work(&cxt->work_erase);
-		return;
+		cxt->nextpage = cxt->oops_pages - 1;
+		cxt->nextcount = 0;
 	}
-
-	cxt->nextpage = maxpos;
-	cxt->nextcount = maxcount;
+	else {
+		cxt->nextpage = maxpos;
+		cxt->nextcount = maxcount;
+	}
 
 	mtdoops_inc_counter(cxt);
 }
 
 static void mtdoops_do_dump(struct kmsg_dumper *dumper,
-		enum kmsg_dump_reason reason, const char *s1, unsigned long l1,
-		const char *s2, unsigned long l2)
+			    enum kmsg_dump_reason reason)
 {
 	struct mtdoops_context *cxt = container_of(dumper,
 			struct mtdoops_context, dump);
-	unsigned long s1_start, s2_start;
-	unsigned long l1_cpy, l2_cpy;
-	char *dst;
-
-	if (reason != KMSG_DUMP_OOPS &&
-	    reason != KMSG_DUMP_PANIC &&
-	    reason != KMSG_DUMP_KEXEC)
-		return;
 
 	/* Only dump oopses if dump_oops is set */
 	if (reason == KMSG_DUMP_OOPS && !dump_oops)
 		return;
 
-	dst = cxt->oops_buf + MTDOOPS_HEADER_SIZE; /* Skip the header */
-	l2_cpy = min(l2, record_size - MTDOOPS_HEADER_SIZE);
-	l1_cpy = min(l1, record_size - MTDOOPS_HEADER_SIZE - l2_cpy);
+	kmsg_dump_get_buffer(dumper, true, cxt->oops_buf + MTDOOPS_HEADER_SIZE,
+			     record_size - MTDOOPS_HEADER_SIZE, NULL);
 
-	s2_start = l2 - l2_cpy;
-	s1_start = l1 - l1_cpy;
-
-	memcpy(dst, s1 + s1_start, l1_cpy);
-	memcpy(dst + l1_cpy, s2 + s2_start, l2_cpy);
-
-	/* Panics must be written immediately */
 	if (reason != KMSG_DUMP_OOPS) {
-		if (!cxt->mtd->panic_write)
-			printk(KERN_ERR "mtdoops: Cannot write from panic without panic_write\n");
-		else
-			mtdoops_write(cxt, 1);
-		return;
+		/* Panics must be written immediately */
+		mtdoops_write(cxt, 1);
+	} else {
+		/* For other cases, schedule work to write it "nicely" */
+		schedule_work(&cxt->work_write);
 	}
-
-	/* For other cases, schedule work to write it "nicely" */
-	schedule_work(&cxt->work_write);
 }
 
 static void mtdoops_notify_add(struct mtd_info *mtd)
@@ -368,13 +317,16 @@ static void mtdoops_notify_add(struct mtd_info *mtd)
 	}
 
 	/* oops_page_used is a bit field */
-	cxt->oops_page_used = vmalloc(DIV_ROUND_UP(mtdoops_pages,
-			BITS_PER_LONG));
+	cxt->oops_page_used =
+		vmalloc(array_size(sizeof(unsigned long),
+				   DIV_ROUND_UP(mtdoops_pages,
+						BITS_PER_LONG)));
 	if (!cxt->oops_page_used) {
 		printk(KERN_ERR "mtdoops: could not allocate page array\n");
 		return;
 	}
 
+	cxt->dump.max_reason = KMSG_DUMP_OOPS;
 	cxt->dump.dump = mtdoops_do_dump;
 	err = kmsg_dump_register(&cxt->dump);
 	if (err) {
@@ -401,8 +353,8 @@ static void mtdoops_notify_remove(struct mtd_info *mtd)
 		printk(KERN_WARNING "mtdoops: could not unregister kmsg_dumper\n");
 
 	cxt->mtd = NULL;
-	flush_work_sync(&cxt->work_erase);
-	flush_work_sync(&cxt->work_write);
+	flush_work(&cxt->work_erase);
+	flush_work(&cxt->work_write);
 }
 
 

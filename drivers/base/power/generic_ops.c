@@ -1,39 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/base/power/generic_ops.c - Generic PM callbacks for subsystems
  *
  * Copyright (c) 2010 Rafael J. Wysocki <rjw@sisk.pl>, Novell Inc.
- *
- * This file is released under the GPLv2.
  */
-
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/export.h>
 
-#ifdef CONFIG_PM_RUNTIME
-/**
- * pm_generic_runtime_idle - Generic runtime idle callback for subsystems.
- * @dev: Device to handle.
- *
- * If PM operations are defined for the @dev's driver and they include
- * ->runtime_idle(), execute it and return its error code, if nonzero.
- * Otherwise, execute pm_runtime_suspend() for the device and return 0.
- */
-int pm_generic_runtime_idle(struct device *dev)
-{
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
-
-	if (pm && pm->runtime_idle) {
-		int ret = pm->runtime_idle(dev);
-		if (ret)
-			return ret;
-	}
-
-	pm_runtime_suspend(dev);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pm_generic_runtime_idle);
-
+#ifdef CONFIG_PM
 /**
  * pm_generic_runtime_suspend - Generic runtime suspend callback for subsystems.
  * @dev: Device to suspend.
@@ -71,7 +46,7 @@ int pm_generic_runtime_resume(struct device *dev)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(pm_generic_runtime_resume);
-#endif /* CONFIG_PM_RUNTIME */
+#endif /* CONFIG_PM */
 
 #ifdef CONFIG_PM_SLEEP
 /**
@@ -92,53 +67,28 @@ int pm_generic_prepare(struct device *dev)
 }
 
 /**
- * __pm_generic_call - Generic suspend/freeze/poweroff/thaw subsystem callback.
- * @dev: Device to handle.
- * @event: PM transition of the system under way.
- * @bool: Whether or not this is the "noirq" stage.
- *
- * If the device has not been suspended at run time, execute the
- * suspend/freeze/poweroff/thaw callback provided by its driver, if defined, and
- * return its error code.  Otherwise, return zero.
- */
-static int __pm_generic_call(struct device *dev, int event, bool noirq)
-{
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
-	int (*callback)(struct device *);
-
-	if (!pm || pm_runtime_suspended(dev))
-		return 0;
-
-	switch (event) {
-	case PM_EVENT_SUSPEND:
-		callback = noirq ? pm->suspend_noirq : pm->suspend;
-		break;
-	case PM_EVENT_FREEZE:
-		callback = noirq ? pm->freeze_noirq : pm->freeze;
-		break;
-	case PM_EVENT_HIBERNATE:
-		callback = noirq ? pm->poweroff_noirq : pm->poweroff;
-		break;
-	case PM_EVENT_THAW:
-		callback = noirq ? pm->thaw_noirq : pm->thaw;
-		break;
-	default:
-		callback = NULL;
-		break;
-	}
-
-	return callback ? callback(dev) : 0;
-}
-
-/**
  * pm_generic_suspend_noirq - Generic suspend_noirq callback for subsystems.
  * @dev: Device to suspend.
  */
 int pm_generic_suspend_noirq(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_SUSPEND, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->suspend_noirq ? pm->suspend_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_suspend_noirq);
+
+/**
+ * pm_generic_suspend_late - Generic suspend_late callback for subsystems.
+ * @dev: Device to suspend.
+ */
+int pm_generic_suspend_late(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->suspend_late ? pm->suspend_late(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_suspend_late);
 
 /**
  * pm_generic_suspend - Generic suspend callback for subsystems.
@@ -146,7 +96,9 @@ EXPORT_SYMBOL_GPL(pm_generic_suspend_noirq);
  */
 int pm_generic_suspend(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_SUSPEND, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->suspend ? pm->suspend(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_suspend);
 
@@ -156,9 +108,23 @@ EXPORT_SYMBOL_GPL(pm_generic_suspend);
  */
 int pm_generic_freeze_noirq(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_FREEZE, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->freeze_noirq ? pm->freeze_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_freeze_noirq);
+
+/**
+ * pm_generic_freeze_late - Generic freeze_late callback for subsystems.
+ * @dev: Device to freeze.
+ */
+int pm_generic_freeze_late(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->freeze_late ? pm->freeze_late(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_freeze_late);
 
 /**
  * pm_generic_freeze - Generic freeze callback for subsystems.
@@ -166,7 +132,9 @@ EXPORT_SYMBOL_GPL(pm_generic_freeze_noirq);
  */
 int pm_generic_freeze(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_FREEZE, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->freeze ? pm->freeze(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_freeze);
 
@@ -176,9 +144,23 @@ EXPORT_SYMBOL_GPL(pm_generic_freeze);
  */
 int pm_generic_poweroff_noirq(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_HIBERNATE, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->poweroff_noirq ? pm->poweroff_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_poweroff_noirq);
+
+/**
+ * pm_generic_poweroff_late - Generic poweroff_late callback for subsystems.
+ * @dev: Device to handle.
+ */
+int pm_generic_poweroff_late(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->poweroff_late ? pm->poweroff_late(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_poweroff_late);
 
 /**
  * pm_generic_poweroff - Generic poweroff callback for subsystems.
@@ -186,7 +168,9 @@ EXPORT_SYMBOL_GPL(pm_generic_poweroff_noirq);
  */
 int pm_generic_poweroff(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_HIBERNATE, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->poweroff ? pm->poweroff(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_poweroff);
 
@@ -196,9 +180,23 @@ EXPORT_SYMBOL_GPL(pm_generic_poweroff);
  */
 int pm_generic_thaw_noirq(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_THAW, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->thaw_noirq ? pm->thaw_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_thaw_noirq);
+
+/**
+ * pm_generic_thaw_early - Generic thaw_early callback for subsystems.
+ * @dev: Device to thaw.
+ */
+int pm_generic_thaw_early(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->thaw_early ? pm->thaw_early(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_thaw_early);
 
 /**
  * pm_generic_thaw - Generic thaw callback for subsystems.
@@ -206,53 +204,11 @@ EXPORT_SYMBOL_GPL(pm_generic_thaw_noirq);
  */
 int pm_generic_thaw(struct device *dev)
 {
-	return __pm_generic_call(dev, PM_EVENT_THAW, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->thaw ? pm->thaw(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_thaw);
-
-/**
- * __pm_generic_resume - Generic resume/restore callback for subsystems.
- * @dev: Device to handle.
- * @event: PM transition of the system under way.
- * @bool: Whether or not this is the "noirq" stage.
- *
- * Execute the resume/resotre callback provided by the @dev's driver, if
- * defined.  If it returns 0, change the device's runtime PM status to 'active'.
- * Return the callback's error code.
- */
-static int __pm_generic_resume(struct device *dev, int event, bool noirq)
-{
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
-	int (*callback)(struct device *);
-	int ret;
-
-	if (!pm)
-		return 0;
-
-	switch (event) {
-	case PM_EVENT_RESUME:
-		callback = noirq ? pm->resume_noirq : pm->resume;
-		break;
-	case PM_EVENT_RESTORE:
-		callback = noirq ? pm->restore_noirq : pm->restore;
-		break;
-	default:
-		callback = NULL;
-		break;
-	}
-
-	if (!callback)
-		return 0;
-
-	ret = callback(dev);
-	if (!ret && !noirq && pm_runtime_enabled(dev)) {
-		pm_runtime_disable(dev);
-		pm_runtime_set_active(dev);
-		pm_runtime_enable(dev);
-	}
-
-	return ret;
-}
 
 /**
  * pm_generic_resume_noirq - Generic resume_noirq callback for subsystems.
@@ -260,9 +216,23 @@ static int __pm_generic_resume(struct device *dev, int event, bool noirq)
  */
 int pm_generic_resume_noirq(struct device *dev)
 {
-	return __pm_generic_resume(dev, PM_EVENT_RESUME, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->resume_noirq ? pm->resume_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_resume_noirq);
+
+/**
+ * pm_generic_resume_early - Generic resume_early callback for subsystems.
+ * @dev: Device to resume.
+ */
+int pm_generic_resume_early(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->resume_early ? pm->resume_early(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_resume_early);
 
 /**
  * pm_generic_resume - Generic resume callback for subsystems.
@@ -270,7 +240,9 @@ EXPORT_SYMBOL_GPL(pm_generic_resume_noirq);
  */
 int pm_generic_resume(struct device *dev)
 {
-	return __pm_generic_resume(dev, PM_EVENT_RESUME, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->resume ? pm->resume(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_resume);
 
@@ -280,9 +252,23 @@ EXPORT_SYMBOL_GPL(pm_generic_resume);
  */
 int pm_generic_restore_noirq(struct device *dev)
 {
-	return __pm_generic_resume(dev, PM_EVENT_RESTORE, true);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->restore_noirq ? pm->restore_noirq(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_restore_noirq);
+
+/**
+ * pm_generic_restore_early - Generic restore_early callback for subsystems.
+ * @dev: Device to resume.
+ */
+int pm_generic_restore_early(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->restore_early ? pm->restore_early(dev) : 0;
+}
+EXPORT_SYMBOL_GPL(pm_generic_restore_early);
 
 /**
  * pm_generic_restore - Generic restore callback for subsystems.
@@ -290,12 +276,14 @@ EXPORT_SYMBOL_GPL(pm_generic_restore_noirq);
  */
 int pm_generic_restore(struct device *dev)
 {
-	return __pm_generic_resume(dev, PM_EVENT_RESTORE, false);
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	return pm && pm->restore ? pm->restore(dev) : 0;
 }
 EXPORT_SYMBOL_GPL(pm_generic_restore);
 
 /**
- * pm_generic_complete - Generic routine competing a device power transition.
+ * pm_generic_complete - Generic routine completing a device power transition.
  * @dev: Device to handle.
  *
  * Complete a device power transition during a system-wide power transition.
@@ -306,36 +294,5 @@ void pm_generic_complete(struct device *dev)
 
 	if (drv && drv->pm && drv->pm->complete)
 		drv->pm->complete(dev);
-
-	/*
-	 * Let runtime PM try to suspend devices that haven't been in use before
-	 * going into the system-wide sleep state we're resuming from.
-	 */
-	pm_runtime_idle(dev);
 }
 #endif /* CONFIG_PM_SLEEP */
-
-struct dev_pm_ops generic_subsys_pm_ops = {
-#ifdef CONFIG_PM_SLEEP
-	.prepare = pm_generic_prepare,
-	.suspend = pm_generic_suspend,
-	.suspend_noirq = pm_generic_suspend_noirq,
-	.resume = pm_generic_resume,
-	.resume_noirq = pm_generic_resume_noirq,
-	.freeze = pm_generic_freeze,
-	.freeze_noirq = pm_generic_freeze_noirq,
-	.thaw = pm_generic_thaw,
-	.thaw_noirq = pm_generic_thaw_noirq,
-	.poweroff = pm_generic_poweroff,
-	.poweroff_noirq = pm_generic_poweroff_noirq,
-	.restore = pm_generic_restore,
-	.restore_noirq = pm_generic_restore_noirq,
-	.complete = pm_generic_complete,
-#endif
-#ifdef CONFIG_PM_RUNTIME
-	.runtime_suspend = pm_generic_runtime_suspend,
-	.runtime_resume = pm_generic_runtime_resume,
-	.runtime_idle = pm_generic_runtime_idle,
-#endif
-};
-EXPORT_SYMBOL_GPL(generic_subsys_pm_ops);

@@ -1,27 +1,32 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * This file contains common function prototypes to avoid externs in the c files.
  *
  * Copyright (c) 2011 Cambridge Silicon Radio Limited, a CSR plc group company.
- *
- * Licensed under GPLv2 or later.
  */
 
 #ifndef __MACH_PRIMA2_COMMON_H__
 #define __MACH_PRIMA2_COMMON_H__
 
 #include <linux/init.h>
-#include <asm/mach/time.h>
+#include <linux/reboot.h>
 
-extern struct sys_timer sirfsoc_timer;
+#include <asm/mach/time.h>
+#include <asm/exception.h>
+
+extern volatile int prima2_pen_release;
+
+extern const struct smp_operations sirfsoc_smp_ops;
+extern void sirfsoc_secondary_startup(void);
+extern void sirfsoc_cpu_die(unsigned int cpu);
 
 extern void __init sirfsoc_of_irq_init(void);
-extern void __init sirfsoc_of_clk_init(void);
-extern void sirfsoc_restart(char, const char *);
+extern asmlinkage void __exception_irq_entry sirfsoc_handle_irq(struct pt_regs *regs);
 
-#ifndef CONFIG_DEBUG_LL
-static inline void sirfsoc_map_lluart(void)  {}
+#ifdef CONFIG_SUSPEND
+extern int sirfsoc_pm_init(void);
 #else
-extern void __init sirfsoc_map_lluart(void);
+static inline int sirfsoc_pm_init(void) { return 0; }
 #endif
 
 #endif

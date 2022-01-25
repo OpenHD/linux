@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mach-pxa/colibri-pxa270.c
  *
  *  Support for Toradex PXA270 based Colibri module
  *  Daniel Mack <daniel@caiaq.de>
  *  Marek Vasut <marek.vasut@gmail.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -18,16 +15,17 @@
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/machine.h>
 #include <linux/ucb1400.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach-types.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
 #include <mach/audio.h>
-#include <mach/colibri.h>
-#include <mach/pxa27x.h>
+#include "colibri.h"
+#include "pxa27x.h"
 
 #include "devices.h"
 #include "generic.h"
@@ -218,8 +216,8 @@ static struct resource colibri_pxa270_dm9000_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.start	= gpio_to_irq(GPIO114_COLIBRI_PXA270_ETH_IRQ),
-		.end	= gpio_to_irq(GPIO114_COLIBRI_PXA270_ETH_IRQ),
+		.start	= PXA_GPIO_TO_IRQ(GPIO114_COLIBRI_PXA270_ETH_IRQ),
+		.end	= PXA_GPIO_TO_IRQ(GPIO114_COLIBRI_PXA270_ETH_IRQ),
 		.flags	= IORESOURCE_IRQ | IRQF_TRIGGER_RISING,
 	},
 };
@@ -249,7 +247,7 @@ static pxa2xx_audio_ops_t colibri_pxa270_ac97_pdata = {
 };
 
 static struct ucb1400_pdata colibri_pxa270_ucb1400_pdata = {
-	.irq		= gpio_to_irq(GPIO113_COLIBRI_PXA270_TS_IRQ),
+	.irq		= PXA_GPIO_TO_IRQ(GPIO113_COLIBRI_PXA270_TS_IRQ),
 };
 
 static struct platform_device colibri_pxa270_ucb1400_device = {
@@ -294,6 +292,8 @@ static void __init colibri_pxa270_init(void)
 		printk(KERN_ERR "Illegal colibri_pxa270_baseboard type %d\n",
 				colibri_pxa270_baseboard);
 	}
+
+	regulator_has_full_constraints();
 }
 
 /* The "Income s.r.o. SH-Dmaster PXA270 SBC" board can be booted either
@@ -310,9 +310,10 @@ MACHINE_START(COLIBRI, "Toradex Colibri PXA270")
 	.atag_offset	= 0x100,
 	.init_machine	= colibri_pxa270_init,
 	.map_io		= pxa27x_map_io,
+	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
 	.handle_irq	= pxa27x_handle_irq,
-	.timer		= &pxa_timer,
+	.init_time	= pxa_timer_init,
 	.restart	= pxa_restart,
 MACHINE_END
 
@@ -320,9 +321,10 @@ MACHINE_START(INCOME, "Income s.r.o. SH-Dmaster PXA270 SBC")
 	.atag_offset	= 0x100,
 	.init_machine	= colibri_pxa270_income_init,
 	.map_io		= pxa27x_map_io,
+	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
 	.handle_irq	= pxa27x_handle_irq,
-	.timer		= &pxa_timer,
+	.init_time	= pxa_timer_init,
 	.restart	= pxa_restart,
 MACHINE_END
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /****************************************************************************
  *
  * Driver for the IFX 6x60 spi modem.
@@ -9,20 +10,6 @@
  *
  * Copyright (C) 2009, 2010 Intel Corp
  * Russ Gorby <russ.gorby@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
- * USA
  *
  * Driver modified by Intel from Option gtm501l_spi.c
  *
@@ -52,7 +39,7 @@
 #include <linux/fs.h>
 #include <linux/ip.h>
 #include <linux/dmapool.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/sched.h>
 #include <linux/time.h>
 #include <linux/wait.h>
@@ -60,26 +47,55 @@
 #include <linux/pm_runtime.h>
 #include <linux/spi/ifx_modem.h>
 #include <linux/delay.h>
+#include <linux/reboot.h>
 
 #include "ifx6x60.h"
 
 #define IFX_SPI_MORE_MASK		0x10
-#define IFX_SPI_MORE_BIT		12	/* bit position in u16 */
-#define IFX_SPI_CTS_BIT			13	/* bit position in u16 */
+#define IFX_SPI_MORE_BIT		4	/* bit position in u8 */
+#define IFX_SPI_CTS_BIT			6	/* bit position in u8 */
 #define IFX_SPI_MODE			SPI_MODE_1
 #define IFX_SPI_TTY_ID			0
 #define IFX_SPI_TIMEOUT_SEC		2
 #define IFX_SPI_HEADER_0		(-1)
 #define IFX_SPI_HEADER_F		(-2)
 
+#define PO_POST_DELAY		200
+
 /* forward reference */
 static void ifx_spi_handle_srdy(struct ifx_spi_device *ifx_dev);
+static int ifx_modem_reboot_callback(struct notifier_block *nfb,
+				unsigned long event, void *data);
+static int ifx_modem_power_off(struct ifx_spi_device *ifx_dev);
 
 /* local variables */
 static int spi_bpw = 16;		/* 8, 16 or 32 bit word length */
 static struct tty_driver *tty_drv;
 static struct ifx_spi_device *saved_ifx_dev;
 static struct lock_class_key ifx_spi_key;
+
+static struct notifier_block ifx_modem_reboot_notifier_block = {
+	.notifier_call = ifx_modem_reboot_callback,
+};
+
+static int ifx_modem_power_off(struct ifx_spi_device *ifx_dev)
+{
+	gpiod_set_value(ifx_dev->gpio.pmu_reset, 1);
+	msleep(PO_POST_DELAY);
+
+	return 0;
+}
+
+static int ifx_modem_reboot_callback(struct notifier_block *nfb,
+				 unsigned long event, void *data)
+{
+	if (saved_ifx_dev)
+		ifx_modem_power_off(saved_ifx_dev);
+	else
+		pr_warn("no ifx modem active;\n");
+
+	return NOTIFY_OK;
+}
 
 /* GPIO/GPE settings */
 
@@ -90,7 +106,7 @@ static struct lock_class_key ifx_spi_key;
  */
 static inline void mrdy_set_high(struct ifx_spi_device *ifx)
 {
-	gpio_set_value(ifx->gpio.mrdy, 1);
+	gpiod_set_value(ifx->gpio.mrdy, 1);
 }
 
 /**
@@ -100,7 +116,7 @@ static inline void mrdy_set_high(struct ifx_spi_device *ifx)
  */
 static inline void mrdy_set_low(struct ifx_spi_device *ifx)
 {
-	gpio_set_value(ifx->gpio.mrdy, 0);
+	gpiod_set_value(ifx->gpio.mrdy, 0);
 }
 
 /**
@@ -152,26 +168,67 @@ ifx_spi_power_state_clear(struct ifx_spi_device *ifx_dev, unsigned char val)
 }
 
 /**
- *	swap_buf
+ *	swap_buf_8
  *	@buf: our buffer
  *	@len : number of bytes (not words) in the buffer
  *	@end: end of buffer
  *
  *	Swap the contents of a buffer into big endian format
  */
-static inline void swap_buf(u16 *buf, int len, void *end)
+static inline void swap_buf_8(unsigned char *buf, int len, void *end)
+{
+	/* don't swap buffer if SPI word width is 8 bits */
+	return;
+}
+
+/**
+ *	swap_buf_16
+ *	@buf: our buffer
+ *	@len : number of bytes (not words) in the buffer
+ *	@end: end of buffer
+ *
+ *	Swap the contents of a buffer into big endian format
+ */
+static inline void swap_buf_16(unsigned char *buf, int len, void *end)
 {
 	int n;
 
+	u16 *buf_16 = (u16 *)buf;
 	len = ((len + 1) >> 1);
-	if ((void *)&buf[len] > end) {
-		pr_err("swap_buf: swap exceeds boundary (%p > %p)!",
-		       &buf[len], end);
+	if ((void *)&buf_16[len] > end) {
+		pr_err("swap_buf_16: swap exceeds boundary (%p > %p)!",
+		       &buf_16[len], end);
 		return;
 	}
 	for (n = 0; n < len; n++) {
-		*buf = cpu_to_be16(*buf);
-		buf++;
+		*buf_16 = cpu_to_be16(*buf_16);
+		buf_16++;
+	}
+}
+
+/**
+ *	swap_buf_32
+ *	@buf: our buffer
+ *	@len : number of bytes (not words) in the buffer
+ *	@end: end of buffer
+ *
+ *	Swap the contents of a buffer into big endian format
+ */
+static inline void swap_buf_32(unsigned char *buf, int len, void *end)
+{
+	int n;
+
+	u32 *buf_32 = (u32 *)buf;
+	len = (len + 3) >> 2;
+
+	if ((void *)&buf_32[len] > end) {
+		pr_err("swap_buf_32: swap exceeds boundary (%p > %p)!\n",
+		       &buf_32[len], end);
+		return;
+	}
+	for (n = 0; n < len; n++) {
+		*buf_32 = cpu_to_be32(*buf_32);
+		buf_32++;
 	}
 }
 
@@ -186,13 +243,11 @@ static inline void swap_buf(u16 *buf, int len, void *end)
  */
 static void mrdy_assert(struct ifx_spi_device *ifx_dev)
 {
-	int val = gpio_get_value(ifx_dev->gpio.srdy);
+	int val = gpiod_get_value(ifx_dev->gpio.srdy);
 	if (!val) {
 		if (!test_and_set_bit(IFX_SPI_STATE_TIMER_PENDING,
 				      &ifx_dev->flags)) {
-			ifx_dev->spi_timer.expires =
-				jiffies + IFX_SPI_TIMEOUT_SEC*HZ;
-			add_timer(&ifx_dev->spi_timer);
+			mod_timer(&ifx_dev->spi_timer,jiffies + IFX_SPI_TIMEOUT_SEC*HZ);
 
 		}
 	}
@@ -201,35 +256,18 @@ static void mrdy_assert(struct ifx_spi_device *ifx_dev)
 }
 
 /**
- *	ifx_spi_hangup		-	hang up an IFX device
- *	@ifx_dev: our SPI device
- *
- *	Hang up the tty attached to the IFX device if one is currently
- *	open. If not take no action
- */
-static void ifx_spi_ttyhangup(struct ifx_spi_device *ifx_dev)
-{
-	struct tty_port *pport = &ifx_dev->tty_port;
-	struct tty_struct *tty = tty_port_tty_get(pport);
-	if (tty) {
-		tty_hangup(tty);
-		tty_kref_put(tty);
-	}
-}
-
-/**
  *	ifx_spi_timeout		-	SPI timeout
- *	@arg: our SPI device
+ *	@t: timer in our SPI device
  *
  *	The SPI has timed out: hang up the tty. Users will then see a hangup
  *	and error events.
  */
-static void ifx_spi_timeout(unsigned long arg)
+static void ifx_spi_timeout(struct timer_list *t)
 {
-	struct ifx_spi_device *ifx_dev = (struct ifx_spi_device *)arg;
+	struct ifx_spi_device *ifx_dev = from_timer(ifx_dev, t, spi_timer);
 
 	dev_warn(&ifx_dev->spi_dev->dev, "*** SPI Timeout ***");
-	ifx_spi_ttyhangup(ifx_dev);
+	tty_port_tty_hangup(&ifx_dev->tty_port, false);
 	mrdy_set_low(ifx_dev);
 	clear_bit(IFX_SPI_STATE_TIMER_PENDING, &ifx_dev->flags);
 }
@@ -239,7 +277,6 @@ static void ifx_spi_timeout(unsigned long arg)
 /**
  *	ifx_spi_tiocmget	-	get modem lines
  *	@tty: our tty device
- *	@filp: file handle issuing the request
  *
  *	Map the signal state into Linux modem flags and report the value
  *	in Linux terms
@@ -343,8 +380,10 @@ static int ifx_spi_decode_spi_header(unsigned char *buffer, int *length,
 
 	if (h1 == 0 && h2 == 0) {
 		*received_cts = 0;
+		*more = 0;
 		return IFX_SPI_HEADER_0;
 	} else if (h1 == 0xffff && h2 == 0xffff) {
+		*more = 0;
 		/* spi_slave_cts remains as it was */
 		return IFX_SPI_HEADER_F;
 	}
@@ -374,25 +413,6 @@ static void ifx_spi_setup_spi_header(unsigned char *txbuffer, int tx_count,
 }
 
 /**
- *	ifx_spi_wakeup_serial	-	SPI space made
- *	@port_data: our SPI device
- *
- *	We have emptied the FIFO enough that we want to get more data
- *	queued into it. Poke the line discipline via tty_wakeup so that
- *	it will feed us more bits
- */
-static void ifx_spi_wakeup_serial(struct ifx_spi_device *ifx_dev)
-{
-	struct tty_struct *tty;
-
-	tty = tty_port_tty_get(&ifx_dev->tty_port);
-	if (!tty)
-		return;
-	tty_wakeup(tty);
-	tty_kref_put(tty);
-}
-
-/**
  *	ifx_spi_prepare_tx_buffer	-	prepare transmit frame
  *	@ifx_dev: our SPI device
  *
@@ -412,7 +432,6 @@ static int ifx_spi_prepare_tx_buffer(struct ifx_spi_device *ifx_dev)
 	unsigned char *tx_buffer;
 
 	tx_buffer = ifx_dev->tx_buffer;
-	memset(tx_buffer, 0, IFX_SPI_TRANSFER_SIZE);
 
 	/* make room for required SPI header */
 	tx_buffer += IFX_SPI_HEADER_OVERHEAD;
@@ -438,7 +457,7 @@ static int ifx_spi_prepare_tx_buffer(struct ifx_spi_device *ifx_dev)
 			tx_count += temp_count;
 			if (temp_count == queue_length)
 				/* poke port to get more data */
-				ifx_spi_wakeup_serial(ifx_dev);
+				tty_port_tty_wakeup(&ifx_dev->tty_port);
 			else /* more data in port, use next SPI message */
 				ifx_dev->spi_more = 1;
 		}
@@ -449,7 +468,7 @@ static int ifx_spi_prepare_tx_buffer(struct ifx_spi_device *ifx_dev)
 					tx_count-IFX_SPI_HEADER_OVERHEAD,
 					ifx_dev->spi_more);
 	/* swap actual data in the buffer */
-	swap_buf((u16 *)(ifx_dev->tx_buffer), tx_count,
+	ifx_dev->swap_buf((ifx_dev->tx_buffer), tx_count,
 		&ifx_dev->tx_buffer[IFX_SPI_TRANSFER_SIZE]);
 	return tx_count;
 }
@@ -469,9 +488,17 @@ static int ifx_spi_write(struct tty_struct *tty, const unsigned char *buf,
 {
 	struct ifx_spi_device *ifx_dev = tty->driver_data;
 	unsigned char *tmp_buf = (unsigned char *)buf;
-	int tx_count = kfifo_in_locked(&ifx_dev->tx_fifo, tmp_buf, count,
-				   &ifx_dev->fifo_lock);
-	mrdy_assert(ifx_dev);
+	unsigned long flags;
+	bool is_fifo_empty;
+	int tx_count;
+
+	spin_lock_irqsave(&ifx_dev->fifo_lock, flags);
+	is_fifo_empty = kfifo_is_empty(&ifx_dev->tx_fifo);
+	tx_count = kfifo_in(&ifx_dev->tx_fifo, tmp_buf, count);
+	spin_unlock_irqrestore(&ifx_dev->fifo_lock, flags);
+	if (is_fifo_empty)
+		mrdy_assert(ifx_dev);
+
 	return tx_count;
 }
 
@@ -503,7 +530,7 @@ static int ifx_spi_chars_in_buffer(struct tty_struct *tty)
 
 /**
  *	ifx_port_hangup
- *	@port: our tty port
+ *	@tty: our tty
  *
  *	tty port hang up. Called when tty_hangup processing is invoked either
  *	by loss of carrier, or by software (eg vhangup). Serialized against
@@ -530,11 +557,18 @@ static int ifx_port_activate(struct tty_port *port, struct tty_struct *tty)
 	/* clear any old data; can't do this in 'close' */
 	kfifo_reset(&ifx_dev->tx_fifo);
 
+	/* clear any flag which may be set in port shutdown procedure */
+	clear_bit(IFX_SPI_STATE_IO_IN_PROGRESS, &ifx_dev->flags);
+	clear_bit(IFX_SPI_STATE_IO_READY, &ifx_dev->flags);
+
 	/* put port data into this tty */
 	tty->driver_data = ifx_dev;
 
 	/* allows flip string push from int context */
-	tty->low_latency = 1;
+	port->low_latency = 1;
+
+	/* set flag to allows data transfer */
+	set_bit(IFX_SPI_STATE_IO_AVAILABLE, &ifx_dev->flags);
 
 	return 0;
 }
@@ -551,7 +585,9 @@ static void ifx_port_shutdown(struct tty_port *port)
 	struct ifx_spi_device *ifx_dev =
 		container_of(port, struct ifx_spi_device, tty_port);
 
+	clear_bit(IFX_SPI_STATE_IO_AVAILABLE, &ifx_dev->flags);
 	mrdy_set_low(ifx_dev);
+	del_timer(&ifx_dev->spi_timer);
 	clear_bit(IFX_SPI_STATE_TIMER_PENDING, &ifx_dev->flags);
 	tasklet_kill(&ifx_dev->io_work_tasklet);
 }
@@ -574,7 +610,7 @@ static const struct tty_operations ifx_spi_serial_ops = {
 
 /**
  *	ifx_spi_insert_fip_string	-	queue received data
- *	@ifx_ser: our SPI device
+ *	@ifx_dev: our SPI device
  *	@chars: buffer we have received
  *	@size: number of chars reeived
  *
@@ -584,12 +620,8 @@ static const struct tty_operations ifx_spi_serial_ops = {
 static void ifx_spi_insert_flip_string(struct ifx_spi_device *ifx_dev,
 				    unsigned char *chars, size_t size)
 {
-	struct tty_struct *tty = tty_port_tty_get(&ifx_dev->tty_port);
-	if (!tty)
-		return;
-	tty_insert_flip_string(tty, chars, size);
-	tty_flip_buffer_push(tty);
-	tty_kref_put(tty);
+	tty_insert_flip_string(&ifx_dev->tty_port, chars, size);
+	tty_flip_buffer_push(&ifx_dev->tty_port);
 }
 
 /**
@@ -602,11 +634,9 @@ static void ifx_spi_insert_flip_string(struct ifx_spi_device *ifx_dev,
 static void ifx_spi_complete(void *ctx)
 {
 	struct ifx_spi_device *ifx_dev = ctx;
-	struct tty_struct *tty;
-	struct tty_ldisc *ldisc = NULL;
 	int length;
 	int actual_length;
-	unsigned char more;
+	unsigned char more = 0;
 	unsigned char cts;
 	int local_write_pending = 0;
 	int queue_length;
@@ -617,7 +647,7 @@ static void ifx_spi_complete(void *ctx)
 
 	if (!ifx_dev->spi_msg.status) {
 		/* check header validity, get comm flags */
-		swap_buf((u16 *)ifx_dev->rx_buffer, IFX_SPI_HEADER_OVERHEAD,
+		ifx_dev->swap_buf(ifx_dev->rx_buffer, IFX_SPI_HEADER_OVERHEAD,
 			&ifx_dev->rx_buffer[IFX_SPI_HEADER_OVERHEAD]);
 		decode_result = ifx_spi_decode_spi_header(ifx_dev->rx_buffer,
 				&length, &more, &cts);
@@ -636,7 +666,8 @@ static void ifx_spi_complete(void *ctx)
 
 		actual_length = min((unsigned int)length,
 					ifx_dev->spi_msg.actual_length);
-		swap_buf((u16 *)(ifx_dev->rx_buffer + IFX_SPI_HEADER_OVERHEAD),
+		ifx_dev->swap_buf(
+			(ifx_dev->rx_buffer + IFX_SPI_HEADER_OVERHEAD),
 			 actual_length,
 			 &ifx_dev->rx_buffer[IFX_SPI_TRANSFER_SIZE]);
 		ifx_spi_insert_flip_string(
@@ -644,6 +675,7 @@ static void ifx_spi_complete(void *ctx)
 			ifx_dev->rx_buffer + IFX_SPI_HEADER_OVERHEAD,
 			(size_t)actual_length);
 	} else {
+		more = 0;
 		dev_dbg(&ifx_dev->spi_dev->dev, "SPI transfer error %d",
 		       ifx_dev->spi_msg.status);
 	}
@@ -657,7 +689,7 @@ complete_exit:
 	clear_bit(IFX_SPI_STATE_IO_IN_PROGRESS, &(ifx_dev->flags));
 
 	queue_length = kfifo_len(&ifx_dev->tx_fifo);
-	srdy = gpio_get_value(ifx_dev->gpio.srdy);
+	srdy = gpiod_get_value(ifx_dev->gpio.srdy);
 	if (!srdy)
 		ifx_spi_power_state_clear(ifx_dev, IFX_SPI_POWER_SRDY);
 
@@ -680,15 +712,7 @@ complete_exit:
 			 */
 			ifx_spi_power_state_clear(ifx_dev,
 						  IFX_SPI_POWER_DATA_PENDING);
-			tty = tty_port_tty_get(&ifx_dev->tty_port);
-			if (tty) {
-				ldisc = tty_ldisc_ref(tty);
-				if (ldisc) {
-					ldisc->ops->write_wakeup(tty);
-					tty_ldisc_deref(ldisc);
-				}
-				tty_kref_put(tty);
-			}
+			tty_port_tty_wakeup(&ifx_dev->tty_port);
 		}
 	}
 }
@@ -700,12 +724,14 @@ complete_exit:
  *	Queue data for transmission if possible and then kick off the
  *	transfer.
  */
-static void ifx_spi_io(unsigned long data)
+static void ifx_spi_io(struct tasklet_struct *t)
 {
 	int retval;
-	struct ifx_spi_device *ifx_dev = (struct ifx_spi_device *) data;
+	struct ifx_spi_device *ifx_dev = from_tasklet(ifx_dev, t,
+						      io_work_tasklet);
 
-	if (!test_and_set_bit(IFX_SPI_STATE_IO_IN_PROGRESS, &ifx_dev->flags)) {
+	if (!test_and_set_bit(IFX_SPI_STATE_IO_IN_PROGRESS, &ifx_dev->flags) &&
+		test_bit(IFX_SPI_STATE_IO_AVAILABLE, &ifx_dev->flags)) {
 		if (ifx_dev->gpio.unack_srdy_int_nb > 0)
 			ifx_dev->gpio.unack_srdy_int_nb--;
 
@@ -723,7 +749,8 @@ static void ifx_spi_io(unsigned long data)
 		ifx_dev->spi_xfer.cs_change = 0;
 		ifx_dev->spi_xfer.speed_hz = ifx_dev->spi_dev->max_speed_hz;
 		/* ifx_dev->spi_xfer.speed_hz = 390625; */
-		ifx_dev->spi_xfer.bits_per_word = spi_bpw;
+		ifx_dev->spi_xfer.bits_per_word =
+			ifx_dev->spi_dev->bits_per_word;
 
 		ifx_dev->spi_xfer.tx_buf = ifx_dev->tx_buffer;
 		ifx_dev->spi_xfer.rx_buf = ifx_dev->rx_buffer;
@@ -773,6 +800,7 @@ static void ifx_spi_free_port(struct ifx_spi_device *ifx_dev)
 {
 	if (ifx_dev->tty_dev)
 		tty_unregister_device(tty_drv, ifx_dev->minor);
+	tty_port_destroy(&ifx_dev->tty_port);
 	kfifo_free(&ifx_dev->tx_fifo);
 }
 
@@ -800,16 +828,18 @@ static int ifx_spi_create_port(struct ifx_spi_device *ifx_dev)
 	tty_port_init(pport);
 	pport->ops = &ifx_tty_port_ops;
 	ifx_dev->minor = IFX_SPI_TTY_ID;
-	ifx_dev->tty_dev = tty_register_device(tty_drv, ifx_dev->minor,
-					       &ifx_dev->spi_dev->dev);
+	ifx_dev->tty_dev = tty_port_register_device(pport, tty_drv,
+			ifx_dev->minor, &ifx_dev->spi_dev->dev);
 	if (IS_ERR(ifx_dev->tty_dev)) {
 		dev_dbg(&ifx_dev->spi_dev->dev,
 			"%s: registering tty device failed", __func__);
 		ret = PTR_ERR(ifx_dev->tty_dev);
-		goto error_ret;
+		goto error_port;
 	}
 	return 0;
 
+error_port:
+	tty_port_destroy(pport);
 error_ret:
 	ifx_spi_free_port(ifx_dev);
 	return ret;
@@ -826,7 +856,7 @@ error_ret:
 static void ifx_spi_handle_srdy(struct ifx_spi_device *ifx_dev)
 {
 	if (test_bit(IFX_SPI_STATE_TIMER_PENDING, &ifx_dev->flags)) {
-		del_timer_sync(&ifx_dev->spi_timer);
+		del_timer(&ifx_dev->spi_timer);
 		clear_bit(IFX_SPI_STATE_TIMER_PENDING, &ifx_dev->flags);
 	}
 
@@ -867,7 +897,7 @@ static irqreturn_t ifx_spi_srdy_interrupt(int irq, void *dev)
 static irqreturn_t ifx_spi_reset_interrupt(int irq, void *dev)
 {
 	struct ifx_spi_device *ifx_dev = dev;
-	int val = gpio_get_value(ifx_dev->gpio.reset_out);
+	int val = gpiod_get_value(ifx_dev->gpio.reset_out);
 	int solreset = test_bit(MR_START, &ifx_dev->mdm_reset_state);
 
 	if (val == 0) {
@@ -875,7 +905,7 @@ static irqreturn_t ifx_spi_reset_interrupt(int irq, void *dev)
 		set_bit(MR_INPROGRESS, &ifx_dev->mdm_reset_state);
 		if (!solreset) {
 			/* unsolicited reset  */
-			ifx_spi_ttyhangup(ifx_dev);
+			tty_port_tty_hangup(&ifx_dev->tty_port, false);
 		}
 	} else {
 		/* exited reset */
@@ -923,14 +953,14 @@ static int ifx_spi_reset(struct ifx_spi_device *ifx_dev)
 	 * to reset properly
 	 */
 	set_bit(MR_START, &ifx_dev->mdm_reset_state);
-	gpio_set_value(ifx_dev->gpio.po, 0);
-	gpio_set_value(ifx_dev->gpio.reset, 0);
+	gpiod_set_value(ifx_dev->gpio.po, 0);
+	gpiod_set_value(ifx_dev->gpio.reset, 0);
 	msleep(25);
-	gpio_set_value(ifx_dev->gpio.reset, 1);
+	gpiod_set_value(ifx_dev->gpio.reset, 1);
 	msleep(1);
-	gpio_set_value(ifx_dev->gpio.po, 1);
+	gpiod_set_value(ifx_dev->gpio.po, 1);
 	msleep(1);
-	gpio_set_value(ifx_dev->gpio.po, 0);
+	gpiod_set_value(ifx_dev->gpio.po, 0);
 	ret = wait_event_timeout(ifx_dev->mdm_reset_wait,
 				 test_bit(MR_COMPLETE,
 					  &ifx_dev->mdm_reset_state),
@@ -961,22 +991,23 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 	int srdy;
 	struct ifx_modem_platform_data *pl_data;
 	struct ifx_spi_device *ifx_dev;
+	struct device *dev = &spi->dev;
 
 	if (saved_ifx_dev) {
-		dev_dbg(&spi->dev, "ignoring subsequent detection");
+		dev_dbg(dev, "ignoring subsequent detection");
 		return -ENODEV;
 	}
 
-	pl_data = (struct ifx_modem_platform_data *)spi->dev.platform_data;
+	pl_data = dev_get_platdata(dev);
 	if (!pl_data) {
-		dev_err(&spi->dev, "missing platform data!");
+		dev_err(dev, "missing platform data!");
 		return -ENODEV;
 	}
 
 	/* initialize structure to hold our device variables */
 	ifx_dev = kzalloc(sizeof(struct ifx_spi_device), GFP_KERNEL);
 	if (!ifx_dev) {
-		dev_err(&spi->dev, "spi device allocation failed");
+		dev_err(dev, "spi device allocation failed");
 		return -ENOMEM;
 	}
 	saved_ifx_dev = ifx_dev;
@@ -985,9 +1016,7 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 	spin_lock_init(&ifx_dev->write_lock);
 	spin_lock_init(&ifx_dev->power_lock);
 	ifx_dev->power_status = 0;
-	init_timer(&ifx_dev->spi_timer);
-	ifx_dev->spi_timer.function = ifx_spi_timeout;
-	ifx_dev->spi_timer.data = (unsigned long)ifx_dev;
+	timer_setup(&ifx_dev->spi_timer, ifx_spi_timeout, 0);
 	ifx_dev->modem = pl_data->modem_type;
 	ifx_dev->use_dma = pl_data->use_dma;
 	ifx_dev->max_hz = pl_data->max_hz;
@@ -997,9 +1026,18 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 	spi->bits_per_word = spi_bpw;
 	ret = spi_setup(spi);
 	if (ret) {
-		dev_err(&spi->dev, "SPI setup wasn't successful %d", ret);
+		dev_err(dev, "SPI setup wasn't successful %d", ret);
+		kfree(ifx_dev);
 		return -ENODEV;
 	}
+
+	/* init swap_buf function according to word width configuration */
+	if (spi->bits_per_word == 32)
+		ifx_dev->swap_buf = swap_buf_32;
+	else if (spi->bits_per_word == 16)
+		ifx_dev->swap_buf = swap_buf_16;
+	else
+		ifx_dev->swap_buf = swap_buf_8;
 
 	/* ensure SPI protocol flags are initialized to enable transfer */
 	ifx_dev->spi_more = 0;
@@ -1011,7 +1049,7 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 				&ifx_dev->tx_bus,
 				GFP_KERNEL);
 	if (!ifx_dev->tx_buffer) {
-		dev_err(&spi->dev, "DMA-TX buffer allocation failed");
+		dev_err(dev, "DMA-TX buffer allocation failed");
 		ret = -ENOMEM;
 		goto error_ret;
 	}
@@ -1020,7 +1058,7 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 				&ifx_dev->rx_bus,
 				GFP_KERNEL);
 	if (!ifx_dev->rx_buffer) {
-		dev_err(&spi->dev, "DMA-RX buffer allocation failed");
+		dev_err(dev, "DMA-RX buffer allocation failed");
 		ret = -ENOMEM;
 		goto error_ret;
 	}
@@ -1029,131 +1067,90 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 	init_waitqueue_head(&ifx_dev->mdm_reset_wait);
 
 	spi_set_drvdata(spi, ifx_dev);
-	tasklet_init(&ifx_dev->io_work_tasklet, ifx_spi_io,
-						(unsigned long)ifx_dev);
+	tasklet_setup(&ifx_dev->io_work_tasklet, ifx_spi_io);
 
 	set_bit(IFX_SPI_STATE_PRESENT, &ifx_dev->flags);
 
 	/* create our tty port */
 	ret = ifx_spi_create_port(ifx_dev);
 	if (ret != 0) {
-		dev_err(&spi->dev, "create default tty port failed");
+		dev_err(dev, "create default tty port failed");
 		goto error_ret;
 	}
 
-	ifx_dev->gpio.reset = pl_data->rst_pmu;
-	ifx_dev->gpio.po = pl_data->pwr_on;
-	ifx_dev->gpio.mrdy = pl_data->mrdy;
-	ifx_dev->gpio.srdy = pl_data->srdy;
-	ifx_dev->gpio.reset_out = pl_data->rst_out;
-
-	dev_info(&spi->dev, "gpios %d, %d, %d, %d, %d",
-		 ifx_dev->gpio.reset, ifx_dev->gpio.po, ifx_dev->gpio.mrdy,
-		 ifx_dev->gpio.srdy, ifx_dev->gpio.reset_out);
-
-	/* Configure gpios */
-	ret = gpio_request(ifx_dev->gpio.reset, "ifxModem");
-	if (ret < 0) {
-		dev_err(&spi->dev, "Unable to allocate GPIO%d (RESET)",
-			ifx_dev->gpio.reset);
+	ifx_dev->gpio.reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(ifx_dev->gpio.reset)) {
+		dev_err(dev, "could not obtain reset GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.reset);
 		goto error_ret;
 	}
-	ret += gpio_direction_output(ifx_dev->gpio.reset, 0);
-	ret += gpio_export(ifx_dev->gpio.reset, 1);
-	if (ret) {
-		dev_err(&spi->dev, "Unable to configure GPIO%d (RESET)",
-			ifx_dev->gpio.reset);
-		ret = -EBUSY;
-		goto error_ret2;
+	gpiod_set_consumer_name(ifx_dev->gpio.reset, "ifxModem reset");
+	ifx_dev->gpio.po = devm_gpiod_get(dev, "power", GPIOD_OUT_LOW);
+	if (IS_ERR(ifx_dev->gpio.po)) {
+		dev_err(dev, "could not obtain power GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.po);
+		goto error_ret;
 	}
+	gpiod_set_consumer_name(ifx_dev->gpio.po, "ifxModem power");
+	ifx_dev->gpio.mrdy = devm_gpiod_get(dev, "mrdy", GPIOD_OUT_LOW);
+	if (IS_ERR(ifx_dev->gpio.mrdy)) {
+		dev_err(dev, "could not obtain mrdy GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.mrdy);
+		goto error_ret;
+	}
+	gpiod_set_consumer_name(ifx_dev->gpio.mrdy, "ifxModem mrdy");
+	ifx_dev->gpio.srdy = devm_gpiod_get(dev, "srdy", GPIOD_IN);
+	if (IS_ERR(ifx_dev->gpio.srdy)) {
+		dev_err(dev, "could not obtain srdy GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.srdy);
+		goto error_ret;
+	}
+	gpiod_set_consumer_name(ifx_dev->gpio.srdy, "ifxModem srdy");
+	ifx_dev->gpio.reset_out = devm_gpiod_get(dev, "rst_out", GPIOD_IN);
+	if (IS_ERR(ifx_dev->gpio.reset_out)) {
+		dev_err(dev, "could not obtain rst_out GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.reset_out);
+		goto error_ret;
+	}
+	gpiod_set_consumer_name(ifx_dev->gpio.reset_out, "ifxModem reset out");
+	ifx_dev->gpio.pmu_reset = devm_gpiod_get(dev, "pmu_reset", GPIOD_ASIS);
+	if (IS_ERR(ifx_dev->gpio.pmu_reset)) {
+		dev_err(dev, "could not obtain pmu_reset GPIO\n");
+		ret = PTR_ERR(ifx_dev->gpio.pmu_reset);
+		goto error_ret;
+	}
+	gpiod_set_consumer_name(ifx_dev->gpio.pmu_reset, "ifxModem PMU reset");
 
-	ret = gpio_request(ifx_dev->gpio.po, "ifxModem");
-	ret += gpio_direction_output(ifx_dev->gpio.po, 0);
-	ret += gpio_export(ifx_dev->gpio.po, 1);
-	if (ret) {
-		dev_err(&spi->dev, "Unable to configure GPIO%d (ON)",
-			ifx_dev->gpio.po);
-		ret = -EBUSY;
-		goto error_ret3;
-	}
-
-	ret = gpio_request(ifx_dev->gpio.mrdy, "ifxModem");
-	if (ret < 0) {
-		dev_err(&spi->dev, "Unable to allocate GPIO%d (MRDY)",
-			ifx_dev->gpio.mrdy);
-		goto error_ret3;
-	}
-	ret += gpio_export(ifx_dev->gpio.mrdy, 1);
-	ret += gpio_direction_output(ifx_dev->gpio.mrdy, 0);
-	if (ret) {
-		dev_err(&spi->dev, "Unable to configure GPIO%d (MRDY)",
-			ifx_dev->gpio.mrdy);
-		ret = -EBUSY;
-		goto error_ret4;
-	}
-
-	ret = gpio_request(ifx_dev->gpio.srdy, "ifxModem");
-	if (ret < 0) {
-		dev_err(&spi->dev, "Unable to allocate GPIO%d (SRDY)",
-			ifx_dev->gpio.srdy);
-		ret = -EBUSY;
-		goto error_ret4;
-	}
-	ret += gpio_export(ifx_dev->gpio.srdy, 1);
-	ret += gpio_direction_input(ifx_dev->gpio.srdy);
-	if (ret) {
-		dev_err(&spi->dev, "Unable to configure GPIO%d (SRDY)",
-			ifx_dev->gpio.srdy);
-		ret = -EBUSY;
-		goto error_ret5;
-	}
-
-	ret = gpio_request(ifx_dev->gpio.reset_out, "ifxModem");
-	if (ret < 0) {
-		dev_err(&spi->dev, "Unable to allocate GPIO%d (RESET_OUT)",
-			ifx_dev->gpio.reset_out);
-		goto error_ret5;
-	}
-	ret += gpio_export(ifx_dev->gpio.reset_out, 1);
-	ret += gpio_direction_input(ifx_dev->gpio.reset_out);
-	if (ret) {
-		dev_err(&spi->dev, "Unable to configure GPIO%d (RESET_OUT)",
-			ifx_dev->gpio.reset_out);
-		ret = -EBUSY;
-		goto error_ret6;
-	}
-
-	ret = request_irq(gpio_to_irq(ifx_dev->gpio.reset_out),
+	ret = request_irq(gpiod_to_irq(ifx_dev->gpio.reset_out),
 			  ifx_spi_reset_interrupt,
 			  IRQF_TRIGGER_RISING|IRQF_TRIGGER_FALLING, DRVNAME,
-		(void *)ifx_dev);
+			  ifx_dev);
 	if (ret) {
-		dev_err(&spi->dev, "Unable to get irq %x\n",
-			gpio_to_irq(ifx_dev->gpio.reset_out));
-		goto error_ret6;
+		dev_err(dev, "Unable to get irq %x\n",
+			gpiod_to_irq(ifx_dev->gpio.reset_out));
+		goto error_ret;
 	}
 
 	ret = ifx_spi_reset(ifx_dev);
 
-	ret = request_irq(gpio_to_irq(ifx_dev->gpio.srdy),
-			  ifx_spi_srdy_interrupt,
-			  IRQF_TRIGGER_RISING, DRVNAME,
-			  (void *)ifx_dev);
+	ret = request_irq(gpiod_to_irq(ifx_dev->gpio.srdy),
+			  ifx_spi_srdy_interrupt, IRQF_TRIGGER_RISING, DRVNAME,
+			  ifx_dev);
 	if (ret) {
-		dev_err(&spi->dev, "Unable to get irq %x",
-			gpio_to_irq(ifx_dev->gpio.srdy));
-		goto error_ret7;
+		dev_err(dev, "Unable to get irq %x",
+			gpiod_to_irq(ifx_dev->gpio.srdy));
+		goto error_ret2;
 	}
 
 	/* set pm runtime power state and register with power system */
-	pm_runtime_set_active(&spi->dev);
-	pm_runtime_enable(&spi->dev);
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
 
 	/* handle case that modem is already signaling SRDY */
 	/* no outgoing tty open at this point, this just satisfies the
 	 * modem's read and should reset communication properly
 	 */
-	srdy = gpio_get_value(ifx_dev->gpio.srdy);
+	srdy = gpiod_get_value(ifx_dev->gpio.srdy);
 
 	if (srdy) {
 		mrdy_assert(ifx_dev);
@@ -1162,18 +1159,8 @@ static int ifx_spi_spi_probe(struct spi_device *spi)
 		mrdy_set_low(ifx_dev);
 	return 0;
 
-error_ret7:
-	free_irq(gpio_to_irq(ifx_dev->gpio.reset_out), (void *)ifx_dev);
-error_ret6:
-	gpio_free(ifx_dev->gpio.srdy);
-error_ret5:
-	gpio_free(ifx_dev->gpio.mrdy);
-error_ret4:
-	gpio_free(ifx_dev->gpio.reset);
-error_ret3:
-	gpio_free(ifx_dev->gpio.po);
 error_ret2:
-	gpio_free(ifx_dev->gpio.reset_out);
+	free_irq(gpiod_to_irq(ifx_dev->gpio.reset_out), ifx_dev);
 error_ret:
 	ifx_spi_free_device(ifx_dev);
 	saved_ifx_dev = NULL;
@@ -1193,15 +1180,12 @@ static int ifx_spi_spi_remove(struct spi_device *spi)
 	struct ifx_spi_device *ifx_dev = spi_get_drvdata(spi);
 	/* stop activity */
 	tasklet_kill(&ifx_dev->io_work_tasklet);
-	/* free irq */
-	free_irq(gpio_to_irq(ifx_dev->gpio.reset_out), (void *)ifx_dev);
-	free_irq(gpio_to_irq(ifx_dev->gpio.srdy), (void *)ifx_dev);
 
-	gpio_free(ifx_dev->gpio.srdy);
-	gpio_free(ifx_dev->gpio.mrdy);
-	gpio_free(ifx_dev->gpio.reset);
-	gpio_free(ifx_dev->gpio.po);
-	gpio_free(ifx_dev->gpio.reset_out);
+	pm_runtime_disable(&spi->dev);
+
+	/* free irq */
+	free_irq(gpiod_to_irq(ifx_dev->gpio.reset_out), ifx_dev);
+	free_irq(gpiod_to_irq(ifx_dev->gpio.srdy), ifx_dev);
 
 	/* free allocations */
 	ifx_spi_free_device(ifx_dev);
@@ -1219,36 +1203,15 @@ static int ifx_spi_spi_remove(struct spi_device *spi)
 
 static void ifx_spi_spi_shutdown(struct spi_device *spi)
 {
+	struct ifx_spi_device *ifx_dev = spi_get_drvdata(spi);
+
+	ifx_modem_power_off(ifx_dev);
 }
 
 /*
  * various suspends and resumes have nothing to do
  * no hardware to save state for
  */
-
-/**
- *	ifx_spi_spi_suspend	-	suspend SPI on system suspend
- *	@dev: device being suspended
- *
- *	Suspend the SPI side. No action needed on Intel MID platforms, may
- *	need extending for other systems.
- */
-static int ifx_spi_spi_suspend(struct spi_device *spi, pm_message_t msg)
-{
-	return 0;
-}
-
-/**
- *	ifx_spi_spi_resume	-	resume SPI side on system resume
- *	@dev: device being suspended
- *
- *	Suspend the SPI side. No action needed on Intel MID platforms, may
- *	need extending for other systems.
- */
-static int ifx_spi_spi_resume(struct spi_device *spi)
-{
-	return 0;
-}
 
 /**
  *	ifx_spi_pm_suspend	-	suspend modem on system suspend
@@ -1331,17 +1294,14 @@ static const struct spi_device_id ifx_id_table[] = {
 MODULE_DEVICE_TABLE(spi, ifx_id_table);
 
 /* spi operations */
-static const struct spi_driver ifx_spi_driver = {
+static struct spi_driver ifx_spi_driver = {
 	.driver = {
 		.name = DRVNAME,
-		.bus = &spi_bus_type,
 		.pm = &ifx_spi_pm,
-		.owner = THIS_MODULE},
+	},
 	.probe = ifx_spi_spi_probe,
 	.shutdown = ifx_spi_spi_shutdown,
-	.remove = __devexit_p(ifx_spi_spi_remove),
-	.suspend = ifx_spi_spi_suspend,
-	.resume = ifx_spi_spi_resume,
+	.remove = ifx_spi_spi_remove,
 	.id_table = ifx_id_table
 };
 
@@ -1354,8 +1314,10 @@ static const struct spi_driver ifx_spi_driver = {
 static void __exit ifx_spi_exit(void)
 {
 	/* unregister */
+	spi_unregister_driver(&ifx_spi_driver);
 	tty_unregister_driver(tty_drv);
-	spi_unregister_driver((void *)&ifx_spi_driver);
+	put_tty_driver(tty_drv);
+	unregister_reboot_notifier(&ifx_modem_reboot_notifier_block);
 }
 
 /**
@@ -1376,12 +1338,9 @@ static int __init ifx_spi_init(void)
 		return -ENOMEM;
 	}
 
-	tty_drv->magic = TTY_DRIVER_MAGIC;
-	tty_drv->owner = THIS_MODULE;
 	tty_drv->driver_name = DRVNAME;
 	tty_drv->name = TTYNAME;
 	tty_drv->minor_start = IFX_SPI_TTY_ID;
-	tty_drv->num = 1;
 	tty_drv->type = TTY_DRIVER_TYPE_SERIAL;
 	tty_drv->subtype = SERIAL_TYPE_NORMAL;
 	tty_drv->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
@@ -1393,16 +1352,31 @@ static int __init ifx_spi_init(void)
 	if (result) {
 		pr_err("%s: tty_register_driver failed(%d)",
 			DRVNAME, result);
-		put_tty_driver(tty_drv);
-		return result;
+		goto err_free_tty;
 	}
 
-	result = spi_register_driver((void *)&ifx_spi_driver);
+	result = spi_register_driver(&ifx_spi_driver);
 	if (result) {
 		pr_err("%s: spi_register_driver failed(%d)",
 			DRVNAME, result);
-		tty_unregister_driver(tty_drv);
+		goto err_unreg_tty;
 	}
+
+	result = register_reboot_notifier(&ifx_modem_reboot_notifier_block);
+	if (result) {
+		pr_err("%s: register ifx modem reboot notifier failed(%d)",
+			DRVNAME, result);
+		goto err_unreg_spi;
+	}
+
+	return 0;
+err_unreg_spi:
+	spi_unregister_driver(&ifx_spi_driver);
+err_unreg_tty:
+	tty_unregister_driver(tty_drv);
+err_free_tty:
+	put_tty_driver(tty_drv);
+
 	return result;
 }
 

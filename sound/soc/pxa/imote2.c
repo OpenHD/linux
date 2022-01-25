@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/module.h>
 #include <sound/soc.h>
@@ -10,9 +11,9 @@
 static int imote2_asoc_hw_params(struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	unsigned int clk = 0;
 	int ret;
 
@@ -30,20 +31,6 @@ static int imote2_asoc_hw_params(struct snd_pcm_substream *substream,
 		break;
 	}
 
-	/* set codec DAI configuration */
-	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S
-				  | SND_SOC_DAIFMT_NB_NF
-				  | SND_SOC_DAIFMT_CBS_CFS);
-	if (ret < 0)
-		return ret;
-
-	/* CPU should be clock master */
-	ret = snd_soc_dai_set_fmt(cpu_dai,  SND_SOC_DAIFMT_I2S
-				  | SND_SOC_DAIFMT_NB_NF
-				  | SND_SOC_DAIFMT_CBS_CFS);
-	if (ret < 0)
-		return ret;
-
 	ret = snd_soc_dai_set_sysclk(codec_dai, 0, clk,
 				     SND_SOC_CLOCK_IN);
 	if (ret < 0)
@@ -56,53 +43,57 @@ static int imote2_asoc_hw_params(struct snd_pcm_substream *substream,
 	return ret;
 }
 
-static struct snd_soc_ops imote2_asoc_ops = {
+static const struct snd_soc_ops imote2_asoc_ops = {
 	.hw_params = imote2_asoc_hw_params,
 };
+
+SND_SOC_DAILINK_DEFS(wm8940,
+	DAILINK_COMP_ARRAY(COMP_CPU("pxa2xx-i2s")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("wm8940-codec.0-0034",
+				      "wm8940-hifi")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("pxa-pcm-audio")));
 
 static struct snd_soc_dai_link imote2_dai = {
 	.name = "WM8940",
 	.stream_name = "WM8940",
-	.cpu_dai_name = "pxa2xx-i2s",
-	.codec_dai_name = "wm8940-hifi",
-	.platform_name = "pxa-pcm-audio",
-	.codec_name = "wm8940-codec.0-0034",
+	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+		   SND_SOC_DAIFMT_CBS_CFS,
 	.ops = &imote2_asoc_ops,
+	SND_SOC_DAILINK_REG(wm8940),
 };
 
-static struct snd_soc_card snd_soc_imote2 = {
+static struct snd_soc_card imote2 = {
 	.name = "Imote2",
+	.owner = THIS_MODULE,
 	.dai_link = &imote2_dai,
 	.num_links = 1,
 };
 
-static struct platform_device *imote2_snd_device;
-
-static int __init imote2_asoc_init(void)
+static int imote2_probe(struct platform_device *pdev)
 {
+	struct snd_soc_card *card = &imote2;
 	int ret;
 
-	if (!machine_is_intelmote2())
-		return -ENODEV;
-	imote2_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!imote2_snd_device)
-		return -ENOMEM;
+	card->dev = &pdev->dev;
 
-	platform_set_drvdata(imote2_snd_device, &snd_soc_imote2);
-	ret = platform_device_add(imote2_snd_device);
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret)
-		platform_device_put(imote2_snd_device);
-
+		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n",
+			ret);
 	return ret;
 }
-module_init(imote2_asoc_init);
 
-static void __exit imote2_asoc_exit(void)
-{
-	platform_device_unregister(imote2_snd_device);
-}
-module_exit(imote2_asoc_exit);
+static struct platform_driver imote2_driver = {
+	.driver		= {
+		.name	= "imote2-audio",
+		.pm     = &snd_soc_pm_ops,
+	},
+	.probe		= imote2_probe,
+};
+
+module_platform_driver(imote2_driver);
 
 MODULE_AUTHOR("Jonathan Cameron");
 MODULE_DESCRIPTION("ALSA SoC Imote 2");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:imote2-audio");

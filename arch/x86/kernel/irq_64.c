@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	Copyright (C) 1992, 1998 Linus Torvalds, Ingo Molnar
  *
@@ -10,78 +11,68 @@
 
 #include <linux/kernel_stat.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/seq_file.h>
-#include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/ftrace.h>
 #include <linux/uaccess.h>
 #include <linux/smp.h>
+#include <linux/sched/task_stack.h>
+
+#include <asm/cpu_entry_area.h>
+#include <asm/irq_stack.h>
 #include <asm/io_apic.h>
-#include <asm/idle.h>
 #include <asm/apic.h>
 
-DEFINE_PER_CPU_SHARED_ALIGNED(irq_cpustat_t, irq_stat);
-EXPORT_PER_CPU_SYMBOL(irq_stat);
+DEFINE_PER_CPU_PAGE_ALIGNED(struct irq_stack, irq_stack_backing_store) __visible;
+DECLARE_INIT_PER_CPU(irq_stack_backing_store);
 
-DEFINE_PER_CPU(struct pt_regs *, irq_regs);
-EXPORT_PER_CPU_SYMBOL(irq_regs);
-
+#ifdef CONFIG_VMAP_STACK
 /*
- * Probabilistic stack overflow check:
- *
- * Only check the stack in process context, because everything else
- * runs on the big interrupt stacks. Checking reliably is too expensive,
- * so we just check from interrupts.
+ * VMAP the backing store with guard pages
  */
-static inline void stack_overflow_check(struct pt_regs *regs)
+static int map_irq_stack(unsigned int cpu)
 {
-#ifdef CONFIG_DEBUG_STACKOVERFLOW
-	u64 curbase = (u64)task_stack_page(current);
+	char *stack = (char *)per_cpu_ptr(&irq_stack_backing_store, cpu);
+	struct page *pages[IRQ_STACK_SIZE / PAGE_SIZE];
+	void *va;
+	int i;
 
-	if (user_mode_vm(regs))
-		return;
+	for (i = 0; i < IRQ_STACK_SIZE / PAGE_SIZE; i++) {
+		phys_addr_t pa = per_cpu_ptr_to_phys(stack + (i << PAGE_SHIFT));
 
-	WARN_ONCE(regs->sp >= curbase &&
-		  regs->sp <= curbase + THREAD_SIZE &&
-		  regs->sp <  curbase + sizeof(struct thread_info) +
-					sizeof(struct pt_regs) + 128,
-
-		  "do_IRQ: %s near stack overflow (cur:%Lx,sp:%lx)\n",
-			current->comm, curbase, regs->sp);
-#endif
-}
-
-bool handle_irq(unsigned irq, struct pt_regs *regs)
-{
-	struct irq_desc *desc;
-
-	stack_overflow_check(regs);
-
-	desc = irq_to_desc(irq);
-	if (unlikely(!desc))
-		return false;
-
-	generic_handle_irq_desc(irq, desc);
-	return true;
-}
-
-
-extern void call_softirq(void);
-
-asmlinkage void do_softirq(void)
-{
-	__u32 pending;
-	unsigned long flags;
-
-	if (in_interrupt())
-		return;
-
-	local_irq_save(flags);
-	pending = local_softirq_pending();
-	/* Switch to interrupt stack */
-	if (pending) {
-		call_softirq();
-		WARN_ON_ONCE(softirq_count());
+		pages[i] = pfn_to_page(pa >> PAGE_SHIFT);
 	}
-	local_irq_restore(flags);
+
+	va = vmap(pages, IRQ_STACK_SIZE / PAGE_SIZE, VM_MAP, PAGE_KERNEL);
+	if (!va)
+		return -ENOMEM;
+
+	per_cpu(hardirq_stack_ptr, cpu) = va + IRQ_STACK_SIZE;
+	return 0;
+}
+#else
+/*
+ * If VMAP stacks are disabled due to KASAN, just use the per cpu
+ * backing store without guard pages.
+ */
+static int map_irq_stack(unsigned int cpu)
+{
+	void *va = per_cpu_ptr(&irq_stack_backing_store, cpu);
+
+	per_cpu(hardirq_stack_ptr, cpu) = va + IRQ_STACK_SIZE;
+	return 0;
+}
+#endif
+
+int irq_init_percpu_irqstack(unsigned int cpu)
+{
+	if (per_cpu(hardirq_stack_ptr, cpu))
+		return 0;
+	return map_irq_stack(cpu);
+}
+
+void do_softirq_own_stack(void)
+{
+	run_on_irqstack_cond(__do_softirq, NULL);
 }

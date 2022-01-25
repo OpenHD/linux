@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cell Broadband Engine OProfile Support
  *
@@ -7,16 +8,10 @@
  * Modifications:
  *	   Carl Love <carll@us.ibm.com>
  *	   Maynard Johnson <maynardj@us.ibm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
-#include <linux/init.h>
 #include <linux/jiffies.h>
 #include <linux/kthread.h>
 #include <linux/oprofile.h>
@@ -34,7 +29,6 @@
 #include <asm/ptrace.h>
 #include <asm/reg.h>
 #include <asm/rtas.h>
-#include <asm/system.h>
 #include <asm/cell-regs.h>
 
 #include "../platforms/cell/interrupt.h"
@@ -210,7 +204,7 @@ static void pm_rtas_reset_signals(u32 node)
 
 	/*
 	 * The debug bus is being set to the passthru disable state.
-	 * However, the FW still expects atleast one legal signal routing
+	 * However, the FW still expects at least one legal signal routing
 	 * entry or it will return an error on the arguments.	If we don't
 	 * supply a valid entry, we must ignore all return values.  Ignoring
 	 * all return values means we might miss an error we should be
@@ -453,7 +447,7 @@ static inline void enable_ctr(u32 cpu, u32 ctr, u32 *pm07_cntrl)
  * This routine will alternate loading the virtual counters for
  * virtual CPUs
  */
-static void cell_virtual_cntr(unsigned long data)
+static void cell_virtual_cntr(struct timer_list *unused)
 {
 	int i, prev_hdw_thread, next_hdw_thread;
 	u32 cpu;
@@ -557,9 +551,7 @@ static void cell_virtual_cntr(unsigned long data)
 
 static void start_virt_cntrs(void)
 {
-	init_timer(&timer_virt_cntr);
-	timer_virt_cntr.function = cell_virtual_cntr;
-	timer_virt_cntr.data = 0UL;
+	timer_setup(&timer_virt_cntr, cell_virtual_cntr, 0);
 	timer_virt_cntr.expires = jiffies + HZ / 10;
 	add_timer(&timer_virt_cntr);
 }
@@ -591,7 +583,7 @@ static int cell_reg_setup_spu_cycles(struct op_counter_config *ctr,
  * periodically based on kernel timer to switch which SPU is
  * being monitored in a round robbin fashion.
  */
-static void spu_evnt_swap(unsigned long data)
+static void spu_evnt_swap(struct timer_list *unused)
 {
 	int node;
 	int cur_phys_spu, nxt_phys_spu, cur_spu_evnt_phys_spu_indx;
@@ -681,9 +673,7 @@ static void spu_evnt_swap(unsigned long data)
 
 static void start_spu_event_swap(void)
 {
-	init_timer(&timer_spu_event_swap);
-	timer_spu_event_swap.function = spu_evnt_swap;
-	timer_spu_event_swap.data = 0UL;
+	timer_setup(&timer_spu_event_swap, spu_evnt_swap, 0);
 	timer_spu_event_swap.expires = jiffies + HZ / 25;
 	add_timer(&timer_spu_event_swap);
 }
@@ -1010,7 +1000,7 @@ static int initial_lfsr[] = {
  *
  * To avoid the time to compute the LFSR, a lookup table is used.  The 24 bit
  * LFSR sequence is broken into four ranges.  The spacing of the precomputed
- * values is adjusted in each range so the error between the user specifed
+ * values is adjusted in each range so the error between the user specified
  * number (N) of events between samples and the actual number of events based
  * on the precomputed value will be les then about 6.2%.  Note, if the user
  * specifies N < 2^16, the LFSR value that is 2^16 from the end will be used.
@@ -1123,8 +1113,7 @@ oprof_cpufreq_notify(struct notifier_block *nb, unsigned long val, void *data)
 	int ret = 0;
 	struct cpufreq_freqs *frq = data;
 	if ((val == CPUFREQ_PRECHANGE && frq->old < frq->new) ||
-	    (val == CPUFREQ_POSTCHANGE && frq->old > frq->new) ||
-	    (val == CPUFREQ_RESUMECHANGE || val == CPUFREQ_SUSPENDCHANGE))
+	    (val == CPUFREQ_POSTCHANGE && frq->old > frq->new))
 		set_spu_profiling_frequency(frq->new, spu_cycle_reset);
 	return ret;
 }

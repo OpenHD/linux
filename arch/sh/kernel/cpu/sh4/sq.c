@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/cpu/sh4/sq.c
  *
@@ -5,10 +6,6 @@
  *
  * Copyright (C) 2001 - 2006  Paul Mundt
  * Copyright (C) 2001, 2002  M. R. Brown
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/cpu.h>
@@ -106,7 +103,8 @@ static int __sq_remap(struct sq_mapping *map, pgprot_t prot)
 #if defined(CONFIG_MMU)
 	struct vm_struct *vma;
 
-	vma = __get_vm_area(map->size, VM_ALLOC, map->sq_addr, SQ_ADDRMAX);
+	vma = __get_vm_area_caller(map->size, VM_ALLOC, map->sq_addr,
+			SQ_ADDRMAX, __builtin_return_address(0));
 	if (!vma)
 		return -ENOMEM;
 
@@ -337,7 +335,7 @@ static struct kobj_type ktype_percpu_entry = {
 	.default_attrs	= sq_sysfs_attrs,
 };
 
-static int __devinit sq_dev_add(struct device *dev)
+static int sq_dev_add(struct device *dev, struct subsys_interface *sif)
 {
 	unsigned int cpu = dev->id;
 	struct kobject *kobj;
@@ -355,20 +353,19 @@ static int __devinit sq_dev_add(struct device *dev)
 	return error;
 }
 
-static int __devexit sq_dev_remove(struct device *dev)
+static void sq_dev_remove(struct device *dev, struct subsys_interface *sif)
 {
 	unsigned int cpu = dev->id;
 	struct kobject *kobj = sq_kobject[cpu];
 
 	kobject_put(kobj);
-	return 0;
 }
 
 static struct subsys_interface sq_interface = {
-	.name		= "sq"
+	.name		= "sq",
 	.subsys		= &cpu_subsys,
 	.add_dev	= sq_dev_add,
-	.remove_dev	= __devexit_p(sq_dev_remove),
+	.remove_dev	= sq_dev_remove,
 };
 
 static int __init sq_api_init(void)

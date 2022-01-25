@@ -1,19 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2010 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
  *
  * Modifications for inclusion into the Linux staging tree are
  * Copyright(c) 2010 Larry Finger. All rights reserved.
@@ -30,49 +18,29 @@
 #include "drv_types.h"
 
 
-#define FW_PWR0	0
-#define FW_PWR1		1
-#define FW_PWR2		2
-#define FW_PWR3		3
-
-
-#define HW_PWR0	7
-#define HW_PWR1		6
-#define HW_PWR2		2
-#define HW_PWR3	0
-#define HW_PWR4	8
-
-#define FW_PWRMSK	0x7
-
-
-#define XMIT_ALIVE	BIT(0)
-#define RECV_ALIVE	BIT(1)
 #define CMD_ALIVE	BIT(2)
-#define EVT_ALIVE	BIT(3)
-
 
 enum Power_Mgnt {
-	PS_MODE_ACTIVE	= 0	,
-	PS_MODE_MIN			,
-	PS_MODE_MAX			,
-	PS_MODE_DTIM			,
-	PS_MODE_VOIP			,
-	PS_MODE_UAPSD_WMM	,
-	PS_MODE_UAPSD			,
-	PS_MODE_IBSS			,
-	PS_MODE_WWLAN		,
-	PM_Radio_Off			,
-	PM_Card_Disable		,
+	PS_MODE_ACTIVE	= 0,
+	PS_MODE_MIN,
+	PS_MODE_MAX,
+	PS_MODE_DTIM,
+	PS_MODE_VOIP,
+	PS_MODE_UAPSD_WMM,
+	PS_MODE_UAPSD,
+	PS_MODE_IBSS,
+	PS_MODE_WWLAN,
+	PM_Radio_Off,
+	PM_Card_Disable,
 	PS_MODE_NUM
 };
 
-
 /*
-	BIT[2:0] = HW state
-	BIT[3] = Protocol PS state, 0: register active state,
-				    1: register sleep state
-	BIT[4] = sub-state
-*/
+ * BIT[2:0] = HW state
+ * BIT[3] = Protocol PS state, 0: register active state,
+ *				1: register sleep state
+ * BIT[4] = sub-state
+ */
 
 #define		PS_DPS				BIT(0)
 #define		PS_LCLK				(PS_DPS)
@@ -107,16 +75,12 @@ struct reportpwrstate_parm {
 	unsigned short rsvd;
 };
 
-static inline void _enter_pwrlock(struct semaphore *plock)
-{
-	_down_sema(plock);
-}
-
 struct	pwrctrl_priv {
-	struct semaphore lock;
+	struct mutex mutex_lock;
 	/*volatile*/ u8 rpwm; /* requested power state for fw */
 	/* fw current power state. updated when 1. read from HCPWM or
-	 * 2. driver lowers power level */
+	 * 2. driver lowers power level
+	 */
 	/*volatile*/ u8 cpwm;
 	/*volatile*/ u8 tog; /* toggling */
 	/*volatile*/ u8 cpwm_tog; /* toggling */
@@ -127,13 +91,12 @@ struct	pwrctrl_priv {
 	uint ImrContent;	/* used to store original imr. */
 	uint bSleep; /* sleep -> active is different from active -> sleep. */
 
-	_workitem SetPSModeWorkItem;
-	_workitem rpwm_workitem;
+	struct work_struct SetPSModeWorkItem;
+	struct work_struct rpwm_workitem;
 	struct timer_list rpwm_check_timer;
 	u8	rpwm_retry;
 	uint	bSetPSModeWorkItemInProgress;
 
-	struct semaphore pnp_pwr_mgnt_sema;
 	spinlock_t pnp_pwr_mgnt_lock;
 	s32	pnp_current_pwr_state;
 	u8	pnp_bstop_trx;
@@ -141,12 +104,13 @@ struct	pwrctrl_priv {
 };
 
 void r8712_init_pwrctrl_priv(struct _adapter *adapter);
-sint r8712_register_cmd_alive(struct _adapter *padapter);
+int r8712_register_cmd_alive(struct _adapter *padapter);
 void r8712_unregister_cmd_alive(struct _adapter *padapter);
 void r8712_cpwm_int_hdl(struct _adapter *padapter,
 			struct reportpwrstate_parm *preportpwrstate);
 void r8712_set_ps_mode(struct _adapter *padapter, uint ps_mode,
 			uint smart_ps);
 void r8712_set_rpwm(struct _adapter *padapter, u8 val8);
+void r8712_flush_rwctrl_works(struct _adapter *padapter);
 
 #endif  /* __RTL871X_PWRCTRL_H_ */

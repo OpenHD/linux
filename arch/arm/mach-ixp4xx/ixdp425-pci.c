@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ixp4xx/ixdp425-pci.c
  *
@@ -7,11 +8,6 @@
  * Copyright (C) 2003-2004 MontaVista Software, Inc.
  *
  * Maintainer: Deepak Saxena <dsaxena@plexity.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -23,6 +19,8 @@
 #include <asm/irq.h>
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
+
+#include "irqs.h"
 
 #define MAX_DEV		4
 #define IRQ_LINES	4
@@ -60,10 +58,9 @@ static int __init ixdp425_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci ixdp425_pci __initdata = {
 	.nr_controllers = 1,
+	.ops		= &ixp4xx_ops,
 	.preinit	= ixdp425_pci_preinit,
-	.swizzle	= pci_std_swizzle,
 	.setup		= ixp4xx_setup,
-	.scan		= ixp4xx_scan_bus,
 	.map_irq	= ixdp425_map_irq,
 };
 

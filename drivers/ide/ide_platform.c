@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Platform IDE driver
  *
  * Copyright (C) 2007 MontaVista Software
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/types.h>
@@ -22,11 +18,9 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 
-static void __devinit plat_ide_setup_ports(struct ide_hw *hw,
-					   void __iomem *base,
-					   void __iomem *ctrl,
-					   struct pata_platform_info *pdata,
-					   int irq)
+static void plat_ide_setup_ports(struct ide_hw *hw, void __iomem *base,
+				 void __iomem *ctrl,
+				 struct pata_platform_info *pdata, int irq)
 {
 	unsigned long port = (unsigned long)base;
 	int i;
@@ -48,7 +42,7 @@ static const struct ide_port_info platform_ide_port_info = {
 	.chipset		= ide_generic,
 };
 
-static int __devinit plat_ide_probe(struct platform_device *pdev)
+static int plat_ide_probe(struct platform_device *pdev)
 {
 	struct resource *res_base, *res_alt, *res_irq;
 	void __iomem *base, *alt_base;
@@ -58,7 +52,7 @@ static int __devinit plat_ide_probe(struct platform_device *pdev)
 	struct ide_hw hw, *hws[] = { &hw };
 	struct ide_port_info d = platform_ide_port_info;
 
-	pdata = pdev->dev.platform_data;
+	pdata = dev_get_platdata(&pdev->dev);
 
 	/* get a pointer to the register memory */
 	res_base = platform_get_resource(pdev, IORESOURCE_IO, 0);
@@ -115,7 +109,7 @@ out:
 	return ret;
 }
 
-static int __devexit plat_ide_remove(struct platform_device *pdev)
+static int plat_ide_remove(struct platform_device *pdev)
 {
 	struct ide_host *host = dev_get_drvdata(&pdev->dev);
 
@@ -127,25 +121,13 @@ static int __devexit plat_ide_remove(struct platform_device *pdev)
 static struct platform_driver platform_ide_driver = {
 	.driver = {
 		.name = "pata_platform",
-		.owner = THIS_MODULE,
 	},
 	.probe = plat_ide_probe,
-	.remove = __devexit_p(plat_ide_remove),
+	.remove = plat_ide_remove,
 };
 
-static int __init platform_ide_init(void)
-{
-	return platform_driver_register(&platform_ide_driver);
-}
-
-static void __exit platform_ide_exit(void)
-{
-	platform_driver_unregister(&platform_ide_driver);
-}
+module_platform_driver(platform_ide_driver);
 
 MODULE_DESCRIPTION("Platform IDE driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:pata_platform");
-
-module_init(platform_ide_init);
-module_exit(platform_ide_exit);

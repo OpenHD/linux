@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ixp4xx/coyote-pci.c
  *
@@ -7,11 +8,6 @@
  * Copyright (C) 2003 MontaVista Softwrae, Inc.
  *
  * Maintainer: Deepak Saxena <dsaxena@mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -22,6 +18,8 @@
 #include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach/pci.h>
+
+#include "irqs.h"
 
 #define SLOT0_DEVID	14
 #define SLOT1_DEVID	15
@@ -48,10 +46,9 @@ static int __init coyote_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci coyote_pci __initdata = {
 	.nr_controllers = 1,
+	.ops		= &ixp4xx_ops,
 	.preinit =        coyote_pci_preinit,
-	.swizzle =        pci_std_swizzle,
 	.setup =          ixp4xx_setup,
-	.scan =           ixp4xx_scan_bus,
 	.map_irq =        coyote_map_irq,
 };
 

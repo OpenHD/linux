@@ -263,9 +263,6 @@ retry:
 		new_skb = skb_copy_expand(rx_skb, 0, rx_size - rx_skb->len,
 					  GFP_KERNEL);
 		if (new_skb == NULL) {
-			if (printk_ratelimit())
-				dev_err(dev, "RX: Can't reallocate skb to %d; "
-					"RX dropped\n", rx_size);
 			kfree_skb(rx_skb);
 			rx_skb = NULL;
 			goto out;	/* drop it...*/
@@ -277,7 +274,7 @@ retry:
 		d_printf(1, dev, "RX: size changed to %d, received %d, "
 			 "copied %d, capacity %ld\n",
 			 rx_size, read_size, rx_skb->len,
-			 (long) (skb_end_pointer(new_skb) - new_skb->head));
+			 (long) skb_end_offset(new_skb));
 		goto retry;
 	}
 		/* In most cases, it happens due to the hardware scheduling a

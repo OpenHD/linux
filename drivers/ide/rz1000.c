@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 1995-1998  Linus Torvalds & author (see below)
  */
@@ -22,7 +23,7 @@
 
 #define DRV_NAME "rz1000"
 
-static int __devinit rz1000_disable_readahead(struct pci_dev *dev)
+static int rz1000_disable_readahead(struct pci_dev *dev)
 {
 	u16 reg;
 
@@ -38,12 +39,12 @@ static int __devinit rz1000_disable_readahead(struct pci_dev *dev)
 	}
 }
 
-static const struct ide_port_info rz1000_chipset __devinitdata = {
+static const struct ide_port_info rz1000_chipset = {
 	.name		= DRV_NAME,
 	.host_flags	= IDE_HFLAG_NO_DMA,
 };
 
-static int __devinit rz1000_init_one(struct pci_dev *dev, const struct pci_device_id *id)
+static int rz1000_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	struct ide_port_info d = rz1000_chipset;
 	int rc;

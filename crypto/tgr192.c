@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cryptographic API.
  *
@@ -14,19 +15,14 @@
  *
  * Adapted for Linux Kernel Crypto  by Aaron Grothe 
  * ajgrothe@yahoo.com, February 22, 2005
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 #include <crypto/internal/hash.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
-#include <asm/byteorder.h>
 #include <linux/types.h>
+#include <asm/byteorder.h>
+#include <asm/unaligned.h>
 
 #define TGR192_DIGEST_SIZE 24
 #define TGR160_DIGEST_SIZE 20
@@ -468,10 +464,9 @@ static void tgr192_transform(struct tgr192_ctx *tctx, const u8 * data)
 	u64 a, b, c, aa, bb, cc;
 	u64 x[8];
 	int i;
-	const __le64 *ptr = (const __le64 *)data;
 
 	for (i = 0; i < 8; i++)
-		x[i] = le64_to_cpu(ptr[i]);
+		x[i] = get_unaligned_le64(data + i * sizeof(__le64));
 
 	/* save */
 	a = aa = tctx->a;
@@ -560,7 +555,7 @@ static int tgr192_final(struct shash_desc *desc, u8 * out)
 	__le32 *le32p;
 	u32 t, msb, lsb;
 
-	tgr192_update(desc, NULL, 0); /* flush */ ;
+	tgr192_update(desc, NULL, 0); /* flush */
 
 	msb = 0;
 	t = tctx->nblocks;
@@ -588,7 +583,7 @@ static int tgr192_final(struct shash_desc *desc, u8 * out)
 		while (tctx->count < 64) {
 			tctx->hash[tctx->count++] = 0;
 		}
-		tgr192_update(desc, NULL, 0); /* flush */ ;
+		tgr192_update(desc, NULL, 0); /* flush */
 		memset(tctx->hash, 0, 56);    /* fill next block with zeroes */
 	}
 	/* append the 64 bit count */
@@ -612,7 +607,7 @@ static int tgr160_final(struct shash_desc *desc, u8 * out)
 
 	tgr192_final(desc, D);
 	memcpy(out, D, TGR160_DIGEST_SIZE);
-	memset(D, 0, TGR192_DIGEST_SIZE);
+	memzero_explicit(D, TGR192_DIGEST_SIZE);
 
 	return 0;
 }
@@ -623,89 +618,64 @@ static int tgr128_final(struct shash_desc *desc, u8 * out)
 
 	tgr192_final(desc, D);
 	memcpy(out, D, TGR128_DIGEST_SIZE);
-	memset(D, 0, TGR192_DIGEST_SIZE);
+	memzero_explicit(D, TGR192_DIGEST_SIZE);
 
 	return 0;
 }
 
-static struct shash_alg tgr192 = {
+static struct shash_alg tgr_algs[3] = { {
 	.digestsize	=	TGR192_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
 	.final		=	tgr192_final,
 	.descsize	=	sizeof(struct tgr192_ctx),
 	.base		=	{
-		.cra_name	=	"tgr192",
-		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
-		.cra_blocksize	=	TGR192_BLOCK_SIZE,
-		.cra_module	=	THIS_MODULE,
+		.cra_name	 =	"tgr192",
+		.cra_driver_name =	"tgr192-generic",
+		.cra_blocksize	 =	TGR192_BLOCK_SIZE,
+		.cra_module	 =	THIS_MODULE,
 	}
-};
-
-static struct shash_alg tgr160 = {
+}, {
 	.digestsize	=	TGR160_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
 	.final		=	tgr160_final,
 	.descsize	=	sizeof(struct tgr192_ctx),
 	.base		=	{
-		.cra_name	=	"tgr160",
-		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
-		.cra_blocksize	=	TGR192_BLOCK_SIZE,
-		.cra_module	=	THIS_MODULE,
+		.cra_name	 =	"tgr160",
+		.cra_driver_name =	"tgr160-generic",
+		.cra_blocksize	 =	TGR192_BLOCK_SIZE,
+		.cra_module	 =	THIS_MODULE,
 	}
-};
-
-static struct shash_alg tgr128 = {
+}, {
 	.digestsize	=	TGR128_DIGEST_SIZE,
 	.init		=	tgr192_init,
 	.update		=	tgr192_update,
 	.final		=	tgr128_final,
 	.descsize	=	sizeof(struct tgr192_ctx),
 	.base		=	{
-		.cra_name	=	"tgr128",
-		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
-		.cra_blocksize	=	TGR192_BLOCK_SIZE,
-		.cra_module	=	THIS_MODULE,
+		.cra_name	 =	"tgr128",
+		.cra_driver_name =	"tgr128-generic",
+		.cra_blocksize	 =	TGR192_BLOCK_SIZE,
+		.cra_module	 =	THIS_MODULE,
 	}
-};
+} };
 
 static int __init tgr192_mod_init(void)
 {
-	int ret = 0;
-
-	ret = crypto_register_shash(&tgr192);
-
-	if (ret < 0) {
-		goto out;
-	}
-
-	ret = crypto_register_shash(&tgr160);
-	if (ret < 0) {
-		crypto_unregister_shash(&tgr192);
-		goto out;
-	}
-
-	ret = crypto_register_shash(&tgr128);
-	if (ret < 0) {
-		crypto_unregister_shash(&tgr192);
-		crypto_unregister_shash(&tgr160);
-	}
-      out:
-	return ret;
+	return crypto_register_shashes(tgr_algs, ARRAY_SIZE(tgr_algs));
 }
 
 static void __exit tgr192_mod_fini(void)
 {
-	crypto_unregister_shash(&tgr192);
-	crypto_unregister_shash(&tgr160);
-	crypto_unregister_shash(&tgr128);
+	crypto_unregister_shashes(tgr_algs, ARRAY_SIZE(tgr_algs));
 }
 
-MODULE_ALIAS("tgr160");
-MODULE_ALIAS("tgr128");
+MODULE_ALIAS_CRYPTO("tgr192");
+MODULE_ALIAS_CRYPTO("tgr160");
+MODULE_ALIAS_CRYPTO("tgr128");
 
-module_init(tgr192_mod_init);
+subsys_initcall(tgr192_mod_init);
 module_exit(tgr192_mod_fini);
 
 MODULE_LICENSE("GPL");

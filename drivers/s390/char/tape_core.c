@@ -1,5 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- *  drivers/s390/char/tape_core.c
  *    basic function of the tape device driver
  *
  *  S390 and zSeries version
@@ -33,7 +33,7 @@
 
 static void __tape_do_irq (struct ccw_device *, unsigned long, struct irb *);
 static void tape_delayed_next_request(struct work_struct *);
-static void tape_long_busy_timeout(unsigned long data);
+static void tape_long_busy_timeout(struct timer_list *t);
 
 /*
  * One list to contain all tape devices of all disciplines, so
@@ -176,7 +176,7 @@ static struct attribute *tape_attrs[] = {
 	NULL
 };
 
-static struct attribute_group tape_attr_group = {
+static const struct attribute_group tape_attr_group = {
 	.attrs = tape_attrs,
 };
 
@@ -382,8 +382,7 @@ tape_generic_online(struct tape_device *device,
 		return -EINVAL;
 	}
 
-	init_timer(&device->lb_timeout);
-	device->lb_timeout.function = tape_long_busy_timeout;
+	timer_setup(&device->lb_timeout, tape_long_busy_timeout, 0);
 
 	/* Let the discipline have a go at the device. */
 	device->discipline = discipline;
@@ -401,9 +400,6 @@ tape_generic_online(struct tape_device *device,
 	rc = tapechar_setup_device(device);
 	if (rc)
 		goto out_minor;
-	rc = tapeblock_setup_device(device);
-	if (rc)
-		goto out_char;
 
 	tape_state_set(device, TS_UNUSED);
 
@@ -411,8 +407,6 @@ tape_generic_online(struct tape_device *device,
 
 	return 0;
 
-out_char:
-	tapechar_cleanup_device(device);
 out_minor:
 	tape_remove_minor(device);
 out_discipline:
@@ -426,7 +420,6 @@ out:
 static void
 tape_cleanup_device(struct tape_device *device)
 {
-	tapeblock_cleanup_device(device);
 	tapechar_cleanup_device(device);
 	device->discipline->cleanup_device(device);
 	module_put(device->discipline->owner);
@@ -684,6 +677,7 @@ tape_generic_remove(struct ccw_device *cdev)
 	switch (device->tape_state) {
 		case TS_INIT:
 			tape_state_set(device, TS_NOT_OPER);
+			fallthrough;
 		case TS_NOT_OPER:
 			/*
 			 * Nothing to do.
@@ -706,8 +700,8 @@ tape_generic_remove(struct ccw_device *cdev)
 			 */
 			DBF_EVENT(3, "(%08x): Drive in use vanished!\n",
 				device->cdev_id);
-			pr_warning("%s: A tape unit was detached while in "
-				   "use\n", dev_name(&device->cdev->dev));
+			pr_warn("%s: A tape unit was detached while in use\n",
+				dev_name(&device->cdev->dev));
 			tape_state_set(device, TS_NOT_OPER);
 			__tape_discard_requests(device);
 			spin_unlock_irq(get_ccwdev_lock(device->cdev));
@@ -785,10 +779,6 @@ __tape_start_io(struct tape_device *device, struct tape_request *request)
 {
 	int rc;
 
-#ifdef CONFIG_S390_TAPE_BLOCK
-	if (request->op == TO_BLOCK)
-		device->discipline->check_locate(device, request);
-#endif
 	rc = ccw_device_start(
 		device->cdev,
 		request->cpaddr,
@@ -878,18 +868,16 @@ tape_delayed_next_request(struct work_struct *work)
 	spin_unlock_irq(get_ccwdev_lock(device->cdev));
 }
 
-static void tape_long_busy_timeout(unsigned long data)
+static void tape_long_busy_timeout(struct timer_list *t)
 {
+	struct tape_device *device = from_timer(device, t, lb_timeout);
 	struct tape_request *request;
-	struct tape_device *device;
 
-	device = (struct tape_device *) data;
 	spin_lock_irq(get_ccwdev_lock(device->cdev));
 	request = list_entry(device->req_queue.next, struct tape_request, list);
 	BUG_ON(request->status != TAPE_REQUEST_LONG_BUSY);
 	DBF_LH(6, "%08x: Long busy timeout.\n", device->cdev_id);
 	__tape_start_next_request(device);
-	device->lb_timeout.data = 0UL;
 	tape_put_device(device);
 	spin_unlock_irq(get_ccwdev_lock(device->cdev));
 }
@@ -962,6 +950,7 @@ __tape_start_request(struct tape_device *device, struct tape_request *request)
 				break;
 			if (device->tape_state == TS_UNUSED)
 				break;
+			fallthrough;
 		default:
 			if (device->tape_state == TS_BLKUSE)
 				break;
@@ -1129,6 +1118,7 @@ __tape_do_irq (struct ccw_device *cdev, unsigned long intparm, struct irb *irb)
 			case -ETIMEDOUT:
 				DBF_LH(1, "(%08x): Request timed out\n",
 				       device->cdev_id);
+				fallthrough;
 			case -EIO:
 				__tape_end_request(device, request, -EIO);
 				break;
@@ -1168,7 +1158,6 @@ __tape_do_irq (struct ccw_device *cdev, unsigned long intparm, struct irb *irb)
 		if (req->status == TAPE_REQUEST_LONG_BUSY) {
 			DBF_EVENT(3, "(%08x): del timer\n", device->cdev_id);
 			if (del_timer(&device->lb_timeout)) {
-				device->lb_timeout.data = 0UL;
 				tape_put_device(device);
 				__tape_start_next_request(device);
 			}
@@ -1223,8 +1212,6 @@ __tape_do_irq (struct ccw_device *cdev, unsigned long intparm, struct irb *irb)
 		case TAPE_IO_PENDING:
 			break;
 		case TAPE_IO_LONG_BUSY:
-			device->lb_timeout.data =
-				(unsigned long) tape_get_device(device);
 			device->lb_timeout.expires = jiffies +
 				LONG_BUSY_TIMEOUT * HZ;
 			DBF_EVENT(3, "(%08x): add timer\n", device->cdev_id);
@@ -1253,7 +1240,7 @@ __tape_do_irq (struct ccw_device *cdev, unsigned long intparm, struct irb *irb)
 }
 
 /*
- * Tape device open function used by tape_char & tape_block frontends.
+ * Tape device open function used by tape_char frontend.
  */
 int
 tape_open(struct tape_device *device)
@@ -1283,7 +1270,7 @@ tape_open(struct tape_device *device)
 }
 
 /*
- * Tape device release function used by tape_char & tape_block frontends.
+ * Tape device release function used by tape_char frontend.
  */
 int
 tape_release(struct tape_device *device)
@@ -1344,7 +1331,6 @@ tape_init (void)
 	DBF_EVENT(3, "tape init\n");
 	tape_proc_init();
 	tapechar_init ();
-	tapeblock_init ();
 	return 0;
 }
 
@@ -1358,7 +1344,6 @@ tape_exit(void)
 
 	/* Get rid of the frontends */
 	tapechar_exit();
-	tapeblock_exit();
 	tape_proc_cleanup();
 	debug_unregister (TAPE_DBF_AREA);
 }

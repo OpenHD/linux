@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * e800-wm9712.c  --  SoC audio for e800
  *
  * Copyright 2007 (c) Ian Molton <spyro@f2s.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation; version 2 ONLY.
- *
  */
 
 #include <linux/module.h>
@@ -20,9 +16,6 @@
 #include <asm/mach-types.h>
 #include <mach/audio.h>
 #include <mach/eseries-gpio.h>
-
-#include "../codecs/wm9712.h"
-#include "pxa2xx-ac97.h"
 
 static int e800_spk_amp_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *kcontrol, int event)
@@ -71,101 +64,87 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC2", NULL, "Mic (Internal2)"},
 };
 
-static int e800_ac97_init(struct snd_soc_pcm_runtime *rtd)
-{
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
 
-	snd_soc_dapm_new_controls(dapm, e800_dapm_widgets,
-					ARRAY_SIZE(e800_dapm_widgets));
+SND_SOC_DAILINK_DEFS(ac97,
+	DAILINK_COMP_ARRAY(COMP_CPU("pxa2xx-ac97")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("wm9712-codec", "wm9712-hifi")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("pxa-pcm-audio")));
 
-	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
-
-	return 0;
-}
+SND_SOC_DAILINK_DEFS(ac97_aux,
+	DAILINK_COMP_ARRAY(COMP_CPU("pxa2xx-ac97-aux")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("wm9712-codec", "wm9712-aux")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("pxa-pcm-audio")));
 
 static struct snd_soc_dai_link e800_dai[] = {
 	{
 		.name = "AC97",
 		.stream_name = "AC97 HiFi",
-		.cpu_dai_name = "pxa2xx-ac97",
-		.codec_dai_name = "wm9712-hifi",
-		.platform_name = "pxa-pcm-audio",
-		.codec_name = "wm9712-codec",
-		.init = e800_ac97_init,
+		SND_SOC_DAILINK_REG(ac97),
 	},
 	{
 		.name = "AC97 Aux",
 		.stream_name = "AC97 Aux",
-		.cpu_dai_name = "pxa2xx-ac97-aux",
-		.codec_dai_name ="wm9712-aux",
-		.platform_name = "pxa-pcm-audio",
-		.codec_name = "wm9712-codec",
+		SND_SOC_DAILINK_REG(ac97_aux),
 	},
 };
 
 static struct snd_soc_card e800 = {
 	.name = "Toshiba e800",
+	.owner = THIS_MODULE,
 	.dai_link = e800_dai,
 	.num_links = ARRAY_SIZE(e800_dai),
+
+	.dapm_widgets = e800_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(e800_dapm_widgets),
+	.dapm_routes = audio_map,
+	.num_dapm_routes = ARRAY_SIZE(audio_map),
 };
 
-static struct platform_device *e800_snd_device;
+static struct gpio e800_audio_gpios[] = {
+	{ GPIO_E800_SPK_AMP_ON, GPIOF_OUT_INIT_HIGH, "Headphone amp" },
+	{ GPIO_E800_HP_AMP_OFF, GPIOF_OUT_INIT_HIGH, "Speaker amp" },
+};
 
-static int __init e800_init(void)
+static int e800_probe(struct platform_device *pdev)
 {
+	struct snd_soc_card *card = &e800;
 	int ret;
 
-	if (!machine_is_e800())
-		return -ENODEV;
-
-	ret = gpio_request(GPIO_E800_HP_AMP_OFF,  "Headphone amp");
+	ret = gpio_request_array(e800_audio_gpios,
+				 ARRAY_SIZE(e800_audio_gpios));
 	if (ret)
 		return ret;
 
-	ret = gpio_request(GPIO_E800_SPK_AMP_ON, "Speaker amp");
-	if (ret)
-		goto free_hp_amp_gpio;
+	card->dev = &pdev->dev;
 
-	ret = gpio_direction_output(GPIO_E800_HP_AMP_OFF, 1);
-	if (ret)
-		goto free_spk_amp_gpio;
-
-	ret = gpio_direction_output(GPIO_E800_SPK_AMP_ON, 1);
-	if (ret)
-		goto free_spk_amp_gpio;
-
-	e800_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!e800_snd_device)
-		return -ENOMEM;
-
-	platform_set_drvdata(e800_snd_device, &e800);
-	ret = platform_device_add(e800_snd_device);
-
-	if (!ret)
-		return 0;
-
-/* Fail gracefully */
-	platform_device_put(e800_snd_device);
-free_spk_amp_gpio:
-	gpio_free(GPIO_E800_SPK_AMP_ON);
-free_hp_amp_gpio:
-	gpio_free(GPIO_E800_HP_AMP_OFF);
-
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
+	if (ret) {
+		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n",
+			ret);
+		gpio_free_array(e800_audio_gpios, ARRAY_SIZE(e800_audio_gpios));
+	}
 	return ret;
 }
 
-static void __exit e800_exit(void)
+static int e800_remove(struct platform_device *pdev)
 {
-	platform_device_unregister(e800_snd_device);
-	gpio_free(GPIO_E800_SPK_AMP_ON);
-	gpio_free(GPIO_E800_HP_AMP_OFF);
+	gpio_free_array(e800_audio_gpios, ARRAY_SIZE(e800_audio_gpios));
+	return 0;
 }
 
-module_init(e800_init);
-module_exit(e800_exit);
+static struct platform_driver e800_driver = {
+	.driver		= {
+		.name	= "e800-audio",
+		.pm     = &snd_soc_pm_ops,
+	},
+	.probe		= e800_probe,
+	.remove		= e800_remove,
+};
+
+module_platform_driver(e800_driver);
 
 /* Module information */
 MODULE_AUTHOR("Ian Molton <spyro@f2s.com>");
 MODULE_DESCRIPTION("ALSA SoC driver for e800");
 MODULE_LICENSE("GPL v2");
+MODULE_ALIAS("platform:e800-audio");

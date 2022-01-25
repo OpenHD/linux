@@ -1,14 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /// Find duplicate field initializations.  This has a high rate of false
 /// positives due to #ifdefs, which Coccinelle is not aware of in a structure
 /// initialization.
 ///
 // Confidence: Low
-// Copyright: (C) 2010 Nicolas Palix, DIKU.  GPLv2.
-// Copyright: (C) 2010 Julia Lawall, DIKU.  GPLv2.
-// Copyright: (C) 2010 Gilles Muller, INRIA/LiP6.  GPLv2.
+// Copyright: (C) 2010-2012 Nicolas Palix.
+// Copyright: (C) 2010-2012 Julia Lawall, INRIA/LIP6.
+// Copyright: (C) 2010-2012 Gilles Muller, INRIA/LiP6.
 // URL: http://coccinelle.lip6.fr/
 // Comments: requires at least Coccinelle 0.2.4, lex or parse error otherwise
-// Options: -no_includes -include_headers
+// Options: --no-includes --include-headers
 
 virtual org
 virtual report
@@ -49,5 +50,5 @@ pr << r.p;
 @@
 
 if int(ps[0].line) < int(pr[0].line) or (int(ps[0].line) == int(pr[0].line) and int(ps[0].column) < int(pr[0].column)):
-  msg = "%s: first occurrence %s, second occurrence %s" % (fld,ps[0].line,pr[0].line)
+  msg = "%s: first occurrence line %s, second occurrence line %s" % (fld,ps[0].line,pr[0].line)
   coccilib.report.print_report(p0[0],msg)

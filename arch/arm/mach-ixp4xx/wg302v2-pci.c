@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arch/mach-ixp4xx/wg302v2-pci.c
  *
@@ -10,11 +11,6 @@
  *	Copyright (C) 2003 MontaVista Software, Inc.
  *
  * Maintainer: Imre Kaloz <kaloz@openwrt.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -26,6 +22,8 @@
 #include <mach/hardware.h>
 
 #include <asm/mach/pci.h>
+
+#include "irqs.h"
 
 void __init wg302v2_pci_preinit(void)
 {
@@ -46,10 +44,9 @@ static int __init wg302v2_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci wg302v2_pci __initdata = {
 	.nr_controllers = 1,
+	.ops = &ixp4xx_ops,
 	.preinit =        wg302v2_pci_preinit,
-	.swizzle =        pci_std_swizzle,
 	.setup =          ixp4xx_setup,
-	.scan =           ixp4xx_scan_bus,
 	.map_irq =        wg302v2_map_irq,
 };
 

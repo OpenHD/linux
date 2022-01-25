@@ -1,10 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_SPI_MMC_SPI_H
 #define __LINUX_SPI_MMC_SPI_H
 
-#include <linux/device.h>
 #include <linux/spi/spi.h>
 #include <linux/interrupt.h>
 
+struct device;
 struct mmc_host;
 
 /* Put this in platform_data of a device being used to manage an MMC/SD
@@ -21,17 +22,9 @@ struct mmc_spi_platform_data {
 		void *);
 	void (*exit)(struct device *, void *);
 
-	/* sense switch on sd cards */
-	int (*get_ro)(struct device *);
-
-	/*
-	 * If board does not use CD interrupts, driver can optimize polling
-	 * using this function.
-	 */
-	int (*get_cd)(struct device *);
-
 	/* Capabilities to pass into mmc core (e.g. MMC_CAP_NEEDS_POLL). */
 	unsigned long caps;
+	unsigned long caps2;
 
 	/* how long to debounce card detect, in msecs */
 	u16 detect_delay;

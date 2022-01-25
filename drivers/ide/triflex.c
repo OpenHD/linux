@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IDE Chipset driver for the Compaq TriFlex IDE controller.
  * 
@@ -5,19 +6,6 @@
  *
  * Copyright (C) 2002 Hewlett-Packard Development Group, L.P.
  * Author: Torben Mathiasen <torben.mathiasen@hp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  * 
  * Loosely based on the piix & svwks drivers.
  *
@@ -92,7 +80,7 @@ static const struct ide_port_ops triflex_port_ops = {
 	.set_dma_mode		= triflex_set_mode,
 };
 
-static const struct ide_port_info triflex_device __devinitdata = {
+static const struct ide_port_info triflex_device = {
 	.name		= DRV_NAME,
 	.enablebits	= {{0x80, 0x01, 0x01}, {0x80, 0x02, 0x02}},
 	.port_ops	= &triflex_port_ops,
@@ -101,8 +89,7 @@ static const struct ide_port_info triflex_device __devinitdata = {
 	.mwdma_mask	= ATA_MWDMA2,
 };
 
-static int __devinit triflex_init_one(struct pci_dev *dev, 
-		const struct pci_device_id *id)
+static int triflex_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	return ide_pci_init_one(dev, &triflex_device, NULL);
 }

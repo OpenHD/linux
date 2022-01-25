@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2010
  *
- * License terms: GNU General Public License (GPL) version 2
  * Author: Virupax Sadashivpetimath <virupax.sadashivpetimath@stericsson.com>
  *
  * RTC clock driver for the RTC part of the AB8500 Power management chip.
@@ -15,8 +15,10 @@
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 #include <linux/mfd/abx500.h>
-#include <linux/mfd/ab8500.h>
+#include <linux/mfd/abx500/ab8500.h>
 #include <linux/delay.h>
+#include <linux/of.h>
+#include <linux/pm_wakeirq.h>
 
 #define AB8500_RTC_SOFF_STAT_REG	0x00
 #define AB8500_RTC_CC_CONF_REG		0x01
@@ -44,7 +46,6 @@
 #define RTC_STATUS_DATA			0x01
 
 #define COUNTS_PER_SEC			(0xF000 / 60)
-#define AB8500_RTC_EPOCH		2000
 
 static const u8 ab8500_rtc_time_regs[] = {
 	AB8500_RTC_WATCH_TMIN_HI_REG, AB8500_RTC_WATCH_TMIN_MID_REG,
@@ -56,23 +57,6 @@ static const u8 ab8500_rtc_alarm_regs[] = {
 	AB8500_RTC_ALRM_MIN_HI_REG, AB8500_RTC_ALRM_MIN_MID_REG,
 	AB8500_RTC_ALRM_MIN_LOW_REG
 };
-
-/* Calculate the seconds from 1970 to 01-01-2000 00:00:00 */
-static unsigned long get_elapsed_seconds(int year)
-{
-	unsigned long secs;
-	struct rtc_time tm = {
-		.tm_year = year - 1900,
-		.tm_mday = 1,
-	};
-
-	/*
-	 * This function calculates secs from 1970 and not from
-	 * 1900, even if we supply the offset from year 1900.
-	 */
-	rtc_tm_to_time(&tm, &secs);
-	return secs;
-}
 
 static int ab8500_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
@@ -88,22 +72,17 @@ static int ab8500_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	if (retval < 0)
 		return retval;
 
-	/* Early AB8500 chips will not clear the rtc read request bit */
-	if (abx500_get_chip_id(dev) == 0) {
-		msleep(1);
-	} else {
-		/* Wait for some cycles after enabling the rtc read in ab8500 */
-		while (time_before(jiffies, timeout)) {
-			retval = abx500_get_register_interruptible(dev,
-				AB8500_RTC, AB8500_RTC_READ_REQ_REG, &value);
-			if (retval < 0)
-				return retval;
+	/* Wait for some cycles after enabling the rtc read in ab8500 */
+	while (time_before(jiffies, timeout)) {
+		retval = abx500_get_register_interruptible(dev,
+			AB8500_RTC, AB8500_RTC_READ_REQ_REG, &value);
+		if (retval < 0)
+			return retval;
 
-			if (!(value & RTC_READ_REQUEST))
-				break;
+		if (!(value & RTC_READ_REQUEST))
+			break;
 
-			msleep(1);
-		}
+		usleep_range(1000, 5000);
 	}
 
 	/* Read the Watchtime registers */
@@ -121,11 +100,8 @@ static int ab8500_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	secs =	secs / COUNTS_PER_SEC;
 	secs =	secs + (mins * 60);
 
-	/* Add back the initially subtracted number of seconds */
-	secs += get_elapsed_seconds(AB8500_RTC_EPOCH);
-
-	rtc_time_to_tm(secs, tm);
-	return rtc_valid_tm(tm);
+	rtc_time64_to_tm(secs, tm);
+	return 0;
 }
 
 static int ab8500_rtc_set_time(struct device *dev, struct rtc_time *tm)
@@ -134,20 +110,7 @@ static int ab8500_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	unsigned char buf[ARRAY_SIZE(ab8500_rtc_time_regs)];
 	unsigned long no_secs, no_mins, secs = 0;
 
-	if (tm->tm_year < (AB8500_RTC_EPOCH - 1900)) {
-		dev_dbg(dev, "year should be equal to or greater than %d\n",
-				AB8500_RTC_EPOCH);
-		return -EINVAL;
-	}
-
-	/* Get the number of seconds since 1970 */
-	rtc_tm_to_time(tm, &secs);
-
-	/*
-	 * Convert it to the number of seconds since 01-01-2000 00:00:00, since
-	 * we only have a small counter in the RTC.
-	 */
-	secs -= get_elapsed_seconds(AB8500_RTC_EPOCH);
+	secs = rtc_tm_to_time64(tm);
 
 	no_mins = secs / 60;
 
@@ -205,12 +168,9 @@ static int ab8500_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 	mins = (buf[0] << 16) | (buf[1] << 8) | (buf[2]);
 	secs = mins * 60;
 
-	/* Add back the initially subtracted number of seconds */
-	secs += get_elapsed_seconds(AB8500_RTC_EPOCH);
+	rtc_time64_to_tm(secs, &alarm->time);
 
-	rtc_time_to_tm(secs, &alarm->time);
-
-	return rtc_valid_tm(&alarm->time);
+	return 0;
 }
 
 static int ab8500_rtc_irq_enable(struct device *dev, unsigned int enabled)
@@ -224,22 +184,23 @@ static int ab8500_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 {
 	int retval, i;
 	unsigned char buf[ARRAY_SIZE(ab8500_rtc_alarm_regs)];
-	unsigned long mins, secs = 0;
-
-	if (alarm->time.tm_year < (AB8500_RTC_EPOCH - 1900)) {
-		dev_dbg(dev, "year should be equal to or greater than %d\n",
-				AB8500_RTC_EPOCH);
-		return -EINVAL;
-	}
+	unsigned long mins, secs = 0, cursec = 0;
+	struct rtc_time curtm;
 
 	/* Get the number of seconds since 1970 */
-	rtc_tm_to_time(&alarm->time, &secs);
+	secs = rtc_tm_to_time64(&alarm->time);
 
 	/*
-	 * Convert it to the number of seconds since 01-01-2000 00:00:00, since
-	 * we only have a small counter in the RTC.
+	 * Check whether alarm is set less than 1min.
+	 * Since our RTC doesn't support alarm resolution less than 1min,
+	 * return -EINVAL, so UIE EMUL can take it up, incase of UIE_ON
 	 */
-	secs -= get_elapsed_seconds(AB8500_RTC_EPOCH);
+	ab8500_rtc_read_time(dev, &curtm); /* Read current time */
+	cursec = rtc_tm_to_time64(&curtm);
+	if ((secs - cursec) < 59) {
+		dev_dbg(dev, "Alarm less than 1 minute not supported\r\n");
+		return -EINVAL;
+	}
 
 	mins = secs / 60;
 
@@ -257,6 +218,107 @@ static int ab8500_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 
 	return ab8500_rtc_irq_enable(dev, alarm->enabled);
 }
+
+static int ab8500_rtc_set_calibration(struct device *dev, int calibration)
+{
+	int retval;
+	u8  rtccal = 0;
+
+	/*
+	 * Check that the calibration value (which is in units of 0.5
+	 * parts-per-million) is in the AB8500's range for RtcCalibration
+	 * register. -128 (0x80) is not permitted because the AB8500 uses
+	 * a sign-bit rather than two's complement, so 0x80 is just another
+	 * representation of zero.
+	 */
+	if ((calibration < -127) || (calibration > 127)) {
+		dev_err(dev, "RtcCalibration value outside permitted range\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * The AB8500 uses sign (in bit7) and magnitude (in bits0-7)
+	 * so need to convert to this sort of representation before writing
+	 * into RtcCalibration register...
+	 */
+	if (calibration >= 0)
+		rtccal = 0x7F & calibration;
+	else
+		rtccal = ~(calibration - 1) | 0x80;
+
+	retval = abx500_set_register_interruptible(dev, AB8500_RTC,
+			AB8500_RTC_CALIB_REG, rtccal);
+
+	return retval;
+}
+
+static int ab8500_rtc_get_calibration(struct device *dev, int *calibration)
+{
+	int retval;
+	u8  rtccal = 0;
+
+	retval =  abx500_get_register_interruptible(dev, AB8500_RTC,
+			AB8500_RTC_CALIB_REG, &rtccal);
+	if (retval >= 0) {
+		/*
+		 * The AB8500 uses sign (in bit7) and magnitude (in bits0-7)
+		 * so need to convert value from RtcCalibration register into
+		 * a two's complement signed value...
+		 */
+		if (rtccal & 0x80)
+			*calibration = 0 - (rtccal & 0x7F);
+		else
+			*calibration = 0x7F & rtccal;
+	}
+
+	return retval;
+}
+
+static ssize_t ab8500_sysfs_store_rtc_calibration(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	int retval;
+	int calibration = 0;
+
+	if (sscanf(buf, " %i ", &calibration) != 1) {
+		dev_err(dev, "Failed to store RTC calibration attribute\n");
+		return -EINVAL;
+	}
+
+	retval = ab8500_rtc_set_calibration(dev, calibration);
+
+	return retval ? retval : count;
+}
+
+static ssize_t ab8500_sysfs_show_rtc_calibration(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int  retval = 0;
+	int  calibration = 0;
+
+	retval = ab8500_rtc_get_calibration(dev, &calibration);
+	if (retval < 0) {
+		dev_err(dev, "Failed to read RTC calibration attribute\n");
+		sprintf(buf, "0\n");
+		return retval;
+	}
+
+	return sprintf(buf, "%d\n", calibration);
+}
+
+static DEVICE_ATTR(rtc_calibration, S_IRUGO | S_IWUSR,
+		   ab8500_sysfs_show_rtc_calibration,
+		   ab8500_sysfs_store_rtc_calibration);
+
+static struct attribute *ab8500_rtc_attrs[] = {
+	&dev_attr_rtc_calibration.attr,
+	NULL
+};
+
+static const struct attribute_group ab8500_rtc_sysfs_files = {
+	.attrs	= ab8500_rtc_attrs,
+};
 
 static irqreturn_t rtc_alarm_handler(int irq, void *data)
 {
@@ -277,8 +339,15 @@ static const struct rtc_class_ops ab8500_rtc_ops = {
 	.alarm_irq_enable	= ab8500_rtc_irq_enable,
 };
 
-static int __devinit ab8500_rtc_probe(struct platform_device *pdev)
+static const struct platform_device_id ab85xx_rtc_ids[] = {
+	{ "ab8500-rtc", (kernel_ulong_t)&ab8500_rtc_ops, },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(platform, ab85xx_rtc_ids);
+
+static int ab8500_rtc_probe(struct platform_device *pdev)
 {
+	const struct platform_device_id *platid = platform_get_device_id(pdev);
 	int err;
 	struct rtc_device *rtc;
 	u8 rtc_ctrl;
@@ -295,7 +364,7 @@ static int __devinit ab8500_rtc_probe(struct platform_device *pdev)
 		return err;
 
 	/* Wait for reset by the PorRtc */
-	msleep(1);
+	usleep_range(1000, 5000);
 
 	err = abx500_get_register_interruptible(&pdev->dev, AB8500_RTC,
 		AB8500_RTC_STAT_REG, &rtc_ctrl);
@@ -308,34 +377,40 @@ static int __devinit ab8500_rtc_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	rtc = rtc_device_register("ab8500-rtc", &pdev->dev, &ab8500_rtc_ops,
-			THIS_MODULE);
-	if (IS_ERR(rtc)) {
-		dev_err(&pdev->dev, "Registration failed\n");
-		err = PTR_ERR(rtc);
-		return err;
-	}
+	device_init_wakeup(&pdev->dev, true);
 
-	err = request_threaded_irq(irq, NULL, rtc_alarm_handler, 0,
-				   "ab8500-rtc", rtc);
-	if (err < 0) {
-		rtc_device_unregister(rtc);
-		return err;
-	}
+	rtc = devm_rtc_allocate_device(&pdev->dev);
+	if (IS_ERR(rtc))
+		return PTR_ERR(rtc);
 
+	rtc->ops = (struct rtc_class_ops *)platid->driver_data;
+
+	err = devm_request_threaded_irq(&pdev->dev, irq, NULL,
+			rtc_alarm_handler, IRQF_ONESHOT,
+			"ab8500-rtc", rtc);
+	if (err < 0)
+		return err;
+
+	dev_pm_set_wake_irq(&pdev->dev, irq);
 	platform_set_drvdata(pdev, rtc);
 
-	return 0;
+	rtc->uie_unsupported = 1;
+
+	rtc->range_max = (1ULL << 24) * 60 - 1; // 24-bit minutes + 59 secs
+	rtc->start_secs = RTC_TIMESTAMP_BEGIN_2000;
+	rtc->set_start_time = true;
+
+	err = rtc_add_group(rtc, &ab8500_rtc_sysfs_files);
+	if (err)
+		return err;
+
+	return rtc_register_device(rtc);
 }
 
-static int __devexit ab8500_rtc_remove(struct platform_device *pdev)
+static int ab8500_rtc_remove(struct platform_device *pdev)
 {
-	struct rtc_device *rtc = platform_get_drvdata(pdev);
-	int irq = platform_get_irq_byname(pdev, "ALARM");
-
-	free_irq(irq, rtc);
-	rtc_device_unregister(rtc);
-	platform_set_drvdata(pdev, NULL);
+	dev_pm_clear_wake_irq(&pdev->dev);
+	device_init_wakeup(&pdev->dev, false);
 
 	return 0;
 }
@@ -343,24 +418,14 @@ static int __devexit ab8500_rtc_remove(struct platform_device *pdev)
 static struct platform_driver ab8500_rtc_driver = {
 	.driver = {
 		.name = "ab8500-rtc",
-		.owner = THIS_MODULE,
 	},
 	.probe	= ab8500_rtc_probe,
-	.remove = __devexit_p(ab8500_rtc_remove),
+	.remove = ab8500_rtc_remove,
+	.id_table = ab85xx_rtc_ids,
 };
 
-static int __init ab8500_rtc_init(void)
-{
-	return platform_driver_register(&ab8500_rtc_driver);
-}
+module_platform_driver(ab8500_rtc_driver);
 
-static void __exit ab8500_rtc_exit(void)
-{
-	platform_driver_unregister(&ab8500_rtc_driver);
-}
-
-module_init(ab8500_rtc_init);
-module_exit(ab8500_rtc_exit);
 MODULE_AUTHOR("Virupax Sadashivpetimath <virupax.sadashivpetimath@stericsson.com>");
 MODULE_DESCRIPTION("AB8500 RTC Driver");
 MODULE_LICENSE("GPL v2");

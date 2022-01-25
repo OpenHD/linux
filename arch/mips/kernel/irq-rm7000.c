@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2003 Ralf Baechle
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  *
  * Handler for RM7000 extended interrupts.  These are a non-standard
  * feature so we handle them separately from standard interrupts.
@@ -16,7 +12,6 @@
 
 #include <asm/irq_cpu.h>
 #include <asm/mipsregs.h>
-#include <asm/system.h>
 
 static inline void unmask_rm7k_irq(struct irq_data *d)
 {

@@ -178,10 +178,9 @@ ahd_linux_pci_dev_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		ahd_get_pci_bus(pci),
 		ahd_get_pci_slot(pci),
 		ahd_get_pci_function(pci));
-	name = kmalloc(strlen(buf) + 1, GFP_ATOMIC);
+	name = kstrdup(buf, GFP_ATOMIC);
 	if (name == NULL)
 		return (-ENOMEM);
-	strcpy(name, buf);
 	ahd = ahd_alloc(NULL, name);
 	if (ahd == NULL)
 		return (-ENOMEM);
@@ -294,7 +293,7 @@ ahd_linux_pci_reserve_mem_region(struct ahd_softc *ahd,
 		if (!request_mem_region(start, 0x1000, "aic79xx"))
 			error = ENOMEM;
 		if (!error) {
-			*maddr = ioremap_nocache(base_page, base_offset + 512);
+			*maddr = ioremap(base_page, base_offset + 512);
 			if (*maddr == NULL) {
 				error = ENOMEM;
 				release_mem_region(start, 0x1000);

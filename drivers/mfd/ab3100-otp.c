@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/mfd/ab3100_otp.c
  *
  * Copyright (C) 2007-2009 ST-Ericsson AB
- * License terms: GNU General Public License (GPL) version 2
  * Driver to read out OTP from the AB3100 Mixed-signal circuit
  * Author: Linus Walleij <linus.walleij@stericsson.com>
  */
@@ -29,22 +29,22 @@
 
 /**
  * struct ab3100_otp
- * @dev containing device
- * @locked whether the OTP is locked, after locking, no more bits
+ * @dev: containing device
+ * @locked: whether the OTP is locked, after locking, no more bits
  *       can be changed but before locking it is still possible
  *       to change bits from 1->0.
- * @freq clocking frequency for the OTP, this frequency is either
+ * @freq: clocking frequency for the OTP, this frequency is either
  *       32768Hz or 1MHz/30
- * @paf product activation flag, indicates whether this is a real
+ * @paf: product activation flag, indicates whether this is a real
  *       product (paf true) or a lab board etc (paf false)
- * @imeich if this is set it is possible to override the
+ * @imeich: if this is set it is possible to override the
  *       IMEI number found in the tac, fac and svn fields with
  *       (secured) software
- * @cid customer ID
- * @tac type allocation code of the IMEI
- * @fac final assembly code of the IMEI
- * @svn software version number of the IMEI
- * @debugfs a debugfs file used when dumping to file
+ * @cid: customer ID
+ * @tac: type allocation code of the IMEI
+ * @fac: final assembly code of the IMEI
+ * @svn: software version number of the IMEI
+ * @debugfs: a debugfs file used when dumping to file
  */
 struct ab3100_otp {
 	struct device *dev;
@@ -122,17 +122,11 @@ static const struct file_operations ab3100_otp_operations = {
 	.release	= single_release,
 };
 
-static int __init ab3100_otp_init_debugfs(struct device *dev,
-					  struct ab3100_otp *otp)
+static void __init ab3100_otp_init_debugfs(struct device *dev,
+					   struct ab3100_otp *otp)
 {
 	otp->debugfs = debugfs_create_file("ab3100_otp", S_IFREG | S_IRUGO,
-					   NULL, otp,
-					   &ab3100_otp_operations);
-	if (!otp->debugfs) {
-		dev_err(dev, "AB3100 debugfs OTP file registration failed!\n");
-		return -ENOENT;
-	}
-	return 0;
+					   NULL, otp, &ab3100_otp_operations);
 }
 
 static void __exit ab3100_otp_exit_debugfs(struct ab3100_otp *otp)
@@ -141,10 +135,9 @@ static void __exit ab3100_otp_exit_debugfs(struct ab3100_otp *otp)
 }
 #else
 /* Compile this out if debugfs not selected */
-static inline int __init ab3100_otp_init_debugfs(struct device *dev,
-						 struct ab3100_otp *otp)
+static inline void __init ab3100_otp_init_debugfs(struct device *dev,
+						  struct ab3100_otp *otp)
 {
-	return 0;
 }
 
 static inline void __exit ab3100_otp_exit_debugfs(struct ab3100_otp *otp)
@@ -187,11 +180,10 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 	int err = 0;
 	int i;
 
-	otp = kzalloc(sizeof(struct ab3100_otp), GFP_KERNEL);
-	if (!otp) {
-		dev_err(&pdev->dev, "could not allocate AB3100 OTP device\n");
+	otp = devm_kzalloc(&pdev->dev, sizeof(struct ab3100_otp), GFP_KERNEL);
+	if (!otp)
 		return -ENOMEM;
-	}
+
 	otp->dev = &pdev->dev;
 
 	/* Replace platform data coming in with a local struct */
@@ -199,7 +191,7 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 
 	err = ab3100_otp_read(otp);
 	if (err)
-		goto err_otp_read;
+		return err;
 
 	dev_info(&pdev->dev, "AB3100 OTP readout registered\n");
 
@@ -208,22 +200,17 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 		err = device_create_file(&pdev->dev,
 					 &ab3100_otp_attrs[i]);
 		if (err)
-			goto err_create_file;
+			goto err;
 	}
 
 	/* debugfs entries */
-	err = ab3100_otp_init_debugfs(&pdev->dev, otp);
-	if (err)
-		goto err_init_debugfs;
+	ab3100_otp_init_debugfs(&pdev->dev, otp);
 
 	return 0;
 
-err_init_debugfs:
-err_create_file:
+err:
 	while (--i >= 0)
 		device_remove_file(&pdev->dev, &ab3100_otp_attrs[i]);
-err_otp_read:
-	kfree(otp);
 	return err;
 }
 
@@ -236,31 +223,17 @@ static int __exit ab3100_otp_remove(struct platform_device *pdev)
 		device_remove_file(&pdev->dev,
 				   &ab3100_otp_attrs[i]);
 	ab3100_otp_exit_debugfs(otp);
-	kfree(otp);
 	return 0;
 }
 
 static struct platform_driver ab3100_otp_driver = {
 	.driver = {
 		.name = "ab3100-otp",
-		.owner = THIS_MODULE,
 	},
 	.remove	 = __exit_p(ab3100_otp_remove),
 };
 
-static int __init ab3100_otp_init(void)
-{
-	return platform_driver_probe(&ab3100_otp_driver,
-				     ab3100_otp_probe);
-}
-
-static void __exit ab3100_otp_exit(void)
-{
-	platform_driver_unregister(&ab3100_otp_driver);
-}
-
-module_init(ab3100_otp_init);
-module_exit(ab3100_otp_exit);
+module_platform_driver_probe(ab3100_otp_driver, ab3100_otp_probe);
 
 MODULE_AUTHOR("Linus Walleij <linus.walleij@stericsson.com>");
 MODULE_DESCRIPTION("AB3100 OTP Readout Driver");

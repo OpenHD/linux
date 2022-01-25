@@ -18,6 +18,15 @@
 
 #include <linux/types.h>
 
+#define CORDIC_ANGLE_GEN	39797
+#define CORDIC_PRECISION_SHIFT	16
+#define CORDIC_NUM_ITER	(CORDIC_PRECISION_SHIFT + 2)
+
+#define CORDIC_FIXED(X)	((s32)((X) << CORDIC_PRECISION_SHIFT))
+#define CORDIC_FLOAT(X)	(((X) >= 0) \
+		? ((((X) >> (CORDIC_PRECISION_SHIFT - 1)) + 1) >> 1) \
+		: -((((-(X)) >> (CORDIC_PRECISION_SHIFT - 1)) + 1) >> 1))
+
 /**
  * struct cordic_iq - i/q coordinate.
  *
@@ -35,8 +44,8 @@ struct cordic_iq {
  * @theta: angle in degrees for which i/q coordinate is to be calculated.
  * @coord: function output parameter holding the i/q coordinate.
  *
- * The function calculates the i/q coordinate for a given angle using
- * cordic algorithm. The coordinate consists of a real (i) and an
+ * The function calculates the i/q coordinate for a given angle using the
+ * CORDIC algorithm. The coordinate consists of a real (i) and an
  * imaginary (q) part. The real part is essentially the cosine of the
  * angle and the imaginary part is the sine of the angle. The returned
  * values are scaled by 2^16 for precision. The range for theta is

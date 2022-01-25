@@ -24,7 +24,7 @@
  */
 
  /*
-  * See Documentation/filesystems/nfs/Exporting
+  * See Documentation/filesystems/nfs/exporting.rst
   * and examples in fs/exportfs
   *
   * Since cifs is a network file system, an "fsid" must be included for
@@ -49,7 +49,7 @@
 static struct dentry *cifs_get_parent(struct dentry *dentry)
 {
 	/* BB need to add code here eventually to enable export via NFSD */
-	cFYI(1, "get parent for %p", dentry);
+	cifs_dbg(FYI, "get parent for %p\n", dentry);
 	return ERR_PTR(-EACCES);
 }
 

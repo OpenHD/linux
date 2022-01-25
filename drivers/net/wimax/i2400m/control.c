@@ -130,7 +130,7 @@ ssize_t i2400m_tlv_match(const struct i2400m_tlv_hdr *tlv,
 	    && le16_to_cpu(tlv->length) + sizeof(*tlv) != tlv_size) {
 		size_t size = le16_to_cpu(tlv->length) + sizeof(*tlv);
 		printk(KERN_WARNING "W: tlv type 0x%x mismatched because of "
-		       "size (got %zu vs %zu expected)\n",
+		       "size (got %zu vs %zd expected)\n",
 		       tlv_type, size, tlv_size);
 		return size;
 	}
@@ -235,7 +235,7 @@ const struct i2400m_tlv_hdr *i2400m_tlv_find(
 			break;
 		if (match > 0)
 			dev_warn(dev, "TLV type 0x%04x found with size "
-				 "mismatch (%zu vs %zu needed)\n",
+				 "mismatch (%zu vs %zd needed)\n",
 				 tlv_type, match, tlv_size);
 	}
 	return tlv;
@@ -257,7 +257,7 @@ static const struct
 	[I2400M_MS_ACCESSIBILITY_ERROR] = { "accesibility error", -EIO },
 	[I2400M_MS_BUSY] = { "busy", -EBUSY },
 	[I2400M_MS_CORRUPTED_TLV] = { "corrupted TLV", -EILSEQ },
-	[I2400M_MS_UNINITIALIZED] = { "not unitialized", -EILSEQ },
+	[I2400M_MS_UNINITIALIZED] = { "uninitialized", -EILSEQ },
 	[I2400M_MS_UNKNOWN_ERROR] = { "unknown error", -EIO },
 	[I2400M_MS_PRODUCTION_ERROR] = { "production error", -EIO },
 	[I2400M_MS_NO_RF] = { "no RF", -EIO },
@@ -352,6 +352,7 @@ void i2400m_report_tlv_system_state(struct i2400m *i2400m,
 
 	case I2400M_SS_IDLE:
 		d_printf(1, dev, "entering BS-negotiated idle mode\n");
+		fallthrough;
 	case I2400M_SS_DISCONNECTING:
 	case I2400M_SS_DATA_PATH_CONNECTED:
 		wimax_state_change(wimax_dev, WIMAX_ST_CONNECTED);
@@ -566,13 +567,12 @@ static void i2400m_msg_ack_hook(struct i2400m *i2400m,
 {
 	int result;
 	struct device *dev = i2400m_dev(i2400m);
-	unsigned ack_type, ack_status;
+	unsigned int ack_type;
 	char strerr[32];
 
 	/* Chew on the message, we might need some information from
 	 * here */
 	ack_type = le16_to_cpu(l3l4_hdr->type);
-	ack_status = le16_to_cpu(l3l4_hdr->status);
 	switch (ack_type) {
 	case I2400M_MT_CMD_ENTER_POWERSAVE:
 		/* This is just left here for the sake of example, as
@@ -655,8 +655,6 @@ void i2400m_msg_to_dev_cancel_wait(struct i2400m *i2400m, int code)
  * i2400m_msg_to_dev - Send a control message to the device and get a response
  *
  * @i2400m: device descriptor
- *
- * @msg_skb: an skb  *
  *
  * @buf: pointer to the buffer containing the message to be sent; it
  *           has to start with a &struct i2400M_l3l4_hdr and then
@@ -1061,7 +1059,7 @@ int i2400m_firmware_check(struct i2400m *i2400m)
 		goto error_bad_major;
 	}
 	result = 0;
-	if (minor < I2400M_HDIv_MINOR_2 && minor > I2400M_HDIv_MINOR)
+	if (minor > I2400M_HDIv_MINOR_2 || minor < I2400M_HDIv_MINOR)
 		dev_warn(dev, "untested minor fw version %u.%u.%u\n",
 			 major, minor, branch);
 	/* Yes, we ignore the branch -- we don't have to track it */

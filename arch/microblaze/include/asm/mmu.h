@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2008-2009 Michal Simek <monstr@monstr.eu>
  * Copyright (C) 2008-2009 PetaLogix
  * Copyright (C) 2006 Atmark Techno, Inc.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License. See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 
 #ifndef _ASM_MICROBLAZE_MMU_H
@@ -56,6 +53,12 @@ typedef struct _SEGREG {
 
 extern void _tlbie(unsigned long va);	/* invalidate a TLB entry */
 extern void _tlbia(void);		/* invalidate all TLB entries */
+
+/*
+ * tlb_skip size stores actual number skipped TLBs from TLB0 - every directy TLB
+ * mapping has to increase tlb_skip size.
+ */
+extern u32 tlb_skip;
 #   endif /* __ASSEMBLY__ */
 
 /*
@@ -68,6 +71,12 @@ extern void _tlbia(void);		/* invalidate all TLB entries */
  */
 
 #  define MICROBLAZE_TLB_SIZE 64
+
+/* For cases when you want to skip some TLB entries */
+#  define MICROBLAZE_TLB_SKIP 0
+
+/* Use the last TLB for temporary access to LMB */
+#  define MICROBLAZE_LMB_TLB_ID 63
 
 /*
  * TLB entries are defined by a "high" tag portion and a "low" data

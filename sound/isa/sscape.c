@@ -1,28 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Low-level ALSA driver for the ENSONIQ SoundScape
  *   Copyright (c) by Chris Rankin
  *
  *   This driver was written in part using information obtained from
  *   the OSS/Free SoundScape driver, written by Hannu Savolainen.
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
 #include <linux/err.h>
+#include <linux/io.h>
 #include <linux/isa.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
@@ -62,22 +49,22 @@ MODULE_PARM_DESC(index, "Index number for SoundScape soundcard");
 module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "Description for SoundScape card");
 
-module_param_array(port, long, NULL, 0444);
+module_param_hw_array(port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for SoundScape driver.");
 
-module_param_array(wss_port, long, NULL, 0444);
+module_param_hw_array(wss_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(wss_port, "WSS Port # for SoundScape driver.");
 
-module_param_array(irq, int, NULL, 0444);
+module_param_hw_array(irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for SoundScape driver.");
 
-module_param_array(mpu_irq, int, NULL, 0444);
+module_param_hw_array(mpu_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(mpu_irq, "MPU401 IRQ # for SoundScape driver.");
 
-module_param_array(dma, int, NULL, 0444);
+module_param_hw_array(dma, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma, "DMA # for SoundScape driver.");
 
-module_param_array(dma2, int, NULL, 0444);
+module_param_hw_array(dma2, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA2 # for SoundScape driver.");
 
 module_param_array(joystick, bool, NULL, 0444);
@@ -87,7 +74,7 @@ MODULE_PARM_DESC(joystick, "Enable gameport.");
 static int isa_registered;
 static int pnp_registered;
 
-static struct pnp_card_device_id sscape_pnpids[] = {
+static const struct pnp_card_device_id sscape_pnpids[] = {
 	{ .id = "ENS3081", .devs = { { "ENS0000" } } }, /* Soundscape PnP */
 	{ .id = "ENS4081", .devs = { { "ENS1011" } } },	/* VIVO90 */
 	{ .id = "" }	/* end */
@@ -166,12 +153,13 @@ static inline struct soundscape *get_card_soundscape(struct snd_card *c)
  * I think this means that the memory has to map to
  * contiguous pages of physical memory.
  */
-static struct snd_dma_buffer *get_dmabuf(struct snd_dma_buffer *buf,
+static struct snd_dma_buffer *get_dmabuf(struct soundscape *s,
+					 struct snd_dma_buffer *buf,
 					 unsigned long size)
 {
 	if (buf) {
 		if (snd_dma_alloc_pages_fallback(SNDRV_DMA_TYPE_DEV,
-						 snd_dma_isa_data(),
+						 s->chip->card->dev,
 						 size, buf) < 0) {
 			snd_printk(KERN_ERR "sscape: Failed to allocate "
 					    "%lu bytes for DMA\n",
@@ -320,7 +308,7 @@ static inline int verify_mpu401(const struct snd_mpu401 *mpu)
 }
 
 /*
- * This is apparently the standard way to initailise an MPU-401
+ * This is apparently the standard way to initialise an MPU-401
  */
 static inline void initialise_mpu401(const struct snd_mpu401 *mpu)
 {
@@ -351,7 +339,7 @@ static void soundscape_free(struct snd_card *c)
 }
 
 /*
- * Tell the SoundScape to begin a DMA tranfer using the given channel.
+ * Tell the SoundScape to begin a DMA transfer using the given channel.
  * All locking issues are left to the caller.
  */
 static void sscape_start_dma_unsafe(unsigned io_base, enum GA_REG reg)
@@ -442,7 +430,7 @@ static int upload_dma_data(struct soundscape *s, const unsigned char *data,
 	int ret;
 	unsigned char val;
 
-	if (!get_dmabuf(&dma, PAGE_ALIGN(32 * 1024)))
+	if (!get_dmabuf(s, &dma, PAGE_ALIGN(32 * 1024)))
 		return -ENOMEM;
 
 	spin_lock_irqsave(&s->lock, flags);
@@ -590,7 +578,7 @@ static int sscape_upload_microcode(struct snd_card *card, int version)
 	}
 	err = upload_dma_data(sscape, init_fw->data, init_fw->size);
 	if (err == 0)
-		snd_printk(KERN_INFO "sscape: MIDI firmware loaded %d KBs\n",
+		snd_printk(KERN_INFO "sscape: MIDI firmware loaded %zu KBs\n",
 				init_fw->size >> 10);
 
 	release_firmware(init_fw);
@@ -670,7 +658,7 @@ __skip_change:
 	return change;
 }
 
-static struct snd_kcontrol_new midi_mixer_ctl = {
+static const struct snd_kcontrol_new midi_mixer_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "MIDI",
 	.info = sscape_midi_info,
@@ -683,7 +671,7 @@ static struct snd_kcontrol_new midi_mixer_ctl = {
  * These IRQs are encoded as bit patterns so that they can be
  * written to the control registers.
  */
-static unsigned __devinit get_irq_config(int sscape_type, int irq)
+static unsigned get_irq_config(int sscape_type, int irq)
 {
 	static const int valid_irq[] = { 9, 5, 7, 10 };
 	static const int old_irq[] = { 9, 7, 5, 15 };
@@ -706,7 +694,7 @@ static unsigned __devinit get_irq_config(int sscape_type, int irq)
  * Perform certain arcane port-checks to see whether there
  * is a SoundScape board lurking behind the given ports.
  */
-static int __devinit detect_sscape(struct soundscape *s, long wss_io)
+static int detect_sscape(struct soundscape *s, long wss_io)
 {
 	unsigned long flags;
 	unsigned d;
@@ -815,10 +803,10 @@ static int mpu401_open(struct snd_mpu401 *mpu)
 }
 
 /*
- * Initialse an MPU-401 subdevice for MIDI support on the SoundScape.
+ * Initialise an MPU-401 subdevice for MIDI support on the SoundScape.
  */
-static int __devinit create_mpu401(struct snd_card *card, int devnum,
-				   unsigned long port, int irq)
+static int create_mpu401(struct snd_card *card, int devnum,
+			 unsigned long port, int irq)
 {
 	struct soundscape *sscape = get_card_soundscape(card);
 	struct snd_rawmidi *rawmidi;
@@ -845,8 +833,8 @@ static int __devinit create_mpu401(struct snd_card *card, int devnum,
  * try to support at least some of the extra bits by overriding
  * some of the CS4231 callback.
  */
-static int __devinit create_ad1845(struct snd_card *card, unsigned port,
-				   int irq, int dma1, int dma2)
+static int create_ad1845(struct snd_card *card, unsigned port,
+			 int irq, int dma1, int dma2)
 {
 	register struct soundscape *sscape = get_card_soundscape(card);
 	struct snd_wss *chip;
@@ -877,7 +865,6 @@ static int __devinit create_ad1845(struct snd_card *card, unsigned port,
 			     codec_type, WSS_HWSHARE_DMA1, &chip);
 	if (!err) {
 		unsigned long flags;
-		struct snd_pcm *pcm;
 
 		if (sscape->type != SSCAPE_VIVO) {
 			/*
@@ -893,7 +880,7 @@ static int __devinit create_ad1845(struct snd_card *card, unsigned port,
 
 		}
 
-		err = snd_wss_pcm(chip, 0, &pcm);
+		err = snd_wss_pcm(chip, 0);
 		if (err < 0) {
 			snd_printk(KERN_ERR "sscape: No PCM device "
 					    "for AD1845 chip\n");
@@ -907,7 +894,7 @@ static int __devinit create_ad1845(struct snd_card *card, unsigned port,
 			goto _error;
 		}
 		if (chip->hardware != WSS_HW_AD1848) {
-			err = snd_wss_timer(chip, 0, NULL);
+			err = snd_wss_timer(chip, 0);
 			if (err < 0) {
 				snd_printk(KERN_ERR "sscape: No timer device "
 						    "for AD1845 chip\n");
@@ -937,7 +924,7 @@ _error:
  * Create an ALSA soundcard entry for the SoundScape, using
  * the given list of port, IRQ and DMA resources.
  */
-static int __devinit create_sscape(int dev, struct snd_card *card)
+static int create_sscape(int dev, struct snd_card *card)
 {
 	struct soundscape *sscape = get_card_soundscape(card);
 	unsigned dma_cfg;
@@ -1019,13 +1006,15 @@ static int __devinit create_sscape(int dev, struct snd_card *card)
 	irq_cfg = get_irq_config(sscape->type, irq[dev]);
 	if (irq_cfg == INVALID_IRQ) {
 		snd_printk(KERN_ERR "sscape: Invalid IRQ %d\n", irq[dev]);
-		return -ENXIO;
+		err = -ENXIO;
+		goto _release_dma;
 	}
 
 	mpu_irq_cfg = get_irq_config(sscape->type, mpu_irq[dev]);
 	if (mpu_irq_cfg == INVALID_IRQ) {
 		snd_printk(KERN_ERR "sscape: Invalid IRQ %d\n", mpu_irq[dev]);
-		return -ENXIO;
+		err = -ENXIO;
+		goto _release_dma;
 	}
 
 	/*
@@ -1141,7 +1130,7 @@ _release_region:
 }
 
 
-static int __devinit snd_sscape_match(struct device *pdev, unsigned int i)
+static int snd_sscape_match(struct device *pdev, unsigned int i)
 {
 	/*
 	 * Make sure we were given ALL of the other parameters.
@@ -1161,14 +1150,14 @@ static int __devinit snd_sscape_match(struct device *pdev, unsigned int i)
 	return 1;
 }
 
-static int __devinit snd_sscape_probe(struct device *pdev, unsigned int dev)
+static int snd_sscape_probe(struct device *pdev, unsigned int dev)
 {
 	struct snd_card *card;
 	struct soundscape *sscape;
 	int ret;
 
-	ret = snd_card_create(index[dev], id[dev], THIS_MODULE,
-			      sizeof(struct soundscape), &card);
+	ret = snd_card_new(pdev, index[dev], id[dev], THIS_MODULE,
+			   sizeof(struct soundscape), &card);
 	if (ret < 0)
 		return ret;
 
@@ -1176,7 +1165,6 @@ static int __devinit snd_sscape_probe(struct device *pdev, unsigned int dev)
 	sscape->type = SSCAPE;
 
 	dma[dev] &= 0x03;
-	snd_card_set_dev(card, pdev);
 
 	ret = create_sscape(dev, card);
 	if (ret < 0)
@@ -1195,10 +1183,9 @@ _release_card:
 	return ret;
 }
 
-static int __devexit snd_sscape_remove(struct device *devptr, unsigned int dev)
+static int snd_sscape_remove(struct device *devptr, unsigned int dev)
 {
 	snd_card_free(dev_get_drvdata(devptr));
-	dev_set_drvdata(devptr, NULL);
 	return 0;
 }
 
@@ -1207,7 +1194,7 @@ static int __devexit snd_sscape_remove(struct device *devptr, unsigned int dev)
 static struct isa_driver snd_sscape_driver = {
 	.match		= snd_sscape_match,
 	.probe		= snd_sscape_probe,
-	.remove		= __devexit_p(snd_sscape_remove),
+	.remove		= snd_sscape_remove,
 	/* FIXME: suspend/resume */
 	.driver		= {
 		.name	= DEV_NAME
@@ -1215,7 +1202,7 @@ static struct isa_driver snd_sscape_driver = {
 };
 
 #ifdef CONFIG_PNP
-static inline int __devinit get_next_autoindex(int i)
+static inline int get_next_autoindex(int i)
 {
 	while (i < SNDRV_CARDS && port[i] != SNDRV_AUTO_PORT)
 		++i;
@@ -1223,8 +1210,8 @@ static inline int __devinit get_next_autoindex(int i)
 }
 
 
-static int __devinit sscape_pnp_detect(struct pnp_card_link *pcard,
-				       const struct pnp_card_device_id *pid)
+static int sscape_pnp_detect(struct pnp_card_link *pcard,
+			     const struct pnp_card_device_id *pid)
 {
 	static int idx = 0;
 	struct pnp_dev *dev;
@@ -1258,8 +1245,9 @@ static int __devinit sscape_pnp_detect(struct pnp_card_link *pcard,
 	 * Create a new ALSA sound card entry, in anticipation
 	 * of detecting our hardware ...
 	 */
-	ret = snd_card_create(index[idx], id[idx], THIS_MODULE,
-			      sizeof(struct soundscape), &card);
+	ret = snd_card_new(&pcard->card->dev,
+			   index[idx], id[idx], THIS_MODULE,
+			   sizeof(struct soundscape), &card);
 	if (ret < 0)
 		return ret;
 
@@ -1287,7 +1275,6 @@ static int __devinit sscape_pnp_detect(struct pnp_card_link *pcard,
 		wss_port[idx] = pnp_port_start(dev, 1);
 		dma2[idx] = pnp_dma(dev, 1);
 	}
-	snd_card_set_dev(card, &pcard->card->dev);
 
 	ret = create_sscape(idx, card);
 	if (ret < 0)
@@ -1308,7 +1295,7 @@ _release_card:
 	return ret;
 }
 
-static void __devexit sscape_pnp_remove(struct pnp_card_link * pcard)
+static void sscape_pnp_remove(struct pnp_card_link *pcard)
 {
 	snd_card_free(pnp_get_card_drvdata(pcard));
 	pnp_set_card_drvdata(pcard, NULL);
@@ -1319,7 +1306,7 @@ static struct pnp_card_driver sscape_pnpc_driver = {
 	.name = "sscape",
 	.id_table = sscape_pnpids,
 	.probe = sscape_pnp_detect,
-	.remove = __devexit_p(sscape_pnp_remove),
+	.remove = sscape_pnp_remove,
 };
 
 #endif /* CONFIG_PNP */

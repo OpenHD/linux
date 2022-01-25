@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Definitions for the new Marvell Yukon 2 driver.
  */
@@ -23,6 +24,7 @@ enum {
 	PSM_CONFIG_REG3  = 0x164,
 	PSM_CONFIG_REG4  = 0x168,
 
+	PCI_LDO_CTRL    = 0xbc,
 };
 
 /* Yukon-2 */
@@ -249,12 +251,6 @@ enum {
 	PSM_CONFIG_REG4_RST_PHY_LINK_DETECT = 1<<0, /* Reset GPHY Link Detect */
 };
 
-
-#define PCI_STATUS_ERROR_BITS (PCI_STATUS_DETECTED_PARITY | \
-			       PCI_STATUS_SIG_SYSTEM_ERROR | \
-			       PCI_STATUS_REC_MASTER_ABORT | \
-			       PCI_STATUS_REC_TARGET_ABORT | \
-			       PCI_STATUS_PARITY)
 
 enum csr_regs {
 	B0_RAP		= 0x0000,
@@ -586,6 +582,10 @@ enum yukon_supr_rev {
 	CHIP_REV_YU_SU_B1    = 3,
 };
 
+enum yukon_prm_rev {
+	CHIP_REV_YU_PRM_Z1   = 1,
+	CHIP_REV_YU_PRM_A0   = 2,
+};
 
 /*	B2_Y2_CLK_GATE	 8 bit	Clock Gating (Yukon-2 only) */
 enum {
@@ -2069,7 +2069,7 @@ enum {
 	GM_IS_RX_FF_OR	= 1<<1,	/* Receive FIFO Overrun */
 	GM_IS_RX_COMPL	= 1<<0,	/* Frame Reception Complete */
 
-#define GMAC_DEF_MSK     GM_IS_TX_FF_UR
+#define GMAC_DEF_MSK     (GM_IS_TX_FF_UR | GM_IS_RX_FF_OR)
 };
 
 /*	GMAC_LINK_CTRL	16 bit	GMAC Link Control Reg (YUKON only) */
@@ -2241,8 +2241,8 @@ struct sky2_port {
 	u16		     rx_pending;
 	u16		     rx_data_size;
 	u16		     rx_nfrags;
-	u16		     rx_tag;
 
+	unsigned long	     last_rx;
 	struct {
 		unsigned long last;
 		u32	mac_rp;
@@ -2303,7 +2303,7 @@ struct sky2_hw {
 	struct work_struct   restart_work;
 	wait_queue_head_t    msi_wait;
 
-	char		     irq_name[0];
+	char		     irq_name[];
 };
 
 static inline int sky2_is_copper(const struct sky2_hw *hw)

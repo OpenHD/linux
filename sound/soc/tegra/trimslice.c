@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * trimslice.c - TrimSlice machine ASoC driver
  *
@@ -7,26 +8,10 @@
  * Based on code copyright/by:
  * Author: Stephen Warren <swarren@nvidia.com>
  * Copyright (C) 2010-2011 - NVIDIA, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
-#include <asm/mach-types.h>
-
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -38,9 +23,6 @@
 
 #include "../codecs/tlv320aic23.h"
 
-#include "tegra_das.h"
-#include "tegra_i2s.h"
-#include "tegra_pcm.h"
 #include "tegra_asoc_utils.h"
 
 #define DRV_NAME "tegra-snd-trimslice"
@@ -52,11 +34,9 @@ struct tegra_trimslice {
 static int trimslice_asoc_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_card *card = codec->card;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_card *card = rtd->card;
 	struct tegra_trimslice *trimslice = snd_soc_card_get_drvdata(card);
 	int srate, mclk;
 	int err;
@@ -70,24 +50,6 @@ static int trimslice_asoc_hw_params(struct snd_pcm_substream *substream,
 		return err;
 	}
 
-	err = snd_soc_dai_set_fmt(codec_dai,
-					SND_SOC_DAIFMT_I2S |
-					SND_SOC_DAIFMT_NB_NF |
-					SND_SOC_DAIFMT_CBS_CFS);
-	if (err < 0) {
-		dev_err(card->dev, "codec_dai fmt not set\n");
-		return err;
-	}
-
-	err = snd_soc_dai_set_fmt(cpu_dai,
-					SND_SOC_DAIFMT_I2S |
-					SND_SOC_DAIFMT_NB_NF |
-					SND_SOC_DAIFMT_CBS_CFS);
-	if (err < 0) {
-		dev_err(card->dev, "cpu_dai fmt not set\n");
-		return err;
-	}
-
 	err = snd_soc_dai_set_sysclk(codec_dai, 0, mclk,
 					SND_SOC_CLOCK_IN);
 	if (err < 0) {
@@ -98,7 +60,7 @@ static int trimslice_asoc_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops trimslice_asoc_ops = {
+static const struct snd_soc_ops trimslice_asoc_ops = {
 	.hw_params = trimslice_asoc_hw_params,
 };
 
@@ -115,31 +77,25 @@ static const struct snd_soc_dapm_route trimslice_audio_map[] = {
 	{"RLINEIN", NULL, "Line In"},
 };
 
-static int trimslice_asoc_init(struct snd_soc_pcm_runtime *rtd)
-{
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
-
-	snd_soc_dapm_nc_pin(dapm, "LHPOUT");
-	snd_soc_dapm_nc_pin(dapm, "RHPOUT");
-	snd_soc_dapm_nc_pin(dapm, "MICIN");
-
-	return 0;
-}
+SND_SOC_DAILINK_DEFS(single_dsp,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "tlv320aic23-hifi")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
 
 static struct snd_soc_dai_link trimslice_tlv320aic23_dai = {
 	.name = "TLV320AIC23",
 	.stream_name = "AIC23",
-	.codec_name = "tlv320aic23-codec.2-001a",
-	.platform_name = "tegra-pcm-audio",
-	.cpu_dai_name = "tegra-i2s.0",
-	.codec_dai_name = "tlv320aic23-hifi",
-	.init = trimslice_asoc_init,
 	.ops = &trimslice_asoc_ops,
+	.dai_fmt = SND_SOC_DAIFMT_I2S |
+		   SND_SOC_DAIFMT_NB_NF |
+		   SND_SOC_DAIFMT_CBS_CFS,
+	SND_SOC_DAILINK_REG(single_dsp),
 };
 
 static struct snd_soc_card snd_soc_trimslice = {
 	.name = "tegra-trimslice",
+	.driver_name = "tegra",
+	.owner = THIS_MODULE,
 	.dai_link = &trimslice_tlv320aic23_dai,
 	.num_links = 1,
 
@@ -147,78 +103,71 @@ static struct snd_soc_card snd_soc_trimslice = {
 	.num_dapm_widgets = ARRAY_SIZE(trimslice_dapm_widgets),
 	.dapm_routes = trimslice_audio_map,
 	.num_dapm_routes = ARRAY_SIZE(trimslice_audio_map),
+	.fully_routed = true,
 };
 
-static __devinit int tegra_snd_trimslice_probe(struct platform_device *pdev)
+static int tegra_snd_trimslice_probe(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
 	struct snd_soc_card *card = &snd_soc_trimslice;
 	struct tegra_trimslice *trimslice;
 	int ret;
 
-	trimslice = kzalloc(sizeof(struct tegra_trimslice), GFP_KERNEL);
-	if (!trimslice) {
-		dev_err(&pdev->dev, "Can't allocate tegra_trimslice\n");
+	trimslice = devm_kzalloc(&pdev->dev, sizeof(struct tegra_trimslice),
+				 GFP_KERNEL);
+	if (!trimslice)
 		return -ENOMEM;
+
+	card->dev = &pdev->dev;
+	snd_soc_card_set_drvdata(card, trimslice);
+
+	trimslice_tlv320aic23_dai.codecs->of_node = of_parse_phandle(np,
+			"nvidia,audio-codec", 0);
+	if (!trimslice_tlv320aic23_dai.codecs->of_node) {
+		dev_err(&pdev->dev,
+			"Property 'nvidia,audio-codec' missing or invalid\n");
+		return -EINVAL;
 	}
+
+	trimslice_tlv320aic23_dai.cpus->of_node = of_parse_phandle(np,
+			"nvidia,i2s-controller", 0);
+	if (!trimslice_tlv320aic23_dai.cpus->of_node) {
+		dev_err(&pdev->dev,
+			"Property 'nvidia,i2s-controller' missing or invalid\n");
+		return -EINVAL;
+	}
+
+	trimslice_tlv320aic23_dai.platforms->of_node =
+			trimslice_tlv320aic23_dai.cpus->of_node;
 
 	ret = tegra_asoc_utils_init(&trimslice->util_data, &pdev->dev);
 	if (ret)
-		goto err_free_trimslice;
+		return ret;
 
-	card->dev = &pdev->dev;
-	platform_set_drvdata(pdev, card);
-	snd_soc_card_set_drvdata(card, trimslice);
-
-	ret = snd_soc_register_card(card);
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
 			ret);
-		goto err_fini_utils;
+		return ret;
 	}
 
 	return 0;
-
-err_fini_utils:
-	tegra_asoc_utils_fini(&trimslice->util_data);
-err_free_trimslice:
-	kfree(trimslice);
-	return ret;
 }
 
-static int __devexit tegra_snd_trimslice_remove(struct platform_device *pdev)
-{
-	struct snd_soc_card *card = platform_get_drvdata(pdev);
-	struct tegra_trimslice *trimslice = snd_soc_card_get_drvdata(card);
-
-	snd_soc_unregister_card(card);
-
-	tegra_asoc_utils_fini(&trimslice->util_data);
-
-	kfree(trimslice);
-
-	return 0;
-}
+static const struct of_device_id trimslice_of_match[] = {
+	{ .compatible = "nvidia,tegra-audio-trimslice", },
+	{},
+};
+MODULE_DEVICE_TABLE(of, trimslice_of_match);
 
 static struct platform_driver tegra_snd_trimslice_driver = {
 	.driver = {
 		.name = DRV_NAME,
-		.owner = THIS_MODULE,
+		.of_match_table = trimslice_of_match,
 	},
 	.probe = tegra_snd_trimslice_probe,
-	.remove = __devexit_p(tegra_snd_trimslice_remove),
 };
-
-static int __init snd_tegra_trimslice_init(void)
-{
-	return platform_driver_register(&tegra_snd_trimslice_driver);
-}
-module_init(snd_tegra_trimslice_init);
-
-static void __exit snd_tegra_trimslice_exit(void)
-{
-	platform_driver_unregister(&tegra_snd_trimslice_driver);
-}
-module_exit(snd_tegra_trimslice_exit);
+module_platform_driver(tegra_snd_trimslice_driver);
 
 MODULE_AUTHOR("Mike Rapoport <mike@compulab.co.il>");
 MODULE_DESCRIPTION("Trimslice machine ASoC driver");

@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux driver for NAND Flash Translation Layer
  *
  * Copyright © 1999 Machine Vision Holdings, Inc.
  * Copyright © 1999-2010 David Woodhouse <dwmw2@infradead.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #define PRERELEASE
@@ -25,7 +12,7 @@
 #include <linux/module.h>
 #include <asm/errno.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -34,7 +21,7 @@
 
 #include <linux/kmod.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/mtd/nftl.h>
 #include <linux/mtd/blktrans.h>
 
@@ -50,18 +37,11 @@ static void nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	struct NFTLrecord *nftl;
 	unsigned long temp;
 
-	if (mtd->type != MTD_NANDFLASH || mtd->size > UINT_MAX)
+	if (!mtd_type_is_nand(mtd) || mtd->size > UINT_MAX)
 		return;
 	/* OK, this is moderately ugly.  But probably safe.  Alternatives? */
 	if (memcmp(mtd->name, "DiskOnChip", 10))
 		return;
-
-	if (!mtd->block_isbad) {
-		printk(KERN_ERR
-"NFTL no longer supports the old DiskOnChip drivers loaded via docprobe.\n"
-"Please use the new diskonchip driver under the NAND subsystem.\n");
-		return;
-	}
 
 	pr_debug("NFTL: add_mtd for %s\n", mtd->name);
 
@@ -153,7 +133,7 @@ int nftl_read_oob(struct mtd_info *mtd, loff_t offs, size_t len,
 	ops.oobbuf = buf;
 	ops.datbuf = NULL;
 
-	res = mtd->read_oob(mtd, offs & ~mask, &ops);
+	res = mtd_read_oob(mtd, offs & ~mask, &ops);
 	*retlen = ops.oobretlen;
 	return res;
 }
@@ -174,7 +154,7 @@ int nftl_write_oob(struct mtd_info *mtd, loff_t offs, size_t len,
 	ops.oobbuf = buf;
 	ops.datbuf = NULL;
 
-	res = mtd->write_oob(mtd, offs & ~mask, &ops);
+	res = mtd_write_oob(mtd, offs & ~mask, &ops);
 	*retlen = ops.oobretlen;
 	return res;
 }
@@ -198,7 +178,7 @@ static int nftl_write(struct mtd_info *mtd, loff_t offs, size_t len,
 	ops.datbuf = buf;
 	ops.len = len;
 
-	res = mtd->write_oob(mtd, offs & ~mask, &ops);
+	res = mtd_write_oob(mtd, offs & ~mask, &ops);
 	*retlen = ops.retlen;
 	return res;
 }
@@ -423,12 +403,17 @@ static u16 NFTL_foldchain (struct NFTLrecord *nftl, unsigned thisVUC, unsigned p
 		if (BlockMap[block] == BLOCK_NIL)
 			continue;
 
-		ret = mtd->read(mtd, (nftl->EraseSize * BlockMap[block]) + (block * 512),
-				512, &retlen, movebuf);
+		ret = mtd_read(mtd,
+			       (nftl->EraseSize * BlockMap[block]) + (block * 512),
+			       512,
+			       &retlen,
+			       movebuf);
 		if (ret < 0 && !mtd_is_bitflip(ret)) {
-			ret = mtd->read(mtd, (nftl->EraseSize * BlockMap[block])
-					+ (block * 512), 512, &retlen,
-					movebuf);
+			ret = mtd_read(mtd,
+				       (nftl->EraseSize * BlockMap[block]) + (block * 512),
+				       512,
+				       &retlen,
+				       movebuf);
 			if (ret != -EIO)
 				printk("Error went away on retry.\n");
 		}
@@ -771,7 +756,7 @@ static int nftl_readblock(struct mtd_blktrans_dev *mbd, unsigned long block,
 	} else {
 		loff_t ptr = (lastgoodEUN * nftl->EraseSize) + blockofs;
 		size_t retlen;
-		int res = mtd->read(mtd, ptr, 512, &retlen, buffer);
+		int res = mtd_read(mtd, ptr, 512, &retlen, buffer);
 
 		if (res < 0 && !mtd_is_bitflip(res))
 			return -EIO;

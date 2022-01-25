@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/alpha/boot/bootpz.c
  *
@@ -15,10 +16,8 @@
 #include <generated/utsrelease.h>
 #include <linux/mm.h>
 
-#include <asm/system.h>
 #include <asm/console.h>
 #include <asm/hwrpb.h>
-#include <asm/pgtable.h>
 #include <asm/io.h>
 
 #include <stdarg.h>

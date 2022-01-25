@@ -1253,15 +1253,14 @@ int i2400m_rx(struct i2400m *i2400m, struct sk_buff *skb)
 	skb_len = skb->len;
 	d_fnstart(4, dev, "(i2400m %p skb %p [size %u])\n",
 		  i2400m, skb, skb_len);
-	result = -EIO;
 	msg_hdr = (void *) skb->data;
 	result = i2400m_rx_msg_hdr_check(i2400m, msg_hdr, skb_len);
 	if (result < 0)
 		goto error_msg_hdr_check;
 	result = -EIO;
 	num_pls = le16_to_cpu(msg_hdr->num_pls);
-	pl_itr = sizeof(*msg_hdr) +	/* Check payload descriptor(s) */
-		num_pls * sizeof(msg_hdr->pld[0]);
+	/* Check payload descriptor(s) */
+	pl_itr = struct_size(msg_hdr, pld, num_pls);
 	pl_itr = ALIGN(pl_itr, I2400M_PL_ALIGN);
 	if (pl_itr > skb_len) {	/* got all the payload descriptors? */
 		dev_err(dev, "RX: HW BUG? message too short (%u bytes) for "
@@ -1346,29 +1345,22 @@ EXPORT_SYMBOL(i2400m_unknown_barker);
 int i2400m_rx_setup(struct i2400m *i2400m)
 {
 	int result = 0;
-	struct device *dev = i2400m_dev(i2400m);
 
 	i2400m->rx_reorder = i2400m_rx_reorder_disabled? 0 : 1;
 	if (i2400m->rx_reorder) {
 		unsigned itr;
-		size_t size;
 		struct i2400m_roq_log *rd;
 
 		result = -ENOMEM;
 
-		size = sizeof(i2400m->rx_roq[0]) * (I2400M_RO_CIN + 1);
-		i2400m->rx_roq = kzalloc(size, GFP_KERNEL);
-		if (i2400m->rx_roq == NULL) {
-			dev_err(dev, "RX: cannot allocate %zu bytes for "
-				"reorder queues\n", size);
+		i2400m->rx_roq = kcalloc(I2400M_RO_CIN + 1,
+					 sizeof(i2400m->rx_roq[0]), GFP_KERNEL);
+		if (i2400m->rx_roq == NULL)
 			goto error_roq_alloc;
-		}
 
-		size = sizeof(*i2400m->rx_roq[0].log) * (I2400M_RO_CIN + 1);
-		rd = kzalloc(size, GFP_KERNEL);
+		rd = kcalloc(I2400M_RO_CIN + 1, sizeof(*i2400m->rx_roq[0].log),
+			     GFP_KERNEL);
 		if (rd == NULL) {
-			dev_err(dev, "RX: cannot allocate %zu bytes for "
-				"reorder queues log areas\n", size);
 			result = -ENOMEM;
 			goto error_roq_log_alloc;
 		}

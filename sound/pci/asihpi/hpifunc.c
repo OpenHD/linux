@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 
 #include "hpi_internal.h"
 #include "hpimsginit.h"
@@ -2323,11 +2324,8 @@ u16 hpi_sample_clock_get_source_index(u32 h_control, u16 *pw_source_index)
 u16 hpi_sample_clock_query_local_rate(const u32 h_clock, const u32 index,
 	u32 *prate)
 {
-	u16 err;
-	err = hpi_control_query(h_clock, HPI_SAMPLECLOCK_LOCAL_SAMPLERATE,
-		index, 0, prate);
-
-	return err;
+	return hpi_control_query(h_clock, HPI_SAMPLECLOCK_LOCAL_SAMPLERATE,
+				 index, 0, prate);
 }
 
 u16 hpi_sample_clock_set_local_rate(u32 h_control, u32 sample_rate)
@@ -2824,6 +2822,16 @@ u16 hpi_volume_auto_fade(u32 h_control,
 {
 	return hpi_volume_auto_fade_profile(h_control, an_stop_gain0_01dB,
 		duration_ms, HPI_VOLUME_AUTOFADE_LOG);
+}
+
+u16 hpi_volume_query_auto_fade_profile(const u32 h_volume, const u32 i,
+	u16 *profile)
+{
+	u16 e;
+	u32 u;
+	e = hpi_control_query(h_volume, HPI_VOLUME_AUTOFADE, i, 0, &u);
+	*profile = (u16)u;
+	return e;
 }
 
 u16 hpi_vox_set_threshold(u32 h_control, short an_gain0_01dB)

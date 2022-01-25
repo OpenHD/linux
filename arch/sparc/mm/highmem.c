@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  highmem.c: virtual kernel memory mappings for high memory
  *
@@ -22,23 +23,28 @@
  * shared by CPUs, and so precious, and establishing them requires IPI.
  * Atomic kmaps are lightweight and we may have NCPUS more of them.
  */
-#include <linux/mm.h>
 #include <linux/highmem.h>
 #include <linux/export.h>
-#include <asm/pgalloc.h>
+#include <linux/mm.h>
+
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-#include <asm/fixmap.h>
+#include <asm/vaddrs.h>
 
-void *__kmap_atomic(struct page *page)
+static pte_t *kmap_pte;
+
+void __init kmap_init(void)
+{
+	unsigned long address = __fix_to_virt(FIX_KMAP_BEGIN);
+
+        /* cache the first kmap pte */
+        kmap_pte = virt_to_kpte(address);
+}
+
+void *kmap_atomic_high_prot(struct page *page, pgprot_t prot)
 {
 	unsigned long vaddr;
 	long idx, type;
-
-	/* even !CONFIG_PREEMPT needs this, for in_atomic in do_page_fault */
-	pagefault_disable();
-	if (!PageHighMem(page))
-		return page_address(page);
 
 	type = kmap_atomic_idx_push();
 	idx = type + KM_TYPE_NR*smp_processor_id();
@@ -54,7 +60,7 @@ void *__kmap_atomic(struct page *page)
 #ifdef CONFIG_DEBUG_HIGHMEM
 	BUG_ON(!pte_none(*(kmap_pte-idx)));
 #endif
-	set_pte(kmap_pte-idx, mk_pte(page, kmap_prot));
+	set_pte(kmap_pte-idx, mk_pte(page, prot));
 /* XXX Fix - Anton */
 #if 0
 	__flush_tlb_one(vaddr);
@@ -64,17 +70,15 @@ void *__kmap_atomic(struct page *page)
 
 	return (void*) vaddr;
 }
-EXPORT_SYMBOL(__kmap_atomic);
+EXPORT_SYMBOL(kmap_atomic_high_prot);
 
-void __kunmap_atomic(void *kvaddr)
+void kunmap_atomic_high(void *kvaddr)
 {
 	unsigned long vaddr = (unsigned long) kvaddr & PAGE_MASK;
 	int type;
 
-	if (vaddr < FIXADDR_START) { // FIXME
-		pagefault_enable();
+	if (vaddr < FIXADDR_START)
 		return;
-	}
 
 	type = kmap_atomic_idx();
 
@@ -107,24 +111,5 @@ void __kunmap_atomic(void *kvaddr)
 #endif
 
 	kmap_atomic_idx_pop();
-	pagefault_enable();
 }
-EXPORT_SYMBOL(__kunmap_atomic);
-
-/* We may be fed a pagetable here by ptep_to_xxx and others. */
-struct page *kmap_atomic_to_page(void *ptr)
-{
-	unsigned long idx, vaddr = (unsigned long)ptr;
-	pte_t *pte;
-
-	if (vaddr < SRMMU_NOCACHE_VADDR)
-		return virt_to_page(ptr);
-	if (vaddr < PKMAP_BASE)
-		return pfn_to_page(__nocache_pa(vaddr) >> PAGE_SHIFT);
-	BUG_ON(vaddr < FIXADDR_START);
-	BUG_ON(vaddr > FIXADDR_TOP);
-
-	idx = virt_to_fix(vaddr);
-	pte = kmap_pte - (idx - FIX_KMAP_BEGIN);
-	return pte_page(*pte);
-}
+EXPORT_SYMBOL(kunmap_atomic_high);

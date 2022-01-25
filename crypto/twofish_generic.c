@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Twofish for CryptoAPI
  *
@@ -11,21 +12,6 @@
  * The original author has disclaimed all copyright interest in this
  * code and thus put it in the public domain. The subsequent authors 
  * have put this under the GNU General Public License.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- * USA
  *
  * This code is a "clean room" implementation, written from the paper
  * _Twofish: A 128-Bit Block Cipher_ by Bruce Schneier, John Kelsey,
@@ -188,7 +174,6 @@ static struct crypto_alg alg = {
 	.cra_ctxsize        =   sizeof(struct twofish_ctx),
 	.cra_alignmask      =	3,
 	.cra_module         =   THIS_MODULE,
-	.cra_list           =   LIST_HEAD_INIT(alg.cra_list),
 	.cra_u              =   { .cipher = {
 	.cia_min_keysize    =   TF_MIN_KEY_SIZE,
 	.cia_max_keysize    =   TF_MAX_KEY_SIZE,
@@ -207,9 +192,10 @@ static void __exit twofish_mod_fini(void)
 	crypto_unregister_alg(&alg);
 }
 
-module_init(twofish_mod_init);
+subsys_initcall(twofish_mod_init);
 module_exit(twofish_mod_fini);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION ("Twofish Cipher Algorithm");
-MODULE_ALIAS("twofish");
+MODULE_ALIAS_CRYPTO("twofish");
+MODULE_ALIAS_CRYPTO("twofish-generic");

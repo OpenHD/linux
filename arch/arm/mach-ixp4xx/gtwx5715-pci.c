@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/arm/mach-ixp4xx/gtwx5715-pci.c
  *
@@ -5,21 +6,6 @@
  *
  * Copyright (C) 2004 George T. Joseph
  * Derived from Coyote
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
- *
  */
 
 #include <linux/pci.h>
@@ -29,6 +15,8 @@
 #include <asm/mach-types.h>
 #include <mach/hardware.h>
 #include <asm/mach/pci.h>
+
+#include "irqs.h"
 
 #define SLOT0_DEVID	0
 #define SLOT1_DEVID	1
@@ -67,10 +55,9 @@ static int __init gtwx5715_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 
 struct hw_pci gtwx5715_pci __initdata = {
 	.nr_controllers = 1,
+	.ops		= &ixp4xx_ops,
 	.preinit =        gtwx5715_pci_preinit,
-	.swizzle =        pci_std_swizzle,
 	.setup =          ixp4xx_setup,
-	.scan =           ixp4xx_scan_bus,
 	.map_irq =        gtwx5715_map_irq,
 };
 

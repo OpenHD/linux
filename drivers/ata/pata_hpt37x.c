@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Libata driver for the highpoint 37x and 30x UDMA66 ATA controllers.
  *
@@ -19,7 +20,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -225,17 +225,14 @@ static int hpt_dma_blacklisted(const struct ata_device *dev, char *modestr,
 			       const char * const list[])
 {
 	unsigned char model_num[ATA_ID_PROD_LEN + 1];
-	int i = 0;
+	int i;
 
 	ata_id_c_string(dev->id, model_num, ATA_ID_PROD, sizeof(model_num));
 
-	while (list[i] != NULL) {
-		if (!strcmp(list[i], model_num)) {
-			pr_warn("%s is not supported for %s\n",
-				modestr, list[i]);
-			return 1;
-		}
-		i++;
+	i = match_string(list, -1, model_num);
+	if (i >= 0) {
+		pr_warn("%s is not supported for %s\n", modestr, list[i]);
+		return 1;
 	}
 	return 0;
 }
@@ -1058,21 +1055,10 @@ static struct pci_driver hpt37x_pci_driver = {
 	.remove		= ata_pci_remove_one
 };
 
-static int __init hpt37x_init(void)
-{
-	return pci_register_driver(&hpt37x_pci_driver);
-}
-
-static void __exit hpt37x_exit(void)
-{
-	pci_unregister_driver(&hpt37x_pci_driver);
-}
+module_pci_driver(hpt37x_pci_driver);
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for the Highpoint HPT37x/30x");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, hpt37x);
 MODULE_VERSION(DRV_VERSION);
-
-module_init(hpt37x_init);
-module_exit(hpt37x_exit);

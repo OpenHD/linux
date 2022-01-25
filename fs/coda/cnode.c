@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* cnode related routines for the coda kernel code
    (C) 1996 Peter Braam
    */
@@ -7,7 +8,8 @@
 #include <linux/time.h>
 
 #include <linux/coda.h>
-#include <linux/coda_psdev.h>
+#include <linux/pagemap.h>
+#include "coda_psdev.h"
 #include "coda_linux.h"
 
 static inline int coda_fideq(struct CodaFid *fid1, struct CodaFid *fid2)
@@ -16,9 +18,7 @@ static inline int coda_fideq(struct CodaFid *fid1, struct CodaFid *fid2)
 }
 
 static const struct inode_operations coda_symlink_inode_operations = {
-	.readlink	= generic_readlink,
-	.follow_link	= page_follow_link_light,
-	.put_link	= page_put_link,
+	.get_link	= page_get_link,
 	.setattr	= coda_setattr,
 };
 
@@ -35,6 +35,7 @@ static void coda_fill_inode(struct inode *inode, struct coda_vattr *attr)
                 inode->i_fop = &coda_dir_operations;
         } else if (S_ISLNK(inode->i_mode)) {
 		inode->i_op = &coda_symlink_inode_operations;
+		inode_nohighmem(inode);
 		inode->i_data.a_ops = &coda_symlink_aops;
 		inode->i_mapping = &inode->i_data;
 	} else
@@ -88,24 +89,21 @@ struct inode * coda_iget(struct super_block * sb, struct CodaFid * fid,
    - link the two up if this is needed
    - fill in the attributes
 */
-int coda_cnode_make(struct inode **inode, struct CodaFid *fid, struct super_block *sb)
+struct inode *coda_cnode_make(struct CodaFid *fid, struct super_block *sb)
 {
         struct coda_vattr attr;
+	struct inode *inode;
         int error;
         
 	/* We get inode numbers from Venus -- see venus source */
 	error = venus_getattr(sb, fid, &attr);
-	if ( error ) {
-	    *inode = NULL;
-	    return error;
-	} 
+	if (error)
+		return ERR_PTR(error);
 
-	*inode = coda_iget(sb, fid, &attr);
-	if ( IS_ERR(*inode) ) {
-		printk("coda_cnode_make: coda_iget failed\n");
-                return PTR_ERR(*inode);
-        }
-	return 0;
+	inode = coda_iget(sb, fid, &attr);
+	if (IS_ERR(inode))
+		pr_warn("%s: coda_iget failed\n", __func__);
+	return inode;
 }
 
 
@@ -139,11 +137,6 @@ struct inode *coda_fid_to_inode(struct CodaFid *fid, struct super_block *sb)
 	struct inode *inode;
 	unsigned long hash = coda_f2i(fid);
 
-	if ( !sb ) {
-		printk("coda_fid_to_inode: no sb!\n");
-		return NULL;
-	}
-
 	inode = ilookup5(sb, hash, coda_test_inode, fid);
 	if ( !inode )
 		return NULL;
@@ -155,20 +148,27 @@ struct inode *coda_fid_to_inode(struct CodaFid *fid, struct super_block *sb)
 	return inode;
 }
 
-/* the CONTROL inode is made without asking attributes from Venus */
-int coda_cnode_makectl(struct inode **inode, struct super_block *sb)
+struct coda_file_info *coda_ftoc(struct file *file)
 {
-	int error = -ENOMEM;
+	struct coda_file_info *cfi = file->private_data;
 
-	*inode = new_inode(sb);
-	if (*inode) {
-		(*inode)->i_ino = CTL_INO;
-		(*inode)->i_op = &coda_ioctl_inode_operations;
-		(*inode)->i_fop = &coda_ioctl_operations;
-		(*inode)->i_mode = 0444;
-		error = 0;
+	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
+
+	return cfi;
+
+}
+
+/* the CONTROL inode is made without asking attributes from Venus */
+struct inode *coda_cnode_makectl(struct super_block *sb)
+{
+	struct inode *inode = new_inode(sb);
+	if (inode) {
+		inode->i_ino = CTL_INO;
+		inode->i_op = &coda_ioctl_inode_operations;
+		inode->i_fop = &coda_ioctl_operations;
+		inode->i_mode = 0444;
+		return inode;
 	}
-
-	return error;
+	return ERR_PTR(-ENOMEM);
 }
 

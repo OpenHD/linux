@@ -1,17 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * GPIOs and interrupts for Palm LifeDrive Handheld Computer
  *
  * Authors:	Alex Osborne <ato@meshy.org>
  *		Marek Vasut <marek.vasut@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #ifndef _INCLUDE_PALMLD_H_
 #define _INCLUDE_PALMLD_H_
+
+#include "irqs.h" /* PXA_GPIO_TO_IRQ */
 
 /** HERE ARE GPIOs **/
 
@@ -68,10 +66,10 @@
 /* 20, 53 and 86 are usb related too */
 
 /* INTERRUPTS */
-#define IRQ_GPIO_PALMLD_GPIO_RESET	IRQ_GPIO(GPIO_NR_PALMLD_GPIO_RESET)
-#define IRQ_GPIO_PALMLD_SD_DETECT_N	IRQ_GPIO(GPIO_NR_PALMLD_SD_DETECT_N)
-#define IRQ_GPIO_PALMLD_WM9712_IRQ	IRQ_GPIO(GPIO_NR_PALMLD_WM9712_IRQ)
-#define IRQ_GPIO_PALMLD_IDE_IRQ		IRQ_GPIO(GPIO_NR_PALMLD_IDE_IRQ)
+#define IRQ_GPIO_PALMLD_GPIO_RESET	PXA_GPIO_TO_IRQ(GPIO_NR_PALMLD_GPIO_RESET)
+#define IRQ_GPIO_PALMLD_SD_DETECT_N	PXA_GPIO_TO_IRQ(GPIO_NR_PALMLD_SD_DETECT_N)
+#define IRQ_GPIO_PALMLD_WM9712_IRQ	PXA_GPIO_TO_IRQ(GPIO_NR_PALMLD_WM9712_IRQ)
+#define IRQ_GPIO_PALMLD_IDE_IRQ		PXA_GPIO_TO_IRQ(GPIO_NR_PALMLD_IDE_IRQ)
 
 
 /** HERE ARE INIT VALUES **/

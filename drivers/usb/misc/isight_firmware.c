@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for loading USB isight firmware
  *
  * Copyright (C) 2008 Matthew Garrett <mjg@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation, version 2.
  *
  * The USB isight cameras in recent Apples are roughly compatible with the USB
  * video class specification, and can be driven by uvcvideo. However, they
@@ -55,8 +52,9 @@ static int isight_firmware_load(struct usb_interface *intf,
 
 	ptr = firmware->data;
 
+	buf[0] = 0x01;
 	if (usb_control_msg
-	    (dev, usb_sndctrlpipe(dev, 0), 0xa0, 0x40, 0xe600, 0, "\1", 1,
+	    (dev, usb_sndctrlpipe(dev, 0), 0xa0, 0x40, 0xe600, 0, buf, 1,
 	     300) != 1) {
 		printk(KERN_ERR
 		       "Failed to initialise isight firmware loader\n");
@@ -100,8 +98,9 @@ static int isight_firmware_load(struct usb_interface *intf,
 		}
 	}
 
+	buf[0] = 0x00;
 	if (usb_control_msg
-	    (dev, usb_sndctrlpipe(dev, 0), 0xa0, 0x40, 0xe600, 0, "\0", 1,
+	    (dev, usb_sndctrlpipe(dev, 0), 0xa0, 0x40, 0xe600, 0, buf, 1,
 	     300) != 1) {
 		printk(KERN_ERR "isight firmware loading completion failed\n");
 		ret = -ENODEV;

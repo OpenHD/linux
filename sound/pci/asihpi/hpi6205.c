@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 
     AudioScience HPI driver
-    Copyright (C) 1997-2010  AudioScience Inc. <support@audioscience.com>
+    Copyright (C) 1997-2014  AudioScience Inc. <support@audioscience.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of version 2 of the GNU General Public License as
-    published by the Free Software Foundation;
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
  Hardware Programming Interface (HPI) for AudioScience
  ASI50xx, AS51xx, ASI6xxx, ASI87xx ASI89xx series adapters.
@@ -45,18 +34,21 @@
 #define HPI6205_ERROR_MSG_RESP_TIMEOUT          1016
 
 /* initialization/bootload errors */
-#define HPI6205_ERROR_6205_NO_IRQ               1002
-#define HPI6205_ERROR_6205_INIT_FAILED          1003
-#define HPI6205_ERROR_6205_REG                  1006
-#define HPI6205_ERROR_6205_DSPPAGE              1007
-#define HPI6205_ERROR_C6713_HPIC                1009
-#define HPI6205_ERROR_C6713_HPIA                1010
-#define HPI6205_ERROR_C6713_PLL                 1011
-#define HPI6205_ERROR_DSP_INTMEM                1012
-#define HPI6205_ERROR_DSP_EXTMEM                1013
-#define HPI6205_ERROR_DSP_PLD                   1014
-#define HPI6205_ERROR_6205_EEPROM               1017
-#define HPI6205_ERROR_DSP_EMIF                  1018
+#define HPI6205_ERROR_6205_NO_IRQ       1002
+#define HPI6205_ERROR_6205_INIT_FAILED  1003
+#define HPI6205_ERROR_6205_REG          1006
+#define HPI6205_ERROR_6205_DSPPAGE      1007
+#define HPI6205_ERROR_C6713_HPIC        1009
+#define HPI6205_ERROR_C6713_HPIA        1010
+#define HPI6205_ERROR_C6713_PLL         1011
+#define HPI6205_ERROR_DSP_INTMEM        1012
+#define HPI6205_ERROR_DSP_EXTMEM        1013
+#define HPI6205_ERROR_DSP_PLD           1014
+#define HPI6205_ERROR_6205_EEPROM       1017
+#define HPI6205_ERROR_DSP_EMIF1         1018
+#define HPI6205_ERROR_DSP_EMIF2         1019
+#define HPI6205_ERROR_DSP_EMIF3         1020
+#define HPI6205_ERROR_DSP_EMIF4         1021
 
 /*****************************************************************************/
 /* for C6205 PCI i/f */
@@ -159,6 +151,9 @@ static u16 create_adapter_obj(struct hpi_adapter_obj *pao,
 	u32 *pos_error_code);
 
 static void delete_adapter_obj(struct hpi_adapter_obj *pao);
+
+static int adapter_irq_query_and_clear(struct hpi_adapter_obj *pao,
+	u32 message);
 
 static void outstream_host_buffer_allocate(struct hpi_adapter_obj *pao,
 	struct hpi_message *phm, struct hpi_response *phr);
@@ -280,7 +275,6 @@ static void adapter_message(struct hpi_adapter_obj *pao,
 	case HPI_ADAPTER_DELETE:
 		adapter_delete(pao, phm, phr);
 		break;
-
 	default:
 		hw_message(pao, phm, phr);
 		break;
@@ -488,7 +482,7 @@ static void subsys_create_adapter(struct hpi_message *phm,
 		return;
 	}
 
-	phr->u.s.adapter_type = ao.adapter_type;
+	phr->u.s.adapter_type = ao.type;
 	phr->u.s.adapter_index = ao.index;
 	phr->error = 0;
 }
@@ -503,7 +497,7 @@ static void adapter_delete(struct hpi_adapter_obj *pao,
 		phr->error = HPI_ERROR_INVALID_OBJ_INDEX;
 		return;
 	}
-	phw = (struct hpi_hw_obj *)pao->priv;
+	phw = pao->priv;
 	/* reset adapter h/w */
 	/* Reset C6713 #1 */
 	boot_loader_write_mem32(pao, 0, C6205_BAR0_TIMER1_CTL, 0);
@@ -630,7 +624,6 @@ static u16 create_adapter_obj(struct hpi_adapter_obj *pao,
 	{
 		struct hpi_message hm;
 		struct hpi_response hr;
-		u32 max_streams;
 
 		HPI_DEBUG_LOG(VERBOSE, "init ADAPTER_GET_INFO\n");
 		memset(&hm, 0, sizeof(hm));
@@ -652,12 +645,8 @@ static u16 create_adapter_obj(struct hpi_adapter_obj *pao,
 		if (hr.error)
 			return hr.error;
 
-		pao->adapter_type = hr.u.ax.info.adapter_type;
+		pao->type = hr.u.ax.info.adapter_type;
 		pao->index = hr.u.ax.info.adapter_index;
-
-		max_streams =
-			hr.u.ax.info.num_outstreams +
-			hr.u.ax.info.num_instreams;
 
 		HPI_DEBUG_LOG(VERBOSE,
 			"got adapter info type %x index %d serial %d\n",
@@ -665,12 +654,16 @@ static u16 create_adapter_obj(struct hpi_adapter_obj *pao,
 			hr.u.ax.info.serial_number);
 	}
 
-	pao->open = 0;	/* upon creation the adapter is closed */
-
 	if (phw->p_cache)
 		phw->p_cache->adap_idx = pao->index;
 
 	HPI_DEBUG_LOG(INFO, "bootload DSP OK\n");
+
+	pao->irq_query_and_clear = adapter_irq_query_and_clear;
+	pao->instream_host_buffer_status =
+		phw->p_interface_buffer->instream_host_buffer_status;
+	pao->outstream_host_buffer_status =
+		phw->p_interface_buffer->outstream_host_buffer_status;
 
 	return hpi_add_adapter(pao);
 }
@@ -712,6 +705,21 @@ static void delete_adapter_obj(struct hpi_adapter_obj *pao)
 
 /*****************************************************************************/
 /* Adapter functions */
+static int adapter_irq_query_and_clear(struct hpi_adapter_obj *pao,
+	u32 message)
+{
+	struct hpi_hw_obj *phw = pao->priv;
+	u32 hsr = 0;
+
+	hsr = ioread32(phw->prHSR);
+	if (hsr & C6205_HSR_INTSRC) {
+		/* reset the interrupt from the DSP */
+		iowrite32(C6205_HSR_INTSRC, phw->prHSR);
+		return HPI_IRQ_MIXER;
+	}
+
+	return HPI_IRQ_NONE;
+}
 
 /*****************************************************************************/
 /* OutStream Host buffer functions */
@@ -803,8 +811,8 @@ static void outstream_host_buffer_allocate(struct hpi_adapter_obj *pao,
 			obj_index];
 		status->samples_processed = 0;
 		status->stream_state = HPI_STATE_STOPPED;
-		status->dSP_index = 0;
-		status->host_index = status->dSP_index;
+		status->dsp_index = 0;
+		status->host_index = status->dsp_index;
 		status->size_in_bytes = phm->u.d.u.buffer.buffer_size;
 		status->auxiliary_data_available = 0;
 
@@ -878,7 +886,7 @@ static void outstream_host_buffer_free(struct hpi_adapter_obj *pao,
 static u32 outstream_get_space_available(struct hpi_hostbuffer_status *status)
 {
 	return status->size_in_bytes - (status->host_index -
-		status->dSP_index);
+		status->dsp_index);
 }
 
 static void outstream_write(struct hpi_adapter_obj *pao,
@@ -1080,8 +1088,8 @@ static void instream_host_buffer_allocate(struct hpi_adapter_obj *pao,
 			obj_index];
 		status->samples_processed = 0;
 		status->stream_state = HPI_STATE_STOPPED;
-		status->dSP_index = 0;
-		status->host_index = status->dSP_index;
+		status->dsp_index = 0;
+		status->host_index = status->dsp_index;
 		status->size_in_bytes = phm->u.d.u.buffer.buffer_size;
 		status->auxiliary_data_available = 0;
 
@@ -1162,7 +1170,7 @@ static void instream_start(struct hpi_adapter_obj *pao,
 
 static u32 instream_get_bytes_available(struct hpi_hostbuffer_status *status)
 {
-	return status->dSP_index - status->host_index;
+	return status->dsp_index - status->host_index;
 }
 
 static void instream_read(struct hpi_adapter_obj *pao,
@@ -1330,17 +1338,21 @@ static u16 adapter_boot_load_dsp(struct hpi_adapter_obj *pao,
 	if (boot_code_id[1] != 0) {
 		/* DSP 1 is a C6713 */
 		/* CLKX0 <- '1' release the C6205 bootmode pulldowns */
-		boot_loader_write_mem32(pao, 0, (0x018C0024L), 0x00002202);
+		boot_loader_write_mem32(pao, 0, 0x018C0024, 0x00002202);
 		hpios_delay_micro_seconds(100);
 		/* Reset the 6713 #1 - revB */
 		boot_loader_write_mem32(pao, 0, C6205_BAR0_TIMER1_CTL, 0);
-
-		/* dummy read every 4 words for 6205 advisory 1.4.4 */
-		boot_loader_read_mem32(pao, 0, 0);
-
+		/* value of bit 3 is unknown after DSP reset, other bits shoudl be 0 */
+		if (0 != (boot_loader_read_mem32(pao, 0,
+					(C6205_BAR0_TIMER1_CTL)) & ~8))
+			return HPI6205_ERROR_6205_REG;
 		hpios_delay_micro_seconds(100);
+
 		/* Release C6713 from reset - revB */
 		boot_loader_write_mem32(pao, 0, C6205_BAR0_TIMER1_CTL, 4);
+		if (4 != (boot_loader_read_mem32(pao, 0,
+					(C6205_BAR0_TIMER1_CTL)) & ~8))
+			return HPI6205_ERROR_6205_REG;
 		hpios_delay_micro_seconds(100);
 	}
 
@@ -1614,7 +1626,7 @@ static u16 boot_loader_config_emif(struct hpi_adapter_obj *pao, int dsp_index)
 		boot_loader_write_mem32(pao, dsp_index, 0x01800008, setting);
 		if (setting != boot_loader_read_mem32(pao, dsp_index,
 				0x01800008))
-			return HPI6205_ERROR_DSP_EMIF;
+			return HPI6205_ERROR_DSP_EMIF1;
 
 		/* EMIF CE1 setup - 32 bit async. This is 6713 #1 HPI, */
 		/* which occupies D15..0. 6713 starts at 27MHz, so need */
@@ -1627,7 +1639,7 @@ static u16 boot_loader_config_emif(struct hpi_adapter_obj *pao, int dsp_index)
 		boot_loader_write_mem32(pao, dsp_index, 0x01800004, setting);
 		if (setting != boot_loader_read_mem32(pao, dsp_index,
 				0x01800004))
-			return HPI6205_ERROR_DSP_EMIF;
+			return HPI6205_ERROR_DSP_EMIF2;
 
 		/* EMIF CE2 setup - 32 bit async. This is 6713 #2 HPI, */
 		/* which occupies D15..0. 6713 starts at 27MHz, so need */
@@ -1639,7 +1651,7 @@ static u16 boot_loader_config_emif(struct hpi_adapter_obj *pao, int dsp_index)
 		boot_loader_write_mem32(pao, dsp_index, 0x01800010, setting);
 		if (setting != boot_loader_read_mem32(pao, dsp_index,
 				0x01800010))
-			return HPI6205_ERROR_DSP_EMIF;
+			return HPI6205_ERROR_DSP_EMIF3;
 
 		/* EMIF CE3 setup - 32 bit async. */
 		/* This is the PLD on the ASI5000 cards only */
@@ -1650,7 +1662,7 @@ static u16 boot_loader_config_emif(struct hpi_adapter_obj *pao, int dsp_index)
 		boot_loader_write_mem32(pao, dsp_index, 0x01800014, setting);
 		if (setting != boot_loader_read_mem32(pao, dsp_index,
 				0x01800014))
-			return HPI6205_ERROR_DSP_EMIF;
+			return HPI6205_ERROR_DSP_EMIF4;
 
 		/* set EMIF SDRAM control for 2Mx32 SDRAM (512x32x4 bank) */
 		/*  need to use this else DSP code crashes? */
@@ -2088,7 +2100,7 @@ static u16 message_response_sequence(struct hpi_adapter_obj *pao,
 		return 0;
 	}
 
-	/* Assume buffer of type struct bus_master_interface
+	/* Assume buffer of type struct bus_master_interface_62
 	   is allocated "noncacheable" */
 
 	if (!wait_dsp_ack(phw, H620_HIF_IDLE, HPI6205_TIMEOUT)) {

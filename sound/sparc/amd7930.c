@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for AMD7930 sound chips found on Sparcs.
  * Copyright (C) 2002, 2008 David S. Miller <davem@davemloft.net>
@@ -37,6 +38,7 @@
 #include <linux/moduleparam.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/io.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -44,13 +46,12 @@
 #include <sound/control.h>
 #include <sound/initval.h>
 
-#include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/prom.h>
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
-static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
+static bool enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for Sun AMD7930 soundcard.");
@@ -666,7 +667,7 @@ static snd_pcm_uframes_t snd_amd7930_capture_pointer(struct snd_pcm_substream *s
 }
 
 /* Playback and capture have identical properties.  */
-static struct snd_pcm_hardware snd_amd7930_pcm_hw =
+static const struct snd_pcm_hardware snd_amd7930_pcm_hw =
 {
 	.info			= (SNDRV_PCM_INFO_MMAP |
 				   SNDRV_PCM_INFO_MMAP_VALID |
@@ -722,40 +723,23 @@ static int snd_amd7930_capture_close(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int snd_amd7930_hw_params(struct snd_pcm_substream *substream,
-				    struct snd_pcm_hw_params *hw_params)
-{
-	return snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
-}
-
-static int snd_amd7930_hw_free(struct snd_pcm_substream *substream)
-{
-	return snd_pcm_lib_free_pages(substream);
-}
-
-static struct snd_pcm_ops snd_amd7930_playback_ops = {
+static const struct snd_pcm_ops snd_amd7930_playback_ops = {
 	.open		=	snd_amd7930_playback_open,
 	.close		=	snd_amd7930_playback_close,
-	.ioctl		=	snd_pcm_lib_ioctl,
-	.hw_params	=	snd_amd7930_hw_params,
-	.hw_free	=	snd_amd7930_hw_free,
 	.prepare	=	snd_amd7930_playback_prepare,
 	.trigger	=	snd_amd7930_playback_trigger,
 	.pointer	=	snd_amd7930_playback_pointer,
 };
 
-static struct snd_pcm_ops snd_amd7930_capture_ops = {
+static const struct snd_pcm_ops snd_amd7930_capture_ops = {
 	.open		=	snd_amd7930_capture_open,
 	.close		=	snd_amd7930_capture_close,
-	.ioctl		=	snd_pcm_lib_ioctl,
-	.hw_params	=	snd_amd7930_hw_params,
-	.hw_free	=	snd_amd7930_hw_free,
 	.prepare	=	snd_amd7930_capture_prepare,
 	.trigger	=	snd_amd7930_capture_trigger,
 	.pointer	=	snd_amd7930_capture_pointer,
 };
 
-static int __devinit snd_amd7930_pcm(struct snd_amd7930 *amd)
+static int snd_amd7930_pcm(struct snd_amd7930 *amd)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -775,9 +759,8 @@ static int __devinit snd_amd7930_pcm(struct snd_amd7930 *amd)
 	strcpy(pcm->name, amd->card->shortname);
 	amd->pcm = pcm;
 
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,
-					      snd_dma_continuous_data(GFP_KERNEL),
-					      64*1024, 64*1024);
+	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,
+				       NULL, 64*1024, 64*1024);
 
 	return 0;
 }
@@ -813,7 +796,7 @@ static int snd_amd7930_get_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 	default:
 		swval = &amd->pgain;
 		break;
-	};
+	}
 
 	ucontrol->value.integer.value[0] = *swval;
 
@@ -838,7 +821,7 @@ static int snd_amd7930_put_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 	default:
 		swval = &amd->pgain;
 		break;
-	};
+	}
 
 	spin_lock_irqsave(&amd->lock, flags);
 
@@ -854,7 +837,7 @@ static int snd_amd7930_put_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 	return change;
 }
 
-static struct snd_kcontrol_new amd7930_controls[] __devinitdata = {
+static const struct snd_kcontrol_new amd7930_controls[] = {
 	{
 		.iface		=	SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name		=	"Monitor Volume",
@@ -884,7 +867,7 @@ static struct snd_kcontrol_new amd7930_controls[] __devinitdata = {
 	},
 };
 
-static int __devinit snd_amd7930_mixer(struct snd_amd7930 *amd)
+static int snd_amd7930_mixer(struct snd_amd7930 *amd)
 {
 	struct snd_card *card;
 	int idx, err;
@@ -929,14 +912,14 @@ static int snd_amd7930_dev_free(struct snd_device *device)
 	return snd_amd7930_free(amd);
 }
 
-static struct snd_device_ops snd_amd7930_dev_ops = {
+static const struct snd_device_ops snd_amd7930_dev_ops = {
 	.dev_free	=	snd_amd7930_dev_free,
 };
 
-static int __devinit snd_amd7930_create(struct snd_card *card,
-					struct platform_device *op,
-					int irq, int dev,
-					struct snd_amd7930 **ramd)
+static int snd_amd7930_create(struct snd_card *card,
+			      struct platform_device *op,
+			      int irq, int dev,
+			      struct snd_amd7930 **ramd)
 {
 	struct snd_amd7930 *amd;
 	unsigned long flags;
@@ -956,6 +939,7 @@ static int __devinit snd_amd7930_create(struct snd_card *card,
 	if (!amd->regs) {
 		snd_printk(KERN_ERR
 			   "amd7930-%d: Unable to map chip registers.\n", dev);
+		kfree(amd);
 		return -EIO;
 	}
 
@@ -1002,7 +986,7 @@ static int __devinit snd_amd7930_create(struct snd_card *card,
 	return 0;
 }
 
-static int __devinit amd7930_sbus_probe(struct platform_device *op)
+static int amd7930_sbus_probe(struct platform_device *op)
 {
 	struct resource *rp = &op->resource[0];
 	static int dev_num;
@@ -1019,8 +1003,8 @@ static int __devinit amd7930_sbus_probe(struct platform_device *op)
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev_num], id[dev_num], THIS_MODULE, 0,
-			      &card);
+	err = snd_card_new(&op->dev, index[dev_num], id[dev_num],
+			   THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
@@ -1063,11 +1047,11 @@ static const struct of_device_id amd7930_match[] = {
 	},
 	{},
 };
+MODULE_DEVICE_TABLE(of, amd7930_match);
 
 static struct platform_driver amd7930_sbus_driver = {
 	.driver = {
 		.name = "audio",
-		.owner = THIS_MODULE,
 		.of_match_table = amd7930_match,
 	},
 	.probe		= amd7930_sbus_probe,

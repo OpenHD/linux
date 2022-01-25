@@ -1,11 +1,11 @@
-#
-# Generated files
-#
-conmakehash
-kallsyms
-pnmtologo
+# SPDX-License-Identifier: GPL-2.0-only
 bin2c
+kallsyms
 unifdef
-ihex2fw
 recordmcount
-docproc
+sorttable
+asn1_compiler
+extract-cert
+sign-file
+insert-sys-cert
+/module.lds

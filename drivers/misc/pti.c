@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  pti.c - PTI driver for cJTAG data extration
  *
  *  Copyright (C) Intel 2010
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
@@ -32,7 +24,7 @@
 #include <linux/pci.h>
 #include <linux/mutex.h>
 #include <linux/miscdevice.h>
-#include <linux/pti.h>
+#include <linux/intel-pti.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
@@ -60,7 +52,7 @@ struct pti_tty {
 };
 
 struct pti_dev {
-	struct tty_port port;
+	struct tty_port port[PTITTY_MINOR_NUM];
 	unsigned long pti_addr;
 	unsigned long aperture_base;
 	void __iomem *pti_ioaddr;
@@ -76,7 +68,7 @@ struct pti_dev {
  */
 static DEFINE_MUTEX(alloclock);
 
-static struct pci_device_id pci_ids[] __devinitconst = {
+static const struct pci_device_id pci_ids[] = {
 		{PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0x82B)},
 		{0}
 };
@@ -393,25 +385,6 @@ void pti_writedata(struct pti_masterchannel *mc, u8 *buf, int count)
 }
 EXPORT_SYMBOL_GPL(pti_writedata);
 
-/**
- * pti_pci_remove()- Driver exit method to remove PTI from
- *		   PCI bus.
- * @pdev: variable containing pci info of PTI.
- */
-static void __devexit pti_pci_remove(struct pci_dev *pdev)
-{
-	struct pti_dev *drv_data;
-
-	drv_data = pci_get_drvdata(pdev);
-	if (drv_data != NULL) {
-		pci_iounmap(pdev, drv_data->pti_ioaddr);
-		pci_set_drvdata(pdev, NULL);
-		kfree(drv_data);
-		pci_release_region(pdev, 1);
-		pci_disable_device(pdev);
-	}
-}
-
 /*
  * for the tty_driver_*() basic function descriptions, see tty_driver.h.
  * Specific header comments made for PTI-related specifics.
@@ -446,7 +419,7 @@ static int pti_tty_driver_open(struct tty_struct *tty, struct file *filp)
 	 * also removes a locking requirement for the actual write
 	 * procedure.
 	 */
-	return tty_port_open(&drv_data->port, tty, filp);
+	return tty_port_open(tty->port, tty, filp);
 }
 
 /**
@@ -462,7 +435,7 @@ static int pti_tty_driver_open(struct tty_struct *tty, struct file *filp)
  */
 static void pti_tty_driver_close(struct tty_struct *tty, struct file *filp)
 {
-	tty_port_close(&drv_data->port, tty, filp);
+	tty_port_close(tty->port, tty, filp);
 }
 
 /**
@@ -481,13 +454,9 @@ static int pti_tty_install(struct tty_driver *driver, struct tty_struct *tty)
 {
 	int idx = tty->index;
 	struct pti_tty *pti_tty_data;
-	int ret = tty_init_termios(tty);
+	int ret = tty_standard_install(driver, tty);
 
 	if (ret == 0) {
-		tty_driver_kref_get(driver);
-		tty->count++;
-		driver->ttys[idx] = tty;
-
 		pti_tty_data = kmalloc(sizeof(struct pti_tty), GFP_KERNEL);
 		if (pti_tty_data == NULL)
 			return -ENOMEM;
@@ -527,9 +496,8 @@ static void pti_tty_cleanup(struct tty_struct *tty)
  * pti_tty_driver_write()-  Write trace debugging data through the char
  * interface to the PTI HW.  Part of the misc device implementation.
  *
- * @filp: Contains private data which is used to obtain
- *        master, channel write ID.
- * @data: trace data to be written.
+ * @tty: tty struct containing pti information.
+ * @buf: trace data to be written.
  * @len:  # of byte to write.
  *
  * Returns:
@@ -765,8 +733,8 @@ static struct console pti_console = {
  * pti_port_activate()- Used to start/initialize any items upon
  * first opening of tty_port().
  *
- * @port- The tty port number of the PTI device.
- * @tty-  The tty struct associated with this device.
+ * @port: The tty port number of the PTI device.
+ * @tty:  The tty struct associated with this device.
  *
  * Returns:
  *	always returns 0
@@ -786,7 +754,7 @@ static int pti_port_activate(struct tty_port *port, struct tty_struct *tty)
  * pti_port_shutdown()- Used to stop/shutdown any items upon the
  * last tty port close.
  *
- * @port- The tty port number of the PTI device.
+ * @port: The tty port number of the PTI device.
  *
  * Notes: The primary purpose of the PTI tty port 0 is to hook
  * the syslog daemon to it; thus this port will be open for a
@@ -812,17 +780,18 @@ static const struct tty_port_operations tty_port_ops = {
  * pti_pci_probe()- Used to detect pti on the pci bus and set
  *		    things up in the driver.
  *
- * @pdev- pci_dev struct values for pti.
- * @ent-  pci_device_id struct for pti driver.
+ * @pdev: pci_dev struct values for pti.
+ * @ent:  pci_device_id struct for pti driver.
  *
  * Returns:
  *	0 for success
  *	otherwise, error
  */
-static int __devinit pti_pci_probe(struct pci_dev *pdev,
+static int pti_pci_probe(struct pci_dev *pdev,
 		const struct pci_device_id *ent)
 {
-	int retval = -EINVAL;
+	unsigned int a;
+	int retval;
 	int pci_bar = 1;
 
 	dev_dbg(&pdev->dev, "%s %s(%d): PTI PCI ID %04x:%04x\n", __FILE__,
@@ -834,7 +803,7 @@ static int __devinit pti_pci_probe(struct pci_dev *pdev,
 			__func__, __LINE__);
 		pr_err("%s(%d): Error value returned: %d\n",
 			__func__, __LINE__, retval);
-		return retval;
+		goto err;
 	}
 
 	retval = pci_enable_device(pdev);
@@ -842,17 +811,16 @@ static int __devinit pti_pci_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev,
 			"%s: pci_enable_device() returned error %d\n",
 			__func__, retval);
-		return retval;
+		goto err_unreg_misc;
 	}
 
 	drv_data = kzalloc(sizeof(*drv_data), GFP_KERNEL);
-
 	if (drv_data == NULL) {
 		retval = -ENOMEM;
 		dev_err(&pdev->dev,
 			"%s(%d): kmalloc() returned NULL memory.\n",
 			__func__, __LINE__);
-		return retval;
+		goto err_disable_pci;
 	}
 	drv_data->pti_addr = pci_resource_start(pdev, pci_bar);
 
@@ -861,31 +829,65 @@ static int __devinit pti_pci_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev,
 			"%s(%d): pci_request_region() returned error %d\n",
 			__func__, __LINE__, retval);
-		kfree(drv_data);
-		return retval;
+		goto err_free_dd;
 	}
 	drv_data->aperture_base = drv_data->pti_addr+APERTURE_14;
 	drv_data->pti_ioaddr =
-		ioremap_nocache((u32)drv_data->aperture_base,
+		ioremap((u32)drv_data->aperture_base,
 		APERTURE_LEN);
 	if (!drv_data->pti_ioaddr) {
-		pci_release_region(pdev, pci_bar);
 		retval = -ENOMEM;
-		kfree(drv_data);
-		return retval;
+		goto err_rel_reg;
 	}
 
 	pci_set_drvdata(pdev, drv_data);
 
-	tty_port_init(&drv_data->port);
-	drv_data->port.ops = &tty_port_ops;
+	for (a = 0; a < PTITTY_MINOR_NUM; a++) {
+		struct tty_port *port = &drv_data->port[a];
+		tty_port_init(port);
+		port->ops = &tty_port_ops;
 
-	tty_register_device(pti_tty_driver, 0, &pdev->dev);
-	tty_register_device(pti_tty_driver, 1, &pdev->dev);
+		tty_port_register_device(port, pti_tty_driver, a, &pdev->dev);
+	}
 
 	register_console(&pti_console);
 
+	return 0;
+err_rel_reg:
+	pci_release_region(pdev, pci_bar);
+err_free_dd:
+	kfree(drv_data);
+err_disable_pci:
+	pci_disable_device(pdev);
+err_unreg_misc:
+	misc_deregister(&pti_char_driver);
+err:
 	return retval;
+}
+
+/**
+ * pti_pci_remove()- Driver exit method to remove PTI from
+ *		   PCI bus.
+ * @pdev: variable containing pci info of PTI.
+ */
+static void pti_pci_remove(struct pci_dev *pdev)
+{
+	struct pti_dev *drv_data = pci_get_drvdata(pdev);
+	unsigned int a;
+
+	unregister_console(&pti_console);
+
+	for (a = 0; a < PTITTY_MINOR_NUM; a++) {
+		tty_unregister_device(pti_tty_driver, a);
+		tty_port_destroy(&drv_data->port[a]);
+	}
+
+	iounmap(drv_data->pti_ioaddr);
+	kfree(drv_data);
+	pci_release_region(pdev, 1);
+	pci_disable_device(pdev);
+
+	misc_deregister(&pti_char_driver);
 }
 
 static struct pci_driver pti_pci_driver = {
@@ -896,7 +898,6 @@ static struct pci_driver pti_pci_driver = {
 };
 
 /**
- *
  * pti_init()- Overall entry/init call to the pti driver.
  *             It starts the registration process with the kernel.
  *
@@ -907,25 +908,21 @@ static struct pci_driver pti_pci_driver = {
  */
 static int __init pti_init(void)
 {
-	int retval = -EINVAL;
+	int retval;
 
 	/* First register module as tty device */
 
-	pti_tty_driver = alloc_tty_driver(1);
+	pti_tty_driver = alloc_tty_driver(PTITTY_MINOR_NUM);
 	if (pti_tty_driver == NULL) {
 		pr_err("%s(%d): Memory allocation failed for ptiTTY driver\n",
 			__func__, __LINE__);
 		return -ENOMEM;
 	}
 
-	pti_tty_driver->owner			= THIS_MODULE;
-	pti_tty_driver->magic			= TTY_DRIVER_MAGIC;
 	pti_tty_driver->driver_name		= DRIVERNAME;
 	pti_tty_driver->name			= TTYNAME;
 	pti_tty_driver->major			= 0;
 	pti_tty_driver->minor_start		= PTITTY_MINOR_START;
-	pti_tty_driver->minor_num		= PTITTY_MINOR_NUM;
-	pti_tty_driver->num			= PTITTY_MINOR_NUM;
 	pti_tty_driver->type			= TTY_DRIVER_TYPE_SYSTEM;
 	pti_tty_driver->subtype			= SYSTEM_TYPE_SYSCONS;
 	pti_tty_driver->flags			= TTY_DRIVER_REAL_RAW |
@@ -941,25 +938,24 @@ static int __init pti_init(void)
 		pr_err("%s(%d): Error value returned: %d\n",
 			__func__, __LINE__, retval);
 
-		pti_tty_driver = NULL;
-		return retval;
+		goto put_tty;
 	}
 
 	retval = pci_register_driver(&pti_pci_driver);
-
 	if (retval) {
 		pr_err("%s(%d): PCI registration failed of pti driver\n",
 			__func__, __LINE__);
 		pr_err("%s(%d): Error value returned: %d\n",
 			__func__, __LINE__, retval);
-
-		tty_unregister_driver(pti_tty_driver);
-		pr_err("%s(%d): Unregistering TTY part of pti driver\n",
-			__func__, __LINE__);
-		pti_tty_driver = NULL;
-		return retval;
+		goto unreg_tty;
 	}
 
+	return 0;
+unreg_tty:
+	tty_unregister_driver(pti_tty_driver);
+put_tty:
+	put_tty_driver(pti_tty_driver);
+	pti_tty_driver = NULL;
 	return retval;
 }
 
@@ -968,31 +964,9 @@ static int __init pti_init(void)
  */
 static void __exit pti_exit(void)
 {
-	int retval;
-
-	tty_unregister_device(pti_tty_driver, 0);
-	tty_unregister_device(pti_tty_driver, 1);
-
-	retval = tty_unregister_driver(pti_tty_driver);
-	if (retval) {
-		pr_err("%s(%d): TTY unregistration failed of pti driver\n",
-			__func__, __LINE__);
-		pr_err("%s(%d): Error value returned: %d\n",
-			__func__, __LINE__, retval);
-	}
-
+	tty_unregister_driver(pti_tty_driver);
 	pci_unregister_driver(&pti_pci_driver);
-
-	retval = misc_deregister(&pti_char_driver);
-	if (retval) {
-		pr_err("%s(%d): CHAR unregistration failed of pti driver\n",
-			__func__, __LINE__);
-		pr_err("%s(%d): Error value returned: %d\n",
-			__func__, __LINE__, retval);
-	}
-
-	unregister_console(&pti_console);
-	return;
+	put_tty_driver(pti_tty_driver);
 }
 
 module_init(pti_init);

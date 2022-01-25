@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * devoard misc stuff.
  */
@@ -10,13 +11,36 @@
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 
+#include <asm/bootinfo.h>
+#include <asm/idle.h>
 #include <asm/reboot.h>
+#include <asm/setup.h>
+#include <asm/mach-au1x00/au1000.h>
 #include <asm/mach-db1x00/bcsr.h>
+
+#include <prom.h>
+
+void prom_putchar(char c)
+{
+	if (alchemy_get_cputype() == ALCHEMY_CPU_AU1300)
+		alchemy_uart_putchar(AU1300_UART2_PHYS_ADDR, c);
+	else
+		alchemy_uart_putchar(AU1000_UART0_PHYS_ADDR, c);
+}
+
+
+static struct platform_device db1x00_rtc_dev = {
+	.name	= "rtc-au1xxx",
+	.id	= -1,
+};
+
 
 static void db1x_power_off(void)
 {
 	bcsr_write(BCSR_RESETS, 0);
 	bcsr_write(BCSR_SYSTEM, BCSR_SYSTEM_PWROFF | BCSR_SYSTEM_RESET);
+	while (1)		/* sit and spin */
+		cpu_wait();
 }
 
 static void db1x_reset(char *c)
@@ -25,7 +49,7 @@ static void db1x_reset(char *c)
 	bcsr_write(BCSR_SYSTEM, 0);
 }
 
-static int __init db1x_poweroff_setup(void)
+static int __init db1x_late_setup(void)
 {
 	if (!pm_power_off)
 		pm_power_off = db1x_power_off;
@@ -34,9 +58,11 @@ static int __init db1x_poweroff_setup(void)
 	if (!_machine_restart)
 		_machine_restart = db1x_reset;
 
+	platform_device_register(&db1x00_rtc_dev);
+
 	return 0;
 }
-late_initcall(db1x_poweroff_setup);
+device_initcall(db1x_late_setup);
 
 /* register a pcmcia socket */
 int __init db1x_register_pcmcia_socket(phys_addr_t pcmcia_attr_start,
@@ -61,7 +87,7 @@ int __init db1x_register_pcmcia_socket(phys_addr_t pcmcia_attr_start,
 	if (stschg_irq)
 		cnt++;
 
-	sr = kzalloc(sizeof(struct resource) * cnt, GFP_KERNEL);
+	sr = kcalloc(cnt, sizeof(struct resource), GFP_KERNEL);
 	if (!sr)
 		return -ENOMEM;
 
@@ -136,7 +162,7 @@ int __init db1x_register_norflash(unsigned long size, int width,
 		return -EINVAL;
 
 	ret = -ENOMEM;
-	parts = kzalloc(sizeof(struct mtd_partition) * 5, GFP_KERNEL);
+	parts = kcalloc(5, sizeof(struct mtd_partition), GFP_KERNEL);
 	if (!parts)
 		goto out;
 

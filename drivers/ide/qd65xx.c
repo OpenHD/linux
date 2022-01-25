@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 1996-2001  Linus Torvalds & author (see below)
  */
@@ -29,7 +30,6 @@
 #include <linux/blkdev.h>
 #include <linux/ide.h>
 #include <linux/init.h>
-#include <asm/system.h>
 #include <asm/io.h>
 
 #define DRV_NAME "qd65xx"
@@ -299,7 +299,7 @@ static void __init qd6500_init_dev(ide_drive_t *drive)
 static void __init qd6580_init_dev(ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = drive->hwif;
-	u16 t1, t2;
+	unsigned long t1, t2;
 	u8 base = (hwif->config_data & 0xff00) >> 8;
 	u8 config = QD_CONFIG(hwif);
 
@@ -336,7 +336,7 @@ static const struct ide_port_ops qd6580_port_ops = {
 	.set_pio_mode		= qd6580_set_pio_mode,
 };
 
-static const struct ide_port_info qd65xx_port_info __initdata = {
+static const struct ide_port_info qd65xx_port_info __initconst = {
 	.name			= DRV_NAME,
 	.tp_ops 		= &qd65xx_tp_ops,
 	.chipset		= ide_qd65xx,
@@ -417,7 +417,7 @@ static int __init qd_probe(int base)
 	return rc;
 }
 
-static int probe_qd65xx;
+static bool probe_qd65xx;
 
 module_param_named(probe, probe_qd65xx, bool, 0);
 MODULE_PARM_DESC(probe, "probe for QD65xx chipsets");

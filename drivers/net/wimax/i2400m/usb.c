@@ -1,26 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Wireless WiMAX Connection 2400m
  * Linux driver model glue for USB device, reset & fw upload
  *
- *
  * Copyright (C) 2007-2008 Intel Corporation <linux-wimax@intel.com>
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
  * Yanir Lubetkin <yanirx.lubetkin@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * See i2400m-usb.h for a general description of this driver.
  *
@@ -210,6 +195,7 @@ retry:
 			msleep(10);	/* give the device some time */
 			goto retry;
 		}
+		fallthrough;
 	case -EINVAL:			/* while removing driver */
 	case -ENODEV:			/* dev disconnect ... */
 	case -ENOENT:			/* just ignore it */
@@ -339,6 +325,23 @@ int i2400mu_bus_reset(struct i2400m *i2400m, enum i2400m_reset_type rt)
 	return result;
 }
 
+static void i2400mu_get_drvinfo(struct net_device *net_dev,
+                                struct ethtool_drvinfo *info)
+{
+	struct i2400m *i2400m = net_dev_to_i2400m(net_dev);
+	struct i2400mu *i2400mu = container_of(i2400m, struct i2400mu, i2400m);
+	struct usb_device *udev = i2400mu->usb_dev;
+
+	strlcpy(info->driver, KBUILD_MODNAME, sizeof(info->driver));
+	strlcpy(info->fw_version, i2400m->fw_name ? : "",
+		sizeof(info->fw_version));
+	usb_make_path(udev, info->bus_info, sizeof(info->bus_info));
+}
+
+static const struct ethtool_ops i2400mu_ethtool_ops = {
+	.get_drvinfo = i2400mu_get_drvinfo,
+	.get_link = ethtool_op_get_link,
+};
 
 static
 void i2400mu_netdev_setup(struct net_device *net_dev)
@@ -347,6 +350,7 @@ void i2400mu_netdev_setup(struct net_device *net_dev)
 	struct i2400mu *i2400mu = container_of(i2400m, struct i2400mu, i2400m);
 	i2400mu_init(i2400mu);
 	i2400m_netdev_setup(net_dev);
+	net_dev->ethtool_ops = &i2400mu_ethtool_ops;
 }
 
 
@@ -362,61 +366,25 @@ struct d_level D_LEVEL[] = {
 };
 size_t D_LEVEL_SIZE = ARRAY_SIZE(D_LEVEL);
 
-
-#define __debugfs_register(prefix, name, parent)			\
-do {									\
-	result = d_level_register_debugfs(prefix, name, parent);	\
-	if (result < 0)							\
-		goto error;						\
-} while (0)
-
-
 static
-int i2400mu_debugfs_add(struct i2400mu *i2400mu)
+void i2400mu_debugfs_add(struct i2400mu *i2400mu)
 {
-	int result;
-	struct device *dev = &i2400mu->usb_iface->dev;
 	struct dentry *dentry = i2400mu->i2400m.wimax_dev.debugfs_dentry;
-	struct dentry *fd;
 
 	dentry = debugfs_create_dir("i2400m-usb", dentry);
-	result = PTR_ERR(dentry);
-	if (IS_ERR(dentry)) {
-		if (result == -ENODEV)
-			result = 0;	/* No debugfs support */
-		goto error;
-	}
 	i2400mu->debugfs_dentry = dentry;
-	__debugfs_register("dl_", usb, dentry);
-	__debugfs_register("dl_", fw, dentry);
-	__debugfs_register("dl_", notif, dentry);
-	__debugfs_register("dl_", rx, dentry);
-	__debugfs_register("dl_", tx, dentry);
+
+	d_level_register_debugfs("dl_", usb, dentry);
+	d_level_register_debugfs("dl_", fw, dentry);
+	d_level_register_debugfs("dl_", notif, dentry);
+	d_level_register_debugfs("dl_", rx, dentry);
+	d_level_register_debugfs("dl_", tx, dentry);
 
 	/* Don't touch these if you don't know what you are doing */
-	fd = debugfs_create_u8("rx_size_auto_shrink", 0600, dentry,
-			       &i2400mu->rx_size_auto_shrink);
-	result = PTR_ERR(fd);
-	if (IS_ERR(fd) && result != -ENODEV) {
-		dev_err(dev, "Can't create debugfs entry "
-			"rx_size_auto_shrink: %d\n", result);
-		goto error;
-	}
+	debugfs_create_u8("rx_size_auto_shrink", 0600, dentry,
+			  &i2400mu->rx_size_auto_shrink);
 
-	fd = debugfs_create_size_t("rx_size", 0600, dentry,
-				   &i2400mu->rx_size);
-	result = PTR_ERR(fd);
-	if (IS_ERR(fd) && result != -ENODEV) {
-		dev_err(dev, "Can't create debugfs entry "
-			"rx_size: %d\n", result);
-		goto error;
-	}
-
-	return 0;
-
-error:
-	debugfs_remove_recursive(i2400mu->debugfs_dentry);
-	return result;
+	debugfs_create_size_t("rx_size", 0600, dentry, &i2400mu->rx_size);
 }
 
 
@@ -449,12 +417,15 @@ int i2400mu_probe(struct usb_interface *iface,
 	struct i2400mu *i2400mu;
 	struct usb_device *usb_dev = interface_to_usbdev(iface);
 
+	if (iface->cur_altsetting->desc.bNumEndpoints < 4)
+		return -ENODEV;
+
 	if (usb_dev->speed != USB_SPEED_HIGH)
 		dev_err(dev, "device not connected as high speed\n");
 
 	/* Allocate instance [calls i2400m_netdev_setup() on it]. */
 	result = -ENOMEM;
-	net_dev = alloc_netdev(sizeof(*i2400mu), "wmx%d",
+	net_dev = alloc_netdev(sizeof(*i2400mu), "wmx%d", NET_NAME_UNKNOWN,
 			       i2400mu_netdev_setup);
 	if (net_dev == NULL) {
 		dev_err(dev, "no memory for network device instance\n");
@@ -492,6 +463,9 @@ int i2400mu_probe(struct usb_interface *iface,
 	switch (id->idProduct) {
 	case USB_DEVICE_ID_I6050:
 	case USB_DEVICE_ID_I6050_2:
+	case USB_DEVICE_ID_I6150:
+	case USB_DEVICE_ID_I6150_2:
+	case USB_DEVICE_ID_I6150_3:
 	case USB_DEVICE_ID_I6250:
 		i2400mu->i6050 = 1;
 		break;
@@ -524,15 +498,9 @@ int i2400mu_probe(struct usb_interface *iface,
 		dev_err(dev, "cannot setup device: %d\n", result);
 		goto error_setup;
 	}
-	result = i2400mu_debugfs_add(i2400mu);
-	if (result < 0) {
-		dev_err(dev, "Can't register i2400mu's debugfs: %d\n", result);
-		goto error_debugfs_add;
-	}
+	i2400mu_debugfs_add(i2400mu);
 	return 0;
 
-error_debugfs_add:
-	i2400m_release(i2400m);
 error_setup:
 	usb_set_intfdata(iface, NULL);
 	usb_put_dev(i2400mu->usb_dev);
@@ -543,7 +511,7 @@ error_alloc_netdev:
 
 
 /*
- * Disconect a i2400m from the system.
+ * Disconnect a i2400m from the system.
  *
  * i2400m_stop() has been called before, so al the rx and tx contexts
  * have been taken down already. Make sure the queue is stopped,
@@ -677,7 +645,7 @@ int i2400mu_resume(struct usb_interface *iface)
 	d_fnstart(3, dev, "(iface %p)\n", iface);
 	rmb();		/* see i2400m->updown's documentation  */
 	if (i2400m->updown == 0) {
-		d_printf(1, dev, "fw was down, no resume neeed\n");
+		d_printf(1, dev, "fw was down, no resume needed\n");
 		goto out;
 	}
 	d_printf(1, dev, "fw was up, resuming\n");
@@ -741,6 +709,9 @@ static
 struct usb_device_id i2400mu_id_table[] = {
 	{ USB_DEVICE(0x8086, USB_DEVICE_ID_I6050) },
 	{ USB_DEVICE(0x8086, USB_DEVICE_ID_I6050_2) },
+	{ USB_DEVICE(0x8087, USB_DEVICE_ID_I6150) },
+	{ USB_DEVICE(0x8087, USB_DEVICE_ID_I6150_2) },
+	{ USB_DEVICE(0x8087, USB_DEVICE_ID_I6150_3) },
 	{ USB_DEVICE(0x8086, USB_DEVICE_ID_I6250) },
 	{ USB_DEVICE(0x8086, 0x0181) },
 	{ USB_DEVICE(0x8086, 0x1403) },

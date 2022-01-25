@@ -1,21 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  PC Speaker beeper driver for Linux
  *
  *  Copyright (c) 2002 Vojtech Pavlik
  *  Copyright (c) 1992 Orest Zborowski
- *
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation
- */
 
 #include <linux/init.h>
 #include <linux/input.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include "pcsp.h"
+#include "pcsp_input.h"
 
 static void pcspkr_do_sound(unsigned int count)
 {
@@ -77,7 +73,7 @@ static int pcspkr_input_event(struct input_dev *dev, unsigned int type,
 	return 0;
 }
 
-int __devinit pcspkr_input_init(struct input_dev **rdev, struct device *dev)
+int pcspkr_input_init(struct input_dev **rdev, struct device *dev)
 {
 	int err;
 

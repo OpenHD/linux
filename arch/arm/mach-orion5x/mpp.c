@@ -10,10 +10,9 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/mbus.h>
 #include <linux/io.h>
-#include <mach/hardware.h>
 #include <plat/mpp.h>
+#include "orion5x.h"
 #include "mpp.h"
 #include "common.h"
 

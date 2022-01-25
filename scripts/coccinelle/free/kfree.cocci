@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /// Find a use after free.
 //# Values of variables may imply that some
 //# execution paths are not possible, resulting in false positives.
@@ -5,12 +6,12 @@
 //# SCTP_DBG_OBJCNT_DEC that do not actually evaluate their argument
 ///
 // Confidence: Moderate
-// Copyright: (C) 2010 Nicolas Palix, DIKU.  GPLv2.
-// Copyright: (C) 2010 Julia Lawall, DIKU.  GPLv2.
-// Copyright: (C) 2010 Gilles Muller, INRIA/LiP6.  GPLv2.
+// Copyright: (C) 2010-2012 Nicolas Palix.
+// Copyright: (C) 2010-2012 Julia Lawall, INRIA/LIP6.
+// Copyright: (C) 2010-2012 Gilles Muller, INRIA/LiP6.
 // URL: http://coccinelle.lip6.fr/
 // Comments:
-// Options: -no_includes -include_headers
+// Options: --no-includes --include-headers
 
 virtual org
 virtual report
@@ -20,10 +21,14 @@ expression E;
 position p1;
 @@
 
-kfree@p1(E)
+(
+* kfree@p1(E)
+|
+* kfree_sensitive@p1(E)
+)
 
 @print expression@
-constant char *c;
+constant char [] c;
 expression free.E,E2;
 type T;
 position p;
@@ -36,6 +41,10 @@ identifier f;
  E@p == E2
 |
  E@p != E2
+|
+ E2 == E@p
+|
+ E2 != E@p
 |
  !E@p
 |
@@ -56,7 +65,11 @@ position ok;
 @@
 
 while (1) { ...
-  kfree@ok(E)
+(
+* kfree@ok(E)
+|
+* kfree_sensitive@ok(E)
+)
   ... when != break;
       when != goto l;
       when forall
@@ -70,7 +83,11 @@ statement S;
 position free.p1!=loop.ok,p2!={print.p,sz.p};
 @@
 
-kfree@p1(E,...)
+(
+* kfree@p1(E,...)
+|
+* kfree_sensitive@p1(E,...)
+)
 ...
 (
  iter(...,subE,...) S // no use
@@ -113,5 +130,5 @@ p1 << free.p1;
 p2 << r.p2;
 @@
 
-msg = "reference preceded by free on line %s" % (p1[0].line)
+msg = "ERROR: reference preceded by free on line %s" % (p1[0].line)
 coccilib.report.print_report(p2[0],msg)

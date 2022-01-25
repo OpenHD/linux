@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux WiMAX
  * Generic messaging interface between userspace and driver/device
  *
- *
  * Copyright (C) 2007-2008 Intel Corporation <linux-wimax@intel.com>
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * This implements a direct communication channel between user space and
  * the driver/device, by which free form messages can be sent back and
@@ -189,7 +174,7 @@ const void *wimax_msg_data_len(struct sk_buff *msg, size_t *size)
 	nla = nlmsg_find_attr(nlh, sizeof(struct genlmsghdr),
 			      WIMAX_GNL_MSG_DATA);
 	if (nla == NULL) {
-		printk(KERN_ERR "Cannot find attribute WIMAX_GNL_MSG_DATA\n");
+		pr_err("Cannot find attribute WIMAX_GNL_MSG_DATA\n");
 		return NULL;
 	}
 	*size = nla_len(nla);
@@ -211,7 +196,7 @@ const void *wimax_msg_data(struct sk_buff *msg)
 	nla = nlmsg_find_attr(nlh, sizeof(struct genlmsghdr),
 			      WIMAX_GNL_MSG_DATA);
 	if (nla == NULL) {
-		printk(KERN_ERR "Cannot find attribute WIMAX_GNL_MSG_DATA\n");
+		pr_err("Cannot find attribute WIMAX_GNL_MSG_DATA\n");
 		return NULL;
 	}
 	return nla_data(nla);
@@ -232,7 +217,7 @@ ssize_t wimax_msg_len(struct sk_buff *msg)
 	nla = nlmsg_find_attr(nlh, sizeof(struct genlmsghdr),
 			      WIMAX_GNL_MSG_DATA);
 	if (nla == NULL) {
-		printk(KERN_ERR "Cannot find attribute WIMAX_GNL_MSG_DATA\n");
+		pr_err("Cannot find attribute WIMAX_GNL_MSG_DATA\n");
 		return -EINVAL;
 	}
 	return nla_len(nla);
@@ -279,7 +264,7 @@ int wimax_msg_send(struct wimax_dev *wimax_dev, struct sk_buff *skb)
 
 	d_printf(1, dev, "CTX: wimax msg, %zu bytes\n", size);
 	d_dump(2, dev, msg, size);
-	genlmsg_multicast(skb, 0, wimax_gnl_mcg.id, GFP_KERNEL);
+	genlmsg_multicast(&wimax_gnl_family, skb, 0, 0, GFP_KERNEL);
 	d_printf(1, dev, "CTX: genl multicast done\n");
 	return 0;
 }
@@ -321,17 +306,6 @@ int wimax_msg(struct wimax_dev *wimax_dev, const char *pipe_name,
 }
 EXPORT_SYMBOL_GPL(wimax_msg);
 
-
-static const struct nla_policy wimax_gnl_msg_policy[WIMAX_GNL_ATTR_MAX + 1] = {
-	[WIMAX_GNL_MSG_IFIDX] = {
-		.type = NLA_U32,
-	},
-	[WIMAX_GNL_MSG_DATA] = {
-		.type = NLA_UNSPEC,	/* libnl doesn't grok BINARY yet */
-	},
-};
-
-
 /*
  * Relays a message from user space to the driver
  *
@@ -340,7 +314,6 @@ static const struct nla_policy wimax_gnl_msg_policy[WIMAX_GNL_ATTR_MAX + 1] = {
  *
  * This call will block while handling/relaying the message.
  */
-static
 int wimax_gnl_doit_msg_from_user(struct sk_buff *skb, struct genl_info *info)
 {
 	int result, ifindex;
@@ -355,8 +328,7 @@ int wimax_gnl_doit_msg_from_user(struct sk_buff *skb, struct genl_info *info)
 	d_fnstart(3, NULL, "(skb %p info %p)\n", skb, info);
 	result = -ENODEV;
 	if (info->attrs[WIMAX_GNL_MSG_IFIDX] == NULL) {
-		printk(KERN_ERR "WIMAX_GNL_MSG_FROM_USER: can't find IFIDX "
-		       "attribute\n");
+		pr_err("WIMAX_GNL_MSG_FROM_USER: can't find IFIDX attribute\n");
 		goto error_no_wimax_dev;
 	}
 	ifindex = nla_get_u32(info->attrs[WIMAX_GNL_MSG_IFIDX]);
@@ -417,17 +389,3 @@ error_no_wimax_dev:
 	d_fnend(3, NULL, "(skb %p info %p) = %d\n", skb, info, result);
 	return result;
 }
-
-
-/*
- * Generic Netlink glue
- */
-
-struct genl_ops wimax_gnl_msg_from_user = {
-	.cmd = WIMAX_GNL_OP_MSG_FROM_USER,
-	.flags = GENL_ADMIN_PERM,
-	.policy = wimax_gnl_msg_policy,
-	.doit = wimax_gnl_doit_msg_from_user,
-	.dumpit = NULL,
-};
-

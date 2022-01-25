@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* NOMMU mmap support for RomFS on MTD devices
  *
  * Copyright © 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/mm.h>
@@ -28,9 +24,10 @@ static unsigned long romfs_get_unmapped_area(struct file *file,
 	struct inode *inode = file->f_mapping->host;
 	struct mtd_info *mtd = inode->i_sb->s_mtd;
 	unsigned long isize, offset, maxpages, lpages;
+	int ret;
 
 	if (!mtd)
-		goto cant_map_directly;
+		return (unsigned long) -ENOSYS;
 
 	/* the mapping mustn't extend beyond the EOF */
 	lpages = (len + PAGE_SIZE - 1) >> PAGE_SHIFT;
@@ -41,23 +38,23 @@ static unsigned long romfs_get_unmapped_area(struct file *file,
 	if ((pgoff >= maxpages) || (maxpages - pgoff < lpages))
 		return (unsigned long) -EINVAL;
 
-	/* we need to call down to the MTD layer to do the actual mapping */
-	if (mtd->get_unmapped_area) {
-		if (addr != 0)
-			return (unsigned long) -EINVAL;
+	if (addr != 0)
+		return (unsigned long) -EINVAL;
 
-		if (len > mtd->size || pgoff >= (mtd->size >> PAGE_SHIFT))
-			return (unsigned long) -EINVAL;
+	if (len > mtd->size || pgoff >= (mtd->size >> PAGE_SHIFT))
+		return (unsigned long) -EINVAL;
 
-		offset += ROMFS_I(inode)->i_dataoffset;
-		if (offset > mtd->size - len)
-			return (unsigned long) -EINVAL;
+	offset += ROMFS_I(inode)->i_dataoffset;
+	if (offset >= mtd->size)
+		return (unsigned long) -EINVAL;
+	/* the mapping mustn't extend beyond the EOF */
+	if ((offset + len) > mtd->size)
+		len = mtd->size - offset;
 
-		return mtd->get_unmapped_area(mtd, len, offset, flags);
-	}
-
-cant_map_directly:
-	return (unsigned long) -ENOSYS;
+	ret = mtd_get_unmapped_area(mtd, len, offset, flags);
+	if (ret == -EOPNOTSUPP)
+		ret = -ENOSYS;
+	return (unsigned long) ret;
 }
 
 /*
@@ -69,11 +66,20 @@ static int romfs_mmap(struct file *file, struct vm_area_struct *vma)
 	return vma->vm_flags & (VM_SHARED | VM_MAYSHARE) ? 0 : -ENOSYS;
 }
 
+static unsigned romfs_mmap_capabilities(struct file *file)
+{
+	struct mtd_info *mtd = file_inode(file)->i_sb->s_mtd;
+
+	if (!mtd)
+		return NOMMU_MAP_COPY;
+	return mtd_mmap_capabilities(mtd);
+}
+
 const struct file_operations romfs_ro_fops = {
 	.llseek			= generic_file_llseek,
-	.read			= do_sync_read,
-	.aio_read		= generic_file_aio_read,
+	.read_iter		= generic_file_read_iter,
 	.splice_read		= generic_file_splice_read,
 	.mmap			= romfs_mmap,
 	.get_unmapped_area	= romfs_get_unmapped_area,
+	.mmap_capabilities	= romfs_mmap_capabilities,
 };

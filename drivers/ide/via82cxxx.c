@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VIA IDE driver for Linux. Supported southbridges:
  *
@@ -18,11 +19,6 @@
  *	Current device documentation available under NDA only
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -179,8 +175,7 @@ static void via_set_speed(ide_hwif_t *hwif, u8 dn, struct ide_timing *timing)
 static void via_set_drive(ide_hwif_t *hwif, ide_drive_t *drive)
 {
 	ide_drive_t *peer = ide_get_pair_dev(drive);
-	struct pci_dev *dev = to_pci_dev(hwif->dev);
-	struct ide_host *host = pci_get_drvdata(dev);
+	struct ide_host *host = dev_get_drvdata(hwif->dev);
 	struct via82cxxx_dev *vdev = host->host_priv;
 	struct ide_timing t, p;
 	unsigned int T, UT;
@@ -403,7 +398,7 @@ static const struct ide_port_ops via_port_ops = {
 	.cable_detect		= via82cxxx_cable_detect,
 };
 
-static const struct ide_port_info via82cxxx_chipset __devinitdata = {
+static const struct ide_port_info via82cxxx_chipset = {
 	.name		= DRV_NAME,
 	.init_chipset	= init_chipset_via82cxxx,
 	.enablebits	= { { 0x40, 0x02, 0x02 }, { 0x40, 0x01, 0x01 } },
@@ -416,7 +411,7 @@ static const struct ide_port_info via82cxxx_chipset __devinitdata = {
 	.mwdma_mask	= ATA_MWDMA2,
 };
 
-static int __devinit via_init_one(struct pci_dev *dev, const struct pci_device_id *id)
+static int via_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	struct pci_dev *isa = NULL;
 	struct via_isa_bridge *via_config;
@@ -489,7 +484,7 @@ static int __devinit via_init_one(struct pci_dev *dev, const struct pci_device_i
 	return rc;
 }
 
-static void __devexit via_remove(struct pci_dev *dev)
+static void via_remove(struct pci_dev *dev)
 {
 	struct ide_host *host = pci_get_drvdata(dev);
 	struct via82cxxx_dev *vdev = host->host_priv;
@@ -514,7 +509,7 @@ static struct pci_driver via_pci_driver = {
 	.name 		= "VIA_IDE",
 	.id_table 	= via_pci_tbl,
 	.probe 		= via_init_one,
-	.remove		= __devexit_p(via_remove),
+	.remove		= via_remove,
 	.suspend	= ide_pci_suspend,
 	.resume		= ide_pci_resume,
 };

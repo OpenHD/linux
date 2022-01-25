@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ixp4xx/omixp-setup.c
  *
@@ -6,10 +7,6 @@
  *
  * based nslu2-setup.c, ixdp425-setup.c:
  *      Copyright (C) 2003-2004 MontaVista Software, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -17,15 +14,17 @@
 #include <linux/serial_8250.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
-#ifdef CONFIG_LEDS_CLASS
 #include <linux/leds.h>
-#endif
 
 #include <asm/setup.h>
 #include <asm/memory.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
+
+#include <mach/hardware.h>
+
+#include "irqs.h"
 
 static struct resource omixp_flash_resources[] = {
 	{
@@ -171,6 +170,22 @@ static struct platform_device mic256_leds = {
 };
 
 /* Built-in 10/100 Ethernet MAC interfaces */
+static struct resource ixp425_npeb_resources[] = {
+	{
+		.start		= IXP4XX_EthB_BASE_PHYS,
+		.end		= IXP4XX_EthB_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
+static struct resource ixp425_npec_resources[] = {
+	{
+		.start		= IXP4XX_EthC_BASE_PHYS,
+		.end		= IXP4XX_EthC_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
 static struct eth_plat_info ixdp425_plat_eth[] = {
 	{
 		.phy		= 0,
@@ -188,10 +203,14 @@ static struct platform_device ixdp425_eth[] = {
 		.name			= "ixp4xx_eth",
 		.id			= IXP4XX_ETH_NPEB,
 		.dev.platform_data	= ixdp425_plat_eth,
+		.num_resources		= ARRAY_SIZE(ixp425_npeb_resources),
+		.resource		= ixp425_npeb_resources,
 	}, {
 		.name			= "ixp4xx_eth",
 		.id			= IXP4XX_ETH_NPEC,
 		.dev.platform_data	= ixdp425_plat_eth + 1,
+		.num_resources		= ARRAY_SIZE(ixp425_npec_resources),
+		.resource		= ixp425_npec_resources,
 	},
 };
 
@@ -243,8 +262,9 @@ static void __init omixp_init(void)
 MACHINE_START(DEVIXP, "Omicron DEVIXP")
 	.atag_offset    = 0x100,
 	.map_io		= ixp4xx_map_io,
+	.init_early	= ixp4xx_init_early,
 	.init_irq	= ixp4xx_init_irq,
-	.timer          = &ixp4xx_timer,
+	.init_time	= ixp4xx_timer_init,
 	.init_machine	= omixp_init,
 	.restart	= ixp4xx_restart,
 MACHINE_END
@@ -254,8 +274,9 @@ MACHINE_END
 MACHINE_START(MICCPT, "Omicron MICCPT")
 	.atag_offset    = 0x100,
 	.map_io		= ixp4xx_map_io,
+	.init_early	= ixp4xx_init_early,
 	.init_irq	= ixp4xx_init_irq,
-	.timer          = &ixp4xx_timer,
+	.init_time	= ixp4xx_timer_init,
 	.init_machine	= omixp_init,
 #if defined(CONFIG_PCI)
 	.dma_zone_size	= SZ_64M,
@@ -268,8 +289,9 @@ MACHINE_END
 MACHINE_START(MIC256, "Omicron MIC256")
 	.atag_offset    = 0x100,
 	.map_io		= ixp4xx_map_io,
+	.init_early	= ixp4xx_init_early,
 	.init_irq	= ixp4xx_init_irq,
-	.timer          = &ixp4xx_timer,
+	.init_time	= ixp4xx_timer_init,
 	.init_machine	= omixp_init,
 	.restart	= ixp4xx_restart,
 MACHINE_END

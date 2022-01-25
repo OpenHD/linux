@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /****************************************************************************
  *
  * Driver for the IFX spi modem.
@@ -5,26 +6,11 @@
  * Copyright (C) 2009, 2010 Intel Corp
  * Jim Stanley <jim.stanley@intel.com>
  *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
- * USA
- *
- *
- *
  *****************************************************************************/
 #ifndef _IFX6X60_H
 #define _IFX6X60_H
+
+struct gpio_desc;
 
 #define DRVNAME				"ifx6x60"
 #define TTYNAME				"ttyIFX"
@@ -41,6 +27,7 @@
 #define IFX_SPI_STATE_IO_IN_PROGRESS	1
 #define IFX_SPI_STATE_IO_READY		2
 #define IFX_SPI_STATE_TIMER_PENDING	3
+#define IFX_SPI_STATE_IO_AVAILABLE	4
 
 /* flow control bitfields */
 #define IFX_SPI_DCD			0
@@ -109,11 +96,12 @@ struct ifx_spi_device {
 
 	struct {
 		/* gpio lines */
-		unsigned short srdy;		/* slave-ready gpio */
-		unsigned short mrdy;		/* master-ready gpio */
-		unsigned short reset;		/* modem-reset gpio */
-		unsigned short po;		/* modem-on gpio */
-		unsigned short reset_out;	/* modem-in-reset gpio */
+		struct gpio_desc *srdy;		/* slave-ready gpio */
+		struct gpio_desc *mrdy;		/* master-ready gpio */
+		struct gpio_desc *reset;	/* modem-reset gpio */
+		struct gpio_desc *po;		/* modem-on gpio */
+		struct gpio_desc *reset_out;	/* modem-in-reset gpio */
+		struct gpio_desc *pmu_reset;	/* PMU reset gpio */
 		/* state/stats */
 		int unack_srdy_int_nb;
 	} gpio;
@@ -124,6 +112,7 @@ struct ifx_spi_device {
 #define MR_INPROGRESS	1
 #define MR_COMPLETE	2
 	wait_queue_head_t mdm_reset_wait;
+	void (*swap_buf)(unsigned char *buf, int len, void *end);
 };
 
 #endif /* _IFX6X60_H */

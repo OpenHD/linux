@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 1996-1998  Linus Torvalds & authors (see below)
  */
@@ -131,7 +132,7 @@ static const struct ide_port_ops opti621_port_ops = {
 	.set_pio_mode		= opti621_set_pio_mode,
 };
 
-static const struct ide_port_info opti621_chipset __devinitdata = {
+static const struct ide_port_info opti621_chipset = {
 	.name		= DRV_NAME,
 	.enablebits	= { {0x45, 0x80, 0x00}, {0x40, 0x08, 0x00} },
 	.port_ops	= &opti621_port_ops,
@@ -139,7 +140,7 @@ static const struct ide_port_info opti621_chipset __devinitdata = {
 	.pio_mask	= ATA_PIO4,
 };
 
-static int __devinit opti621_init_one(struct pci_dev *dev, const struct pci_device_id *id)
+static int opti621_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	return ide_pci_init_one(dev, &opti621_chipset, NULL);
 }

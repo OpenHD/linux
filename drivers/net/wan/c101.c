@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Moxa C101 synchronous serial card driver for Linux
  *
  * Copyright (C) 2000-2003 Krzysztof Halasa <khc@pm.waw.pl>
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
- *
- * For information see <http://www.kernel.org/pub/linux/utils/net/hdlc/>
+ * For information see <https://www.kernel.org/pub/linux/utils/net/hdlc/>
  *
  * Sources of information:
  *    Hitachi HD64570 SCA User's Manual
@@ -24,7 +21,6 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/moduleparam.h>
 #include <linux/netdevice.h>
 #include <linux/hdlc.h>
 #include <linux/delay.h>
@@ -302,7 +298,6 @@ static void c101_destroy_card(card_t *card)
 static const struct net_device_ops c101_ops = {
 	.ndo_open       = c101_open,
 	.ndo_stop       = c101_close,
-	.ndo_change_mtu = hdlc_change_mtu,
 	.ndo_start_xmit = hdlc_start_xmit,
 	.ndo_do_ioctl   = c101_ioctl,
 };
@@ -325,10 +320,8 @@ static int __init c101_run(unsigned long irq, unsigned long winbase)
 	}
 
 	card = kzalloc(sizeof(card_t), GFP_KERNEL);
-	if (card == NULL) {
-		pr_err("unable to allocate memory\n");
+	if (card == NULL)
 		return -ENOBUFS;
-	}
 
 	card->dev = alloc_hdlcdev(card);
 	if (!card->dev) {

@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram VXpocket V2/440 soundcards
  *
  * Copyright (c) 2002 by Takashi Iwai <tiwai@suse.de>
 
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 
@@ -39,7 +27,7 @@ MODULE_SUPPORTED_DEVICE("{{Digigram,VXPocket},{Digigram,VXPocket440}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
-static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable switches */
+static bool enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable switches */
 static int ibl[SNDRV_CARDS];
 
 module_param_array(index, int, NULL, 0444);
@@ -62,6 +50,7 @@ static unsigned int card_alloc;
  */
 static void vxpocket_release(struct pcmcia_device *link)
 {
+	free_irq(link->irq, link->priv);
 	pcmcia_disable_device(link);
 }
 
@@ -93,7 +82,7 @@ static int snd_vxpocket_dev_free(struct snd_device *device)
 
 static const DECLARE_TLV_DB_SCALE(db_scale_old_vol, -11350, 50, 0);
 
-static struct snd_vx_hardware vxpocket_hw = {
+static const struct snd_vx_hardware vxpocket_hw = {
 	.name = "VXPocket",
 	.type = VX_TYPE_VXPOCKET,
 
@@ -115,7 +104,7 @@ static struct snd_vx_hardware vxpocket_hw = {
  * UER, but only for the first two inputs and outputs.
  */
 
-static struct snd_vx_hardware vxp440_hw = {
+static const struct snd_vx_hardware vxp440_hw = {
 	.name = "VXPocket440",
 	.type = VX_TYPE_VXP440,
 
@@ -137,7 +126,7 @@ static int snd_vxpocket_new(struct snd_card *card, int ibl,
 {
 	struct vx_core *chip;
 	struct snd_vxpocket *vxp;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free =	snd_vxpocket_dev_free,
 	};
 	int err;
@@ -154,7 +143,7 @@ static int snd_vxpocket_new(struct snd_card *card, int ibl,
 	}
 	chip->ibl.size = ibl;
 
-	vxp = (struct snd_vxpocket *)chip;
+	vxp = to_vxpocket(chip);
 
 	vxp->p_dev = link;
 	link->priv = chip;
@@ -173,6 +162,7 @@ static int snd_vxpocket_new(struct snd_card *card, int ibl,
 
 /**
  * snd_vxpocket_assign_resources - initialize the hardware and card instance.
+ * @chip: VX core instance
  * @port: i/o port for the card
  * @irq: irq number for the card
  *
@@ -185,7 +175,7 @@ static int snd_vxpocket_assign_resources(struct vx_core *chip, int port, int irq
 {
 	int err;
 	struct snd_card *card = chip->card;
-	struct snd_vxpocket *vxp = (struct snd_vxpocket *)chip;
+	struct snd_vxpocket *vxp = to_vxpocket(chip);
 
 	snd_printdd(KERN_DEBUG "vxpocket assign resources: port = 0x%x, irq = %d\n", port, irq);
 	vxp->port = port;
@@ -195,6 +185,7 @@ static int snd_vxpocket_assign_resources(struct vx_core *chip, int port, int irq
 		card->shortname, port, irq);
 
 	chip->irq = irq;
+	card->sync_irq = chip->irq;
 
 	if ((err = snd_vx_setup_firmware(chip)) < 0)
 		return err;
@@ -227,18 +218,19 @@ static int vxpocket_config(struct pcmcia_device *link)
 
 	ret = pcmcia_request_io(link);
 	if (ret)
-		goto failed;
+		goto failed_preirq;
 
-	ret = pcmcia_request_irq(link, snd_vx_irq_handler);
+	ret = request_threaded_irq(link->irq, snd_vx_irq_handler,
+				   snd_vx_threaded_irq_handler,
+				   IRQF_SHARED, link->devname, link->priv);
 	if (ret)
-		goto failed;
+		goto failed_preirq;
 
 	ret = pcmcia_enable_device(link);
 	if (ret)
 		goto failed;
 
 	chip->dev = &link->dev;
-	snd_card_set_dev(chip->card, chip->dev);
 
 	if (snd_vxpocket_assign_resources(chip, link->resource[0]->start,
 						link->irq) < 0)
@@ -246,7 +238,9 @@ static int vxpocket_config(struct pcmcia_device *link)
 
 	return 0;
 
-failed:
+ failed:
+	free_irq(link->irq, link->priv);
+failed_preirq:
 	pcmcia_disable_device(link);
 	return -ENODEV;
 }
@@ -260,7 +254,7 @@ static int vxp_suspend(struct pcmcia_device *link)
 	snd_printdd(KERN_DEBUG "SUSPEND\n");
 	if (chip) {
 		snd_printdd(KERN_DEBUG "snd_vx_suspend calling\n");
-		snd_vx_suspend(chip, PMSG_SUSPEND);
+		snd_vx_suspend(chip);
 	}
 
 	return 0;
@@ -307,7 +301,8 @@ static int vxpocket_probe(struct pcmcia_device *p_dev)
 		return -ENODEV; /* disabled explicitly */
 
 	/* ok, create a card instance */
-	err = snd_card_create(index[i], id[i], THIS_MODULE, 0, &card);
+	err = snd_card_new(&p_dev->dev, index[i], id[i], THIS_MODULE,
+			   0, &card);
 	if (err < 0) {
 		snd_printk(KERN_ERR "vxpocket: cannot create a card instance\n");
 		return err;
@@ -367,16 +362,4 @@ static struct pcmcia_driver vxp_cs_driver = {
 	.resume		= vxp_resume,
 #endif
 };
-
-static int __init init_vxpocket(void)
-{
-	return pcmcia_register_driver(&vxp_cs_driver);
-}
-
-static void __exit exit_vxpocket(void)
-{
-	pcmcia_unregister_driver(&vxp_cs_driver);
-}
-
-module_init(init_vxpocket);
-module_exit(exit_vxpocket);
+module_pcmcia_driver(vxp_cs_driver);

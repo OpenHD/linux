@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Kernel Probes (KProbes)
  *  arch/mips/kernel/kprobes.c
@@ -8,29 +9,19 @@
  *  Some portions copied from the powerpc version.
  *
  *   Copyright (C) IBM Corporation, 2002, 2004
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kprobes.h>
 #include <linux/preempt.h>
+#include <linux/uaccess.h>
 #include <linux/kdebug.h>
 #include <linux/slab.h>
 
 #include <asm/ptrace.h>
+#include <asm/branch.h>
 #include <asm/break.h>
-#include <asm/inst.h>
+
+#include "probes-common.h"
 
 static const union mips_instruction breakpoint_insn = {
 	.b_format = {
@@ -53,63 +44,31 @@ DEFINE_PER_CPU(struct kprobe_ctlblk, kprobe_ctlblk);
 
 static int __kprobes insn_has_delayslot(union mips_instruction insn)
 {
+	return __insn_has_delay_slot(insn);
+}
+
+/*
+ * insn_has_ll_or_sc function checks whether instruction is ll or sc
+ * one; putting breakpoint on top of atomic ll/sc pair is bad idea;
+ * so we need to prevent it and refuse kprobes insertion for such
+ * instructions; cannot do much about breakpoint in the middle of
+ * ll/sc pair; it is upto user to avoid those places
+ */
+static int __kprobes insn_has_ll_or_sc(union mips_instruction insn)
+{
+	int ret = 0;
+
 	switch (insn.i_format.opcode) {
-
-		/*
-		 * This group contains:
-		 * jr and jalr are in r_format format.
-		 */
-	case spec_op:
-		switch (insn.r_format.func) {
-		case jr_op:
-		case jalr_op:
-			break;
-		default:
-			goto insn_ok;
-		}
-
-		/*
-		 * This group contains:
-		 * bltz_op, bgez_op, bltzl_op, bgezl_op,
-		 * bltzal_op, bgezal_op, bltzall_op, bgezall_op.
-		 */
-	case bcond_op:
-
-		/*
-		 * These are unconditional and in j_format.
-		 */
-	case jal_op:
-	case j_op:
-
-		/*
-		 * These are conditional and in i_format.
-		 */
-	case beq_op:
-	case beql_op:
-	case bne_op:
-	case bnel_op:
-	case blez_op:
-	case blezl_op:
-	case bgtz_op:
-	case bgtzl_op:
-
-		/*
-		 * These are the FPA/cp1 branch instructions.
-		 */
-	case cop1_op:
-
-#ifdef CONFIG_CPU_CAVIUM_OCTEON
-	case lwc2_op: /* This is bbit0 on Octeon */
-	case ldc2_op: /* This is bbit032 on Octeon */
-	case swc2_op: /* This is bbit1 on Octeon */
-	case sdc2_op: /* This is bbit132 on Octeon */
-#endif
-		return 1;
+	case ll_op:
+	case lld_op:
+	case sc_op:
+	case scd_op:
+		ret = 1;
+		break;
 	default:
 		break;
 	}
-insn_ok:
-	return 0;
+	return ret;
 }
 
 int __kprobes arch_prepare_kprobe(struct kprobe *p)
@@ -118,11 +77,25 @@ int __kprobes arch_prepare_kprobe(struct kprobe *p)
 	union mips_instruction prev_insn;
 	int ret = 0;
 
-	prev_insn = p->addr[-1];
 	insn = p->addr[0];
 
-	if (insn_has_delayslot(insn) || insn_has_delayslot(prev_insn)) {
-		pr_notice("Kprobes for branch and jump instructions are not supported\n");
+	if (insn_has_ll_or_sc(insn)) {
+		pr_notice("Kprobes for ll and sc instructions are not"
+			  "supported\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (copy_from_kernel_nofault(&prev_insn, p->addr - 1,
+			sizeof(mips_instruction)) == 0 &&
+	    insn_has_delayslot(prev_insn)) {
+		pr_notice("Kprobes for branch delayslot are not supported\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (__insn_is_compact_branch(insn)) {
+		pr_notice("Kprobes for compact branches are not supported\n");
 		ret = -EINVAL;
 		goto out;
 	}
@@ -138,9 +111,20 @@ int __kprobes arch_prepare_kprobe(struct kprobe *p)
 	 * In the kprobe->ainsn.insn[] array we store the original
 	 * instruction at index zero and a break trap instruction at
 	 * index one.
+	 *
+	 * On MIPS arch if the instruction at probed address is a
+	 * branch instruction, we need to execute the instruction at
+	 * Branch Delayslot (BD) at the time of probe hit. As MIPS also
+	 * doesn't have single stepping support, the BD instruction can
+	 * not be executed in-line and it would be executed on SSOL slot
+	 * using a normal breakpoint instruction in the next slot.
+	 * So, read the instruction and save it for later execution.
 	 */
+	if (insn_has_delayslot(insn))
+		memcpy(&p->ainsn.insn[0], p->addr + 1, sizeof(kprobe_opcode_t));
+	else
+		memcpy(&p->ainsn.insn[0], p->addr, sizeof(kprobe_opcode_t));
 
-	memcpy(&p->ainsn.insn[0], p->addr, sizeof(kprobe_opcode_t));
 	p->ainsn.insn[1] = breakpoint2_insn;
 	p->opcode = *p->addr;
 
@@ -162,7 +146,10 @@ void __kprobes arch_disarm_kprobe(struct kprobe *p)
 
 void __kprobes arch_remove_kprobe(struct kprobe *p)
 {
-	free_insn_slot(p->ainsn.insn, 0);
+	if (p->ainsn.insn) {
+		free_insn_slot(p->ainsn.insn, 0);
+		p->ainsn.insn = NULL;
+	}
 }
 
 static void save_previous_kprobe(struct kprobe_ctlblk *kcb)
@@ -176,7 +163,7 @@ static void save_previous_kprobe(struct kprobe_ctlblk *kcb)
 
 static void restore_previous_kprobe(struct kprobe_ctlblk *kcb)
 {
-	__get_cpu_var(current_kprobe) = kcb->prev_kprobe.kp;
+	__this_cpu_write(current_kprobe, kcb->prev_kprobe.kp);
 	kcb->kprobe_status = kcb->prev_kprobe.status;
 	kcb->kprobe_old_SR = kcb->prev_kprobe.old_SR;
 	kcb->kprobe_saved_SR = kcb->prev_kprobe.saved_SR;
@@ -186,21 +173,101 @@ static void restore_previous_kprobe(struct kprobe_ctlblk *kcb)
 static void set_current_kprobe(struct kprobe *p, struct pt_regs *regs,
 			       struct kprobe_ctlblk *kcb)
 {
-	__get_cpu_var(current_kprobe) = p;
+	__this_cpu_write(current_kprobe, p);
 	kcb->kprobe_saved_SR = kcb->kprobe_old_SR = (regs->cp0_status & ST0_IE);
 	kcb->kprobe_saved_epc = regs->cp0_epc;
 }
 
-static void prepare_singlestep(struct kprobe *p, struct pt_regs *regs)
+/**
+ * evaluate_branch_instrucion -
+ *
+ * Evaluate the branch instruction at probed address during probe hit. The
+ * result of evaluation would be the updated epc. The insturction in delayslot
+ * would actually be single stepped using a normal breakpoint) on SSOL slot.
+ *
+ * The result is also saved in the kprobe control block for later use,
+ * in case we need to execute the delayslot instruction. The latter will be
+ * false for NOP instruction in dealyslot and the branch-likely instructions
+ * when the branch is taken. And for those cases we set a flag as
+ * SKIP_DELAYSLOT in the kprobe control block
+ */
+static int evaluate_branch_instruction(struct kprobe *p, struct pt_regs *regs,
+					struct kprobe_ctlblk *kcb)
 {
+	union mips_instruction insn = p->opcode;
+	long epc;
+	int ret = 0;
+
+	epc = regs->cp0_epc;
+	if (epc & 3)
+		goto unaligned;
+
+	if (p->ainsn.insn->word == 0)
+		kcb->flags |= SKIP_DELAYSLOT;
+	else
+		kcb->flags &= ~SKIP_DELAYSLOT;
+
+	ret = __compute_return_epc_for_insn(regs, insn);
+	if (ret < 0)
+		return ret;
+
+	if (ret == BRANCH_LIKELY_TAKEN)
+		kcb->flags |= SKIP_DELAYSLOT;
+
+	kcb->target_epc = regs->cp0_epc;
+
+	return 0;
+
+unaligned:
+	pr_notice("%s: unaligned epc - sending SIGBUS.\n", current->comm);
+	force_sig(SIGBUS);
+	return -EFAULT;
+
+}
+
+static void prepare_singlestep(struct kprobe *p, struct pt_regs *regs,
+						struct kprobe_ctlblk *kcb)
+{
+	int ret = 0;
+
 	regs->cp0_status &= ~ST0_IE;
 
 	/* single step inline if the instruction is a break */
 	if (p->opcode.word == breakpoint_insn.word ||
 	    p->opcode.word == breakpoint2_insn.word)
 		regs->cp0_epc = (unsigned long)p->addr;
-	else
-		regs->cp0_epc = (unsigned long)&p->ainsn.insn[0];
+	else if (insn_has_delayslot(p->opcode)) {
+		ret = evaluate_branch_instruction(p, regs, kcb);
+		if (ret < 0) {
+			pr_notice("Kprobes: Error in evaluating branch\n");
+			return;
+		}
+	}
+	regs->cp0_epc = (unsigned long)&p->ainsn.insn[0];
+}
+
+/*
+ * Called after single-stepping.  p->addr is the address of the
+ * instruction whose first byte has been replaced by the "break 0"
+ * instruction.	 To avoid the SMP problems that can occur when we
+ * temporarily put back the original opcode to single-step, we
+ * single-stepped a copy of the instruction.  The address of this
+ * copy is p->ainsn.insn.
+ *
+ * This function prepares to return from the post-single-step
+ * breakpoint trap. In case of branch instructions, the target
+ * epc to be restored.
+ */
+static void __kprobes resume_execution(struct kprobe *p,
+				       struct pt_regs *regs,
+				       struct kprobe_ctlblk *kcb)
+{
+	if (insn_has_delayslot(p->opcode))
+		regs->cp0_epc = kcb->target_epc;
+	else {
+		unsigned long orig_epc = kcb->kprobe_saved_epc;
+		regs->cp0_epc = orig_epc + 4;
+	}
 }
 
 static int __kprobes kprobe_handler(struct pt_regs *regs)
@@ -239,22 +306,21 @@ static int __kprobes kprobe_handler(struct pt_regs *regs)
 			save_previous_kprobe(kcb);
 			set_current_kprobe(p, regs, kcb);
 			kprobes_inc_nmissed_count(p);
-			prepare_singlestep(p, regs);
+			prepare_singlestep(p, regs, kcb);
 			kcb->kprobe_status = KPROBE_REENTER;
-			return 1;
-		} else {
-			if (addr->word != breakpoint_insn.word) {
-				/*
-				 * The breakpoint instruction was removed by
-				 * another cpu right after we hit, no further
-				 * handling of this interrupt is appropriate
-				 */
-				ret = 1;
-				goto no_kprobe;
+			if (kcb->flags & SKIP_DELAYSLOT) {
+				resume_execution(p, regs, kcb);
+				restore_previous_kprobe(kcb);
+				preempt_enable_no_resched();
 			}
-			p = __get_cpu_var(current_kprobe);
-			if (p->break_handler && p->break_handler(p, regs))
-				goto ss_probe;
+			return 1;
+		} else if (addr->word != breakpoint_insn.word) {
+			/*
+			 * The breakpoint instruction was removed by
+			 * another cpu right after we hit, no further
+			 * handling of this interrupt is appropriate
+			 */
+			ret = 1;
 		}
 		goto no_kprobe;
 	}
@@ -280,37 +346,27 @@ static int __kprobes kprobe_handler(struct pt_regs *regs)
 
 	if (p->pre_handler && p->pre_handler(p, regs)) {
 		/* handler has already set things up, so skip ss setup */
+		reset_current_kprobe();
+		preempt_enable_no_resched();
 		return 1;
 	}
 
-ss_probe:
-	prepare_singlestep(p, regs);
-	kcb->kprobe_status = KPROBE_HIT_SS;
+	prepare_singlestep(p, regs, kcb);
+	if (kcb->flags & SKIP_DELAYSLOT) {
+		kcb->kprobe_status = KPROBE_HIT_SSDONE;
+		if (p->post_handler)
+			p->post_handler(p, regs, 0);
+		resume_execution(p, regs, kcb);
+		preempt_enable_no_resched();
+	} else
+		kcb->kprobe_status = KPROBE_HIT_SS;
+
 	return 1;
 
 no_kprobe:
 	preempt_enable_no_resched();
 	return ret;
 
-}
-
-/*
- * Called after single-stepping.  p->addr is the address of the
- * instruction whose first byte has been replaced by the "break 0"
- * instruction.  To avoid the SMP problems that can occur when we
- * temporarily put back the original opcode to single-step, we
- * single-stepped a copy of the instruction.  The address of this
- * copy is p->ainsn.insn.
- *
- * This function prepares to return from the post-single-step
- * breakpoint trap.
- */
-static void __kprobes resume_execution(struct kprobe *p,
-				       struct pt_regs *regs,
-				       struct kprobe_ctlblk *kcb)
-{
-	unsigned long orig_epc = kcb->kprobe_saved_epc;
-	regs->cp0_epc = orig_epc + 4;
 }
 
 static inline int post_kprobe_handler(struct pt_regs *regs)
@@ -342,7 +398,7 @@ out:
 	return 1;
 }
 
-static inline int kprobe_fault_handler(struct pt_regs *regs, int trapnr)
+int kprobe_fault_handler(struct pt_regs *regs, int trapnr)
 {
 	struct kprobe *cur = kprobe_running();
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
@@ -395,51 +451,6 @@ int __kprobes kprobe_exceptions_notify(struct notifier_block *self,
 	return ret;
 }
 
-int __kprobes setjmp_pre_handler(struct kprobe *p, struct pt_regs *regs)
-{
-	struct jprobe *jp = container_of(p, struct jprobe, kp);
-	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
-
-	kcb->jprobe_saved_regs = *regs;
-	kcb->jprobe_saved_sp = regs->regs[29];
-
-	memcpy(kcb->jprobes_stack, (void *)kcb->jprobe_saved_sp,
-	       MIN_JPROBES_STACK_SIZE(kcb->jprobe_saved_sp));
-
-	regs->cp0_epc = (unsigned long)(jp->entry);
-
-	return 1;
-}
-
-/* Defined in the inline asm below. */
-void jprobe_return_end(void);
-
-void __kprobes jprobe_return(void)
-{
-	/* Assembler quirk necessitates this '0,code' business.  */
-	asm volatile(
-		"break 0,%0\n\t"
-		".globl jprobe_return_end\n"
-		"jprobe_return_end:\n"
-		: : "n" (BRK_KPROBE_BP) : "memory");
-}
-
-int __kprobes longjmp_break_handler(struct kprobe *p, struct pt_regs *regs)
-{
-	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
-
-	if (regs->cp0_epc >= (unsigned long)jprobe_return &&
-	    regs->cp0_epc <= (unsigned long)jprobe_return_end) {
-		*regs = kcb->jprobe_saved_regs;
-		memcpy((void *)kcb->jprobe_saved_sp, kcb->jprobes_stack,
-		       MIN_JPROBES_STACK_SIZE(kcb->jprobe_saved_sp));
-		preempt_enable_no_resched();
-
-		return 1;
-	}
-	return 0;
-}
-
 /*
  * Function return probe trampoline:
  *	- init_kprobes() establishes a probepoint here
@@ -466,6 +477,7 @@ void __kprobes arch_prepare_kretprobe(struct kretprobe_instance *ri,
 				      struct pt_regs *regs)
 {
 	ri->ret_addr = (kprobe_opcode_t *) regs->regs[31];
+	ri->fp = NULL;
 
 	/* Replace the return addr with trampoline addr */
 	regs->regs[31] = (unsigned long)kretprobe_trampoline;
@@ -477,59 +489,8 @@ void __kprobes arch_prepare_kretprobe(struct kretprobe_instance *ri,
 static int __kprobes trampoline_probe_handler(struct kprobe *p,
 						struct pt_regs *regs)
 {
-	struct kretprobe_instance *ri = NULL;
-	struct hlist_head *head, empty_rp;
-	struct hlist_node *node, *tmp;
-	unsigned long flags, orig_ret_address = 0;
-	unsigned long trampoline_address = (unsigned long)kretprobe_trampoline;
-
-	INIT_HLIST_HEAD(&empty_rp);
-	kretprobe_hash_lock(current, &head, &flags);
-
-	/*
-	 * It is possible to have multiple instances associated with a given
-	 * task either because an multiple functions in the call path
-	 * have a return probe installed on them, and/or more than one return
-	 * return probe was registered for a target function.
-	 *
-	 * We can handle this because:
-	 *     - instances are always inserted at the head of the list
-	 *     - when multiple return probes are registered for the same
-	 *       function, the first instance's ret_addr will point to the
-	 *       real return address, and all the rest will point to
-	 *       kretprobe_trampoline
-	 */
-	hlist_for_each_entry_safe(ri, node, tmp, head, hlist) {
-		if (ri->task != current)
-			/* another task is sharing our hash bucket */
-			continue;
-
-		if (ri->rp && ri->rp->handler)
-			ri->rp->handler(ri, regs);
-
-		orig_ret_address = (unsigned long)ri->ret_addr;
-		recycle_rp_inst(ri, &empty_rp);
-
-		if (orig_ret_address != trampoline_address)
-			/*
-			 * This is the real return address. Any other
-			 * instances associated with this task are for
-			 * other calls deeper on the call stack
-			 */
-			break;
-	}
-
-	kretprobe_assert(ri, orig_ret_address, trampoline_address);
-	instruction_pointer(regs) = orig_ret_address;
-
-	reset_current_kprobe();
-	kretprobe_hash_unlock(current, &flags);
-	preempt_enable_no_resched();
-
-	hlist_for_each_entry_safe(ri, node, tmp, &empty_rp, hlist) {
-		hlist_del(&ri->hlist);
-		kfree(ri);
-	}
+	instruction_pointer(regs) = __kretprobe_trampoline_handler(regs,
+						kretprobe_trampoline, NULL);
 	/*
 	 * By returning a non-zero value, we are telling
 	 * kprobe_handler() that we don't want the post_handler

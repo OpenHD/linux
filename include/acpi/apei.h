@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * apei.h - ACPI Platform Error Interface
  */
@@ -16,10 +17,16 @@
 
 #ifdef __KERNEL__
 
+enum hest_status {
+	HEST_ENABLED,
+	HEST_DISABLED,
+	HEST_NOT_FOUND,
+};
+
 extern int hest_disable;
 extern int erst_disable;
 #ifdef CONFIG_ACPI_APEI_GHES
-extern int ghes_disable;
+extern bool ghes_disable;
 #else
 #define ghes_disable 1
 #endif
@@ -41,6 +48,9 @@ void erst_get_record_id_end(void);
 ssize_t erst_read(u64 record_id, struct cper_record_header *record,
 		  size_t buflen);
 int erst_clear(u64 record_id);
+
+int arch_apei_enable_cmcff(struct acpi_hest_header *hest_hdr, void *data);
+void arch_apei_report_mem_error(int sev, struct cper_sec_mem_err *mem_err);
 
 #endif
 #endif

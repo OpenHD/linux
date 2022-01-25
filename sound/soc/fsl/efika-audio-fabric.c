@@ -26,30 +26,39 @@
 #include <sound/soc.h>
 
 #include "mpc5200_dma.h"
-#include "mpc5200_psc_ac97.h"
-#include "../codecs/stac9766.h"
 
 #define DRV_NAME "efika-audio-fabric"
 
-static struct snd_soc_card card;
+SND_SOC_DAILINK_DEFS(analog,
+	DAILINK_COMP_ARRAY(COMP_CPU("mpc5200-psc-ac97.0")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("stac9766-codec",
+				      "stac9766-hifi-analog")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("mpc5200-pcm-audio")));
+
+SND_SOC_DAILINK_DEFS(iec958,
+	DAILINK_COMP_ARRAY(COMP_CPU("mpc5200-psc-ac97.1")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("stac9766-codec",
+				      "stac9766-hifi-IEC958")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("mpc5200-pcm-audio")));
 
 static struct snd_soc_dai_link efika_fabric_dai[] = {
 {
 	.name = "AC97",
 	.stream_name = "AC97 Analog",
-	.codec_dai_name = "stac9766-hifi-analog",
-	.cpu_dai_name = "mpc5200-psc-ac97.0",
-	.platform_name = "mpc5200-pcm-audio",
-	.codec_name = "stac9766-codec",
+	SND_SOC_DAILINK_REG(analog),
 },
 {
 	.name = "AC97",
 	.stream_name = "AC97 IEC958",
-	.codec_dai_name = "stac9766-hifi-IEC958",
-	.cpu_dai_name = "mpc5200-psc-ac97.1",
-	.platform_name = "mpc5200-pcm-audio",
-	.codec_name = "stac9766-codec",
+	SND_SOC_DAILINK_REG(iec958),
 },
+};
+
+static struct snd_soc_card card = {
+	.name = "Efika",
+	.owner = THIS_MODULE,
+	.dai_link = efika_fabric_dai,
+	.num_links = ARRAY_SIZE(efika_fabric_dai),
 };
 
 static __init int efika_fabric_init(void)
@@ -59,11 +68,6 @@ static __init int efika_fabric_init(void)
 
 	if (!of_machine_is_compatible("bplan,efika"))
 		return -ENODEV;
-
-	card.name = "Efika";
-	card.dai_link = efika_fabric_dai;
-	card.num_links = ARRAY_SIZE(efika_fabric_dai);
-
 
 	pdev = platform_device_alloc("soc-audio", 1);
 	if (!pdev) {

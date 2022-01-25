@@ -1,19 +1,15 @@
-/* videomate-m1f.h - Keytable for videomate_m1f Remote Controller
+// SPDX-License-Identifier: GPL-2.0-or-later
+/* videomate-k100.h - Keytable for videomate_k100 Remote Controller
  *
  * keymap imported from ir-keymaps.c
  *
  * Copyright (c) 2010 by Pavel Osnova <pvosnova@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <media/rc-map.h>
 #include <linux/module.h>
 
-static struct rc_map_table videomate_m1f[] = {
+static struct rc_map_table videomate_k100[] = {
 	{ 0x01, KEY_POWER },
 	{ 0x31, KEY_TUNER },
 	{ 0x33, KEY_VIDEO },
@@ -45,17 +41,17 @@ static struct rc_map_table videomate_m1f[] = {
 	{ 0x10, KEY_PREVIOUS },
 	{ 0x0d, KEY_PAUSE },
 	{ 0x0f, KEY_NEXT },
-	{ 0x1e, KEY_1 },
-	{ 0x1f, KEY_2 },
-	{ 0x20, KEY_3 },
-	{ 0x21, KEY_4 },
-	{ 0x22, KEY_5 },
-	{ 0x23, KEY_6 },
-	{ 0x24, KEY_7 },
-	{ 0x25, KEY_8 },
-	{ 0x26, KEY_9 },
+	{ 0x1e, KEY_NUMERIC_1 },
+	{ 0x1f, KEY_NUMERIC_2 },
+	{ 0x20, KEY_NUMERIC_3 },
+	{ 0x21, KEY_NUMERIC_4 },
+	{ 0x22, KEY_NUMERIC_5 },
+	{ 0x23, KEY_NUMERIC_6 },
+	{ 0x24, KEY_NUMERIC_7 },
+	{ 0x25, KEY_NUMERIC_8 },
+	{ 0x26, KEY_NUMERIC_9 },
 	{ 0x2a, KEY_NUMERIC_STAR }, /* * key */
-	{ 0x1d, KEY_0 },
+	{ 0x1d, KEY_NUMERIC_0 },
 	{ 0x29, KEY_SUBTITLE }, /* # key */
 	{ 0x27, KEY_CLEAR },
 	{ 0x34, KEY_SCREEN },
@@ -67,27 +63,27 @@ static struct rc_map_table videomate_m1f[] = {
 	{ 0x18, KEY_TEXT },
 };
 
-static struct rc_map_list videomate_m1f_map = {
+static struct rc_map_list videomate_k100_map = {
 	.map = {
-		.scan    = videomate_m1f,
-		.size    = ARRAY_SIZE(videomate_m1f),
-		.rc_type = RC_TYPE_UNKNOWN,     /* Legacy IR type */
-		.name    = RC_MAP_VIDEOMATE_M1F,
+		.scan     = videomate_k100,
+		.size     = ARRAY_SIZE(videomate_k100),
+		.rc_proto = RC_PROTO_UNKNOWN,     /* Legacy IR type */
+		.name     = RC_MAP_VIDEOMATE_K100,
 	}
 };
 
-static int __init init_rc_map_videomate_m1f(void)
+static int __init init_rc_map_videomate_k100(void)
 {
-	return rc_map_register(&videomate_m1f_map);
+	return rc_map_register(&videomate_k100_map);
 }
 
-static void __exit exit_rc_map_videomate_m1f(void)
+static void __exit exit_rc_map_videomate_k100(void)
 {
-	rc_map_unregister(&videomate_m1f_map);
+	rc_map_unregister(&videomate_k100_map);
 }
 
-module_init(init_rc_map_videomate_m1f)
-module_exit(exit_rc_map_videomate_m1f)
+module_init(init_rc_map_videomate_k100)
+module_exit(exit_rc_map_videomate_k100)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pavel Osnova <pvosnova@gmail.com>");

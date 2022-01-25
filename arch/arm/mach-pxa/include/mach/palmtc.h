@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/include/asm-arm/arch-pxa/palmtc-gpio.h
  *
@@ -6,15 +7,12 @@
  * Authors:	Alex Osborne <bobofdoom@gmail.com>
  *		Marek Vasut <marek.vasut@gmail.com>
  *		Holger Bocklet <bitz.email@gmx.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #ifndef _INCLUDE_PALMTC_H_
 #define _INCLUDE_PALMTC_H_
+
+#include "irqs.h" /* PXA_GPIO_TO_IRQ */
 
 /** HERE ARE GPIOs **/
 
@@ -52,8 +50,8 @@
 #define GPIO_NR_PALMTC_IR_DISABLE	45
 
 /* IRQs */
-#define IRQ_GPIO_PALMTC_SD_DETECT_N	IRQ_GPIO(GPIO_NR_PALMTC_SD_DETECT_N)
-#define IRQ_GPIO_PALMTC_WLAN_READY	IRQ_GPIO(GPIO_NR_PALMTC_WLAN_READY)
+#define IRQ_GPIO_PALMTC_SD_DETECT_N	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTC_SD_DETECT_N)
+#define IRQ_GPIO_PALMTC_WLAN_READY	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTC_WLAN_READY)
 
 /* UCB1400 GPIOs */
 #define GPIO_NR_PALMTC_POWER_DETECT	(0x80 | 0x00)

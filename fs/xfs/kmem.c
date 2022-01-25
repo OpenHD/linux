@@ -1,132 +1,95 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2005 Silicon Graphics, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-#include <linux/mm.h>
-#include <linux/highmem.h>
-#include <linux/slab.h>
-#include <linux/swap.h>
-#include <linux/blkdev.h>
+#include "xfs.h"
 #include <linux/backing-dev.h>
-#include "time.h"
-#include "kmem.h"
 #include "xfs_message.h"
-
-/*
- * Greedy allocation.  May fail and may return vmalloced memory.
- *
- * Must be freed using kmem_free_large.
- */
-void *
-kmem_zalloc_greedy(size_t *size, size_t minsize, size_t maxsize)
-{
-	void		*ptr;
-	size_t		kmsize = maxsize;
-
-	while (!(ptr = kmem_zalloc_large(kmsize))) {
-		if ((kmsize >>= 1) <= minsize)
-			kmsize = minsize;
-	}
-	if (ptr)
-		*size = kmsize;
-	return ptr;
-}
+#include "xfs_trace.h"
 
 void *
-kmem_alloc(size_t size, unsigned int __nocast flags)
+kmem_alloc(size_t size, xfs_km_flags_t flags)
 {
 	int	retries = 0;
 	gfp_t	lflags = kmem_flags_convert(flags);
 	void	*ptr;
+
+	trace_kmem_alloc(size, flags, _RET_IP_);
 
 	do {
 		ptr = kmalloc(size, lflags);
-		if (ptr || (flags & (KM_MAYFAIL|KM_NOSLEEP)))
+		if (ptr || (flags & KM_MAYFAIL))
 			return ptr;
 		if (!(++retries % 100))
 			xfs_err(NULL,
-		"possible memory allocation deadlock in %s (mode:0x%x)",
-					__func__, lflags);
+	"%s(%u) possible memory allocation deadlock size %u in %s (mode:0x%x)",
+				current->comm, current->pid,
+				(unsigned int)size, __func__, lflags);
 		congestion_wait(BLK_RW_ASYNC, HZ/50);
 	} while (1);
 }
 
-void *
-kmem_zalloc(size_t size, unsigned int __nocast flags)
+
+/*
+ * __vmalloc() will allocate data pages and auxiliary structures (e.g.
+ * pagetables) with GFP_KERNEL, yet we may be under GFP_NOFS context here. Hence
+ * we need to tell memory reclaim that we are in such a context via
+ * PF_MEMALLOC_NOFS to prevent memory reclaim re-entering the filesystem here
+ * and potentially deadlocking.
+ */
+static void *
+__kmem_vmalloc(size_t size, xfs_km_flags_t flags)
 {
+	unsigned nofs_flag = 0;
 	void	*ptr;
-
-	ptr = kmem_alloc(size, flags);
-	if (ptr)
-		memset((char *)ptr, 0, (int)size);
-	return ptr;
-}
-
-void
-kmem_free(const void *ptr)
-{
-	if (!is_vmalloc_addr(ptr)) {
-		kfree(ptr);
-	} else {
-		vfree(ptr);
-	}
-}
-
-void *
-kmem_realloc(const void *ptr, size_t newsize, size_t oldsize,
-	     unsigned int __nocast flags)
-{
-	void	*new;
-
-	new = kmem_alloc(newsize, flags);
-	if (ptr) {
-		if (new)
-			memcpy(new, ptr,
-				((oldsize < newsize) ? oldsize : newsize));
-		kmem_free(ptr);
-	}
-	return new;
-}
-
-void *
-kmem_zone_alloc(kmem_zone_t *zone, unsigned int __nocast flags)
-{
-	int	retries = 0;
 	gfp_t	lflags = kmem_flags_convert(flags);
-	void	*ptr;
 
-	do {
-		ptr = kmem_cache_alloc(zone, lflags);
-		if (ptr || (flags & (KM_MAYFAIL|KM_NOSLEEP)))
-			return ptr;
-		if (!(++retries % 100))
-			xfs_err(NULL,
-		"possible memory allocation deadlock in %s (mode:0x%x)",
-					__func__, lflags);
-		congestion_wait(BLK_RW_ASYNC, HZ/50);
-	} while (1);
+	if (flags & KM_NOFS)
+		nofs_flag = memalloc_nofs_save();
+
+	ptr = __vmalloc(size, lflags);
+
+	if (flags & KM_NOFS)
+		memalloc_nofs_restore(nofs_flag);
+
+	return ptr;
 }
 
+/*
+ * Same as kmem_alloc_large, except we guarantee the buffer returned is aligned
+ * to the @align_mask. We only guarantee alignment up to page size, we'll clamp
+ * alignment at page size if it is larger. vmalloc always returns a PAGE_SIZE
+ * aligned region.
+ */
 void *
-kmem_zone_zalloc(kmem_zone_t *zone, unsigned int __nocast flags)
+kmem_alloc_io(size_t size, int align_mask, xfs_km_flags_t flags)
 {
 	void	*ptr;
 
-	ptr = kmem_zone_alloc(zone, flags);
+	trace_kmem_alloc_io(size, flags, _RET_IP_);
+
+	if (WARN_ON_ONCE(align_mask >= PAGE_SIZE))
+		align_mask = PAGE_SIZE - 1;
+
+	ptr = kmem_alloc(size, flags | KM_MAYFAIL);
+	if (ptr) {
+		if (!((uintptr_t)ptr & align_mask))
+			return ptr;
+		kfree(ptr);
+	}
+	return __kmem_vmalloc(size, flags);
+}
+
+void *
+kmem_alloc_large(size_t size, xfs_km_flags_t flags)
+{
+	void	*ptr;
+
+	trace_kmem_alloc_large(size, flags, _RET_IP_);
+
+	ptr = kmem_alloc(size, flags | KM_MAYFAIL);
 	if (ptr)
-		memset((char *)ptr, 0, kmem_cache_size(zone));
-	return ptr;
+		return ptr;
+	return __kmem_vmalloc(size, flags);
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * GPIOs and interrupts for Palm T|X Handheld Computer
  *
@@ -6,15 +7,12 @@
  * Authors:	Marek Vasut <marek.vasut@gmail.com>
  *		Cristiano P. <cristianop@users.sourceforge.net>
  *		Jan Herman <2hp@seznam.cz>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #ifndef _INCLUDE_PALMTX_H_
 #define _INCLUDE_PALMTX_H_
+
+#include "irqs.h" /* PXA_GPIO_TO_IRQ */
 
 /** HERE ARE GPIOs **/
 
@@ -62,10 +60,10 @@
 #define GPIO_NR_PALMTX_NAND_BUFFER_DIR		79
 
 /* INTERRUPTS */
-#define IRQ_GPIO_PALMTX_SD_DETECT_N	IRQ_GPIO(GPIO_NR_PALMTX_SD_DETECT_N)
-#define IRQ_GPIO_PALMTX_WM9712_IRQ	IRQ_GPIO(GPIO_NR_PALMTX_WM9712_IRQ)
-#define IRQ_GPIO_PALMTX_USB_DETECT	IRQ_GPIO(GPIO_NR_PALMTX_USB_DETECT)
-#define IRQ_GPIO_PALMTX_GPIO_RESET	IRQ_GPIO(GPIO_NR_PALMTX_GPIO_RESET)
+#define IRQ_GPIO_PALMTX_SD_DETECT_N	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTX_SD_DETECT_N)
+#define IRQ_GPIO_PALMTX_WM9712_IRQ	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTX_WM9712_IRQ)
+#define IRQ_GPIO_PALMTX_USB_DETECT	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTX_USB_DETECT)
+#define IRQ_GPIO_PALMTX_GPIO_RESET	PXA_GPIO_TO_IRQ(GPIO_NR_PALMTX_GPIO_RESET)
 
 /** HERE ARE INIT VALUES **/
 

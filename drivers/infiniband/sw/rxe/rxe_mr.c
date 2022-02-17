@@ -91,9 +91,9 @@ static void rxe_mem_init(int access, struct rxe_mem *mem)
 	mem->map_shift		= ilog2(RXE_BUF_PER_MAP);
 }
 
-void rxe_mem_cleanup(struct rxe_pool_entry *arg)
+void rxe_mem_cleanup(void *arg)
 {
-	struct rxe_mem *mem = container_of(arg, typeof(*mem), pelem);
+	struct rxe_mem *mem = arg;
 	int i;
 
 	if (mem->umem)
@@ -107,7 +107,7 @@ void rxe_mem_cleanup(struct rxe_pool_entry *arg)
 	}
 }
 
-static int rxe_mem_alloc(struct rxe_mem *mem, int num_buf)
+static int rxe_mem_alloc(struct rxe_dev *rxe, struct rxe_mem *mem, int num_buf)
 {
 	int i;
 	int num_map;
@@ -125,7 +125,7 @@ static int rxe_mem_alloc(struct rxe_mem *mem, int num_buf)
 			goto err2;
 	}
 
-	BUILD_BUG_ON(!is_power_of_2(RXE_BUF_PER_MAP));
+	WARN_ON(!is_power_of_2(RXE_BUF_PER_MAP));
 
 	mem->map_shift	= ilog2(RXE_BUF_PER_MAP);
 	mem->map_mask	= RXE_BUF_PER_MAP - 1;
@@ -145,7 +145,7 @@ err1:
 	return -ENOMEM;
 }
 
-int rxe_mem_init_dma(struct rxe_pd *pd,
+int rxe_mem_init_dma(struct rxe_dev *rxe, struct rxe_pd *pd,
 		     int access, struct rxe_mem *mem)
 {
 	rxe_mem_init(access, mem);
@@ -158,7 +158,7 @@ int rxe_mem_init_dma(struct rxe_pd *pd,
 	return 0;
 }
 
-int rxe_mem_init_user(struct rxe_pd *pd, u64 start,
+int rxe_mem_init_user(struct rxe_dev *rxe, struct rxe_pd *pd, u64 start,
 		      u64 length, u64 iova, int access, struct ib_udata *udata,
 		      struct rxe_mem *mem)
 {
@@ -184,15 +184,17 @@ int rxe_mem_init_user(struct rxe_pd *pd, u64 start,
 
 	rxe_mem_init(access, mem);
 
-	err = rxe_mem_alloc(mem, num_buf);
+	err = rxe_mem_alloc(rxe, mem, num_buf);
 	if (err) {
 		pr_warn("err %d from rxe_mem_alloc\n", err);
 		ib_umem_release(umem);
 		goto err1;
 	}
 
-	mem->page_shift		= umem->page_shift;
-	mem->page_mask		= BIT(umem->page_shift) - 1;
+	WARN_ON(!is_power_of_2(umem->page_size));
+
+	mem->page_shift		= ilog2(umem->page_size);
+	mem->page_mask		= umem->page_size - 1;
 
 	num_buf			= 0;
 	map			= mem->map;
@@ -203,12 +205,13 @@ int rxe_mem_init_user(struct rxe_pd *pd, u64 start,
 			vaddr = page_address(sg_page(sg));
 			if (!vaddr) {
 				pr_warn("null vaddr\n");
+				ib_umem_release(umem);
 				err = -ENOMEM;
 				goto err1;
 			}
 
 			buf->addr = (uintptr_t)vaddr;
-			buf->size = BIT(umem->page_shift);
+			buf->size = umem->page_size;
 			num_buf++;
 			buf++;
 
@@ -236,7 +239,7 @@ err1:
 	return err;
 }
 
-int rxe_mem_init_fast(struct rxe_pd *pd,
+int rxe_mem_init_fast(struct rxe_dev *rxe, struct rxe_pd *pd,
 		      int max_pages, struct rxe_mem *mem)
 {
 	int err;
@@ -246,7 +249,7 @@ int rxe_mem_init_fast(struct rxe_pd *pd,
 	/* In fastreg, we also set the rkey */
 	mem->ibmr.rkey = mem->ibmr.lkey;
 
-	err = rxe_mem_alloc(mem, max_pages);
+	err = rxe_mem_alloc(rxe, mem, max_pages);
 	if (err)
 		goto err1;
 
@@ -355,9 +358,6 @@ int rxe_mem_copy(struct rxe_mem *mem, u64 iova, void *addr, int length,
 	size_t			offset;
 	u32			crc = crcp ? (*crcp) : 0;
 
-	if (length == 0)
-		return 0;
-
 	if (mem->type == RXE_MEM_TYPE_DMA) {
 		u8 *src, *dest;
 
@@ -367,16 +367,15 @@ int rxe_mem_copy(struct rxe_mem *mem, u64 iova, void *addr, int length,
 		dest = (dir == to_mem_obj) ?
 			((void *)(uintptr_t)iova) : addr;
 
-		memcpy(dest, src, length);
-
 		if (crcp)
-			*crcp = rxe_crc32(to_rdev(mem->pd->ibpd.device),
-					*crcp, dest, length);
+			*crcp = crc32_le(*crcp, src, length);
+
+		memcpy(dest, src, length);
 
 		return 0;
 	}
 
-	WARN_ON_ONCE(!mem->map);
+	WARN_ON(!mem->map);
 
 	err = mem_check_range(mem, iova, length);
 	if (err) {
@@ -401,11 +400,10 @@ int rxe_mem_copy(struct rxe_mem *mem, u64 iova, void *addr, int length,
 		if (bytes > length)
 			bytes = length;
 
-		memcpy(dest, src, bytes);
-
 		if (crcp)
-			crc = rxe_crc32(to_rdev(mem->pd->ibpd.device),
-					crc, dest, bytes);
+			crc = crc32_le(crc, src, bytes);
+
+		memcpy(dest, src, bytes);
 
 		length	-= bytes;
 		addr	+= bytes;
@@ -434,6 +432,7 @@ err1:
  * under the control of a dma descriptor
  */
 int copy_data(
+	struct rxe_dev		*rxe,
 	struct rxe_pd		*pd,
 	int			access,
 	struct rxe_dma_info	*dma,

@@ -60,7 +60,6 @@ static void __init ath79_detect_sys_type(void)
 	u32 major;
 	u32 minor;
 	u32 rev = 0;
-	u32 ver = 1;
 
 	id = ath79_reset_rr(AR71XX_RESET_REG_REV_ID);
 	major = id & REV_ID_MAJOR_MASK;
@@ -153,17 +152,6 @@ static void __init ath79_detect_sys_type(void)
 		rev = id & AR934X_REV_ID_REVISION_MASK;
 		break;
 
-	case REV_ID_MAJOR_QCA9533_V2:
-		ver = 2;
-		ath79_soc_rev = 2;
-		/* drop through */
-
-	case REV_ID_MAJOR_QCA9533:
-		ath79_soc = ATH79_SOC_QCA9533;
-		chip = "9533";
-		rev = id & QCA953X_REV_ID_REVISION_MASK;
-		break;
-
 	case REV_ID_MAJOR_QCA9556:
 		ath79_soc = ATH79_SOC_QCA9556;
 		chip = "9556";
@@ -176,30 +164,14 @@ static void __init ath79_detect_sys_type(void)
 		rev = id & QCA955X_REV_ID_REVISION_MASK;
 		break;
 
-	case REV_ID_MAJOR_QCA956X:
-		ath79_soc = ATH79_SOC_QCA956X;
-		chip = "956X";
-		rev = id & QCA956X_REV_ID_REVISION_MASK;
-		break;
-
-	case REV_ID_MAJOR_TP9343:
-		ath79_soc = ATH79_SOC_TP9343;
-		chip = "9343";
-		rev = id & QCA956X_REV_ID_REVISION_MASK;
-		break;
-
 	default:
 		panic("ath79: unknown SoC, id:0x%08x", id);
 	}
 
-	if (ver == 1)
-		ath79_soc_rev = rev;
+	ath79_soc_rev = rev;
 
-	if (soc_is_qca953x() || soc_is_qca955x() || soc_is_qca956x())
-		sprintf(ath79_sys_type, "Qualcomm Atheros QCA%s ver %u rev %u",
-			chip, ver, rev);
-	else if (soc_is_tp9343())
-		sprintf(ath79_sys_type, "Qualcomm Atheros TP%s rev %u",
+	if (soc_is_qca955x())
+		sprintf(ath79_sys_type, "Qualcomm Atheros QCA%s rev %u",
 			chip, rev);
 	else
 		sprintf(ath79_sys_type, "Atheros AR%s rev %u", chip, rev);
@@ -210,12 +182,6 @@ const char *get_system_type(void)
 {
 	return ath79_sys_type;
 }
-
-int get_c0_perfcount_int(void)
-{
-	return ATH79_MISC_IRQ(5);
-}
-EXPORT_SYMBOL_GPL(get_c0_perfcount_int);
 
 unsigned int get_c0_compare_int(void)
 {

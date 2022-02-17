@@ -7,8 +7,16 @@
 #include <asm/cmdline.h>
 
 #include <linux/sched.h>
-#include <linux/sched/task.h>
 #include <linux/init.h>
+
+/*
+ * Initialize the TS bit in CR0 according to the style of context-switches
+ * we are using:
+ */
+static void fpu__init_cpu_ctx_switch(void)
+{
+	clts();
+}
 
 /*
  * Initialize the registers found in all CPUs, CR0 and CR4:
@@ -47,9 +55,16 @@ void fpu__init_cpu(void)
 {
 	fpu__init_cpu_generic();
 	fpu__init_cpu_xstate();
+	fpu__init_cpu_ctx_switch();
 }
 
-static bool fpu__probe_without_cpuid(void)
+/*
+ * The earliest FPU detection code.
+ *
+ * Set the X86_FEATURE_FPU CPU-capability bit based on
+ * trying to execute an actual sequence of FPU instructions:
+ */
+static void fpu__init_system_early_generic(struct cpuinfo_x86 *c)
 {
 	unsigned long cr0;
 	u16 fsw, fcw;
@@ -60,25 +75,18 @@ static bool fpu__probe_without_cpuid(void)
 	cr0 &= ~(X86_CR0_TS | X86_CR0_EM);
 	write_cr0(cr0);
 
-	asm volatile("fninit ; fnstsw %0 ; fnstcw %1" : "+m" (fsw), "+m" (fcw));
+	if (!test_bit(X86_FEATURE_FPU, (unsigned long *)cpu_caps_cleared)) {
+		asm volatile("fninit ; fnstsw %0 ; fnstcw %1"
+			     : "+m" (fsw), "+m" (fcw));
 
-	pr_info("x86/fpu: Probing for FPU: FSW=0x%04hx FCW=0x%04hx\n", fsw, fcw);
-
-	return fsw == 0 && (fcw & 0x103f) == 0x003f;
-}
-
-static void fpu__init_system_early_generic(struct cpuinfo_x86 *c)
-{
-	if (!boot_cpu_has(X86_FEATURE_CPUID) &&
-	    !test_bit(X86_FEATURE_FPU, (unsigned long *)cpu_caps_cleared)) {
-		if (fpu__probe_without_cpuid())
-			setup_force_cpu_cap(X86_FEATURE_FPU);
+		if (fsw == 0 && (fcw & 0x103f) == 0x003f)
+			set_cpu_cap(c, X86_FEATURE_FPU);
 		else
-			setup_clear_cpu_cap(X86_FEATURE_FPU);
+			clear_cpu_cap(c, X86_FEATURE_FPU);
 	}
 
 #ifndef CONFIG_MATH_EMULATION
-	if (!test_cpu_cap(&boot_cpu_data, X86_FEATURE_FPU)) {
+	if (!boot_cpu_has(X86_FEATURE_FPU)) {
 		pr_emerg("x86/fpu: Giving up, no FPU found and no math emulation present\n");
 		for (;;)
 			asm volatile("hlt");
@@ -240,7 +248,7 @@ static void __init fpu__init_system_ctx_switch(void)
 	WARN_ON_FPU(!on_boot_cpu);
 	on_boot_cpu = 0;
 
-	WARN_ON_FPU(current->thread.fpu.initialized);
+	WARN_ON_FPU(current->thread.fpu.fpstate_active);
 }
 
 /*
@@ -249,10 +257,6 @@ static void __init fpu__init_system_ctx_switch(void)
  */
 static void __init fpu__init_parse_early_param(void)
 {
-	char arg[32];
-	char *argptr = arg;
-	int bit;
-
 	if (cmdline_find_option_bool(boot_command_line, "no387"))
 		setup_clear_cpu_cap(X86_FEATURE_FPU);
 
@@ -270,13 +274,6 @@ static void __init fpu__init_parse_early_param(void)
 
 	if (cmdline_find_option_bool(boot_command_line, "noxsaves"))
 		setup_clear_cpu_cap(X86_FEATURE_XSAVES);
-
-	if (cmdline_find_option(boot_command_line, "clearcpuid", arg,
-				sizeof(arg)) &&
-	    get_option(&argptr, &bit) &&
-	    bit >= 0 &&
-	    bit < NCAPINTS * 32)
-		setup_clear_cpu_cap(bit);
 }
 
 /*
@@ -293,6 +290,14 @@ void __init fpu__init_system(struct cpuinfo_x86 *c)
 	 * later FPU init activities:
 	 */
 	fpu__init_cpu();
+
+	/*
+	 * But don't leave CR0::TS set yet, as some of the FPU setup
+	 * methods depend on being able to execute FPU instructions
+	 * that will fault on a set TS, such as the FXSAVE in
+	 * fpu__init_system_mxcsr().
+	 */
+	clts();
 
 	fpu__init_system_generic();
 	fpu__init_system_xstate_size_legacy();

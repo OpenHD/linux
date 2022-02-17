@@ -1,9 +1,26 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  of-thermal.c - Generic Thermal Management device tree support.
  *
  *  Copyright (C) 2013 Texas Instruments
  *  Copyright (C) 2013 Eduardo Valentin <eduardo.valentin@ti.com>
+ *
+ *
+ *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; version 2 of the License.
+ *
+ *  This program is distributed in the hope that it will be useful, but
+ *  WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+ *
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 #include <linux/thermal.h>
 #include <linux/slab.h>
@@ -13,6 +30,7 @@
 #include <linux/err.h>
 #include <linux/export.h>
 #include <linux/string.h>
+#include <linux/thermal.h>
 
 #include "thermal_core.h"
 
@@ -33,6 +51,7 @@ struct __thermal_bind_params {
 	unsigned int usage;
 	unsigned long min;
 	unsigned long max;
+	const char *type;
 };
 
 /**
@@ -201,7 +220,8 @@ static int of_thermal_bind(struct thermal_zone_device *thermal,
 	for (i = 0; i < data->num_tbps; i++) {
 		struct __thermal_bind_params *tbp = data->tbps + i;
 
-		if (tbp->cooling_device == cdev->np) {
+		if ((tbp->cooling_device == cdev->np) || (tbp->type &&
+			!strncmp(tbp->type, cdev->type, THERMAL_NAME_LENGTH))) {
 			int ret;
 
 			ret = thermal_zone_bind_cooling_device(thermal,
@@ -230,7 +250,8 @@ static int of_thermal_unbind(struct thermal_zone_device *thermal,
 	for (i = 0; i < data->num_tbps; i++) {
 		struct __thermal_bind_params *tbp = data->tbps + i;
 
-		if (tbp->cooling_device == cdev->np) {
+		if ((tbp->cooling_device == cdev->np) || (tbp->type &&
+			!strncmp(tbp->type, cdev->type, THERMAL_NAME_LENGTH))) {
 			int ret;
 
 			ret = thermal_zone_unbind_cooling_device(thermal,
@@ -319,7 +340,11 @@ static int of_thermal_set_trip_temp(struct thermal_zone_device *tz, int trip,
 	}
 
 	/* thermal framework should take care of data->mask & (1 << trip) */
+
 	data->trips[trip].temperature = temp;
+
+	if (data->ops->trip_update)
+		data->ops->trip_update(data->sensor_data, trip);
 
 	return 0;
 }
@@ -347,6 +372,9 @@ static int of_thermal_set_trip_hyst(struct thermal_zone_device *tz, int trip,
 
 	/* thermal framework should take care of data->mask & (1 << trip) */
 	data->trips[trip].hysteresis = hyst;
+
+	if (data->ops->trip_update)
+		data->ops->trip_update(data->sensor_data, trip);
 
 	return 0;
 }
@@ -391,7 +419,7 @@ thermal_zone_of_add_sensor(struct device_node *zone,
 	struct thermal_zone_device *tzd;
 	struct __thermal_zone *tz;
 
-	tzd = thermal_zone_get_zone_by_name(zone->name);
+	tzd = thermal_zone_get_zone_by_node(zone);
 	if (IS_ERR(tzd))
 		return ERR_PTR(-EPROBE_DEFER);
 
@@ -418,6 +446,9 @@ thermal_zone_of_add_sensor(struct device_node *zone,
 		tzd->ops->set_emul_temp = of_thermal_set_emul_temp;
 
 	mutex_unlock(&tzd->lock);
+
+	if (tzd->polling_delay)
+		thermal_zone_device_update(tzd, THERMAL_EVENT_UNSPECIFIED);
 
 	return tzd;
 }
@@ -545,7 +576,6 @@ void thermal_zone_of_sensor_unregister(struct device *dev,
 	tzd->ops->get_temp = NULL;
 	tzd->ops->get_trend = NULL;
 	tzd->ops->set_emul_temp = NULL;
-
 	tz->ops = NULL;
 	tz->sensor_data = NULL;
 	mutex_unlock(&tzd->lock);
@@ -664,6 +694,8 @@ static int thermal_of_populate_bind_params(struct device_node *np,
 	ret = of_property_read_u32(np, "contribution", &prop);
 	if (ret == 0)
 		__tbp->usage = prop;
+
+	__tbp->type =  of_get_property(np, "cdev-type", NULL);
 
 	trip = of_parse_phandle(np, "trip", 0);
 	if (!trip) {
@@ -856,7 +888,7 @@ __init *thermal_of_build_thermal_zone(struct device_node *np)
 	if (tz->ntrips == 0) /* must have at least one child */
 		goto finish;
 
-	tz->trips = kcalloc(tz->ntrips, sizeof(*tz->trips), GFP_KERNEL);
+	tz->trips = kzalloc(tz->ntrips * sizeof(*tz->trips), GFP_KERNEL);
 	if (!tz->trips) {
 		ret = -ENOMEM;
 		goto free_tz;
@@ -882,7 +914,7 @@ __init *thermal_of_build_thermal_zone(struct device_node *np)
 	if (tz->num_tbps == 0)
 		goto finish;
 
-	tz->tbps = kcalloc(tz->num_tbps, sizeof(*tz->tbps), GFP_KERNEL);
+	tz->tbps = kzalloc(tz->num_tbps * sizeof(*tz->tbps), GFP_KERNEL);
 	if (!tz->tbps) {
 		ret = -ENOMEM;
 		goto free_trips;
@@ -931,6 +963,29 @@ static inline void of_thermal_free_zone(struct __thermal_zone *tz)
 	kfree(tz);
 }
 
+static int of_parse_thermal_zone_params(struct device_node *np,
+		struct thermal_zone_params *tzp)
+{
+	const char *pstr;
+	struct thermal_governor *gov;
+
+	pstr =  of_get_property(np, "governor-name", NULL);
+	if (!pstr)
+		return 0;
+
+	strlcpy(tzp->governor_name, pstr, THERMAL_NAME_LENGTH);
+
+	gov = thermal_find_governor(tzp->governor_name);
+	if (!gov)
+		return 0;
+	else if (!gov->of_parse)
+		return 0;
+	else if (gov->of_parse(tzp, np))
+		pr_err("failed to parse governor '%s' params\n",
+		       tzp->governor_name);
+	return 0;
+}
+
 /**
  * of_parse_thermal_zones - parse device tree thermal data
  *
@@ -960,6 +1015,7 @@ int __init of_parse_thermal_zones(void)
 		struct thermal_zone_params *tzp;
 		int i, mask = 0;
 		u32 prop;
+		struct device_node *param_child;
 
 		tz = thermal_of_build_thermal_zone(child);
 		if (IS_ERR(tz)) {
@@ -981,6 +1037,11 @@ int __init of_parse_thermal_zones(void)
 
 		/* No hwmon because there might be hwmon drivers registering */
 		tzp->no_hwmon = true;
+
+		/* Thermal zone params */
+		param_child = of_get_child_by_name(child, "thermal-zone-params");
+		if (param_child)
+			of_parse_thermal_zone_params(param_child, tzp);
 
 		if (!of_property_read_u32(child, "sustainable-power", &prop))
 			tzp->sustainable_power = prop;
@@ -1004,7 +1065,10 @@ int __init of_parse_thermal_zones(void)
 			kfree(ops);
 			of_thermal_free_zone(tz);
 			/* attempting to build remaining zones still */
+			continue;
 		}
+
+		zone->np = child;
 	}
 	of_node_put(np);
 
@@ -1041,7 +1105,11 @@ void of_thermal_destroy_zones(void)
 	for_each_available_child_of_node(np, child) {
 		struct thermal_zone_device *zone;
 
-		zone = thermal_zone_get_zone_by_name(child->name);
+		/* Check whether child is enabled or not */
+		if (!of_device_is_available(child))
+			continue;
+
+		zone = thermal_zone_get_zone_by_node(child);
 		if (IS_ERR(zone))
 			continue;
 

@@ -1,7 +1,7 @@
 /*
  * Maxim MAX77620 Regulator driver
  *
- * Copyright (c) 2016-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2016-2019, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Mallikarjun Kasoju <mkasoju@nvidia.com>
  *	Laxman Dewangan <ldewangan@nvidia.com>
@@ -98,6 +98,11 @@ struct max77620_regulator {
 	(fps_src == MAX77620_FPS_SRC_0 ? "FPS_SRC_0" :	\
 	fps_src == MAX77620_FPS_SRC_1 ? "FPS_SRC_1" :	\
 	fps_src == MAX77620_FPS_SRC_2 ? "FPS_SRC_2" : "FPS_SRC_NONE")
+
+static unsigned int max77620_map_mode(unsigned int mode)
+{
+	return mode;
+}
 
 static int max77620_regulator_get_fps_src(struct max77620_regulator *pmic,
 					  int id)
@@ -359,8 +364,7 @@ static int max77620_config_power_ok(struct max77620_regulator *pmic, int id)
 	u8 val, mask;
 	int ret;
 
-	switch (chip->chip_id) {
-	case MAX20024:
+	if (chip->chip_id == MAX20024) {
 		if (rpdata->power_ok >= 0) {
 			if (rinfo->type == MAX77620_REGULATOR_TYPE_SD)
 				mask = MAX20024_SD_CFG1_MPOK_MASK;
@@ -372,15 +376,12 @@ static int max77620_config_power_ok(struct max77620_regulator *pmic, int id)
 			ret = regmap_update_bits(pmic->rmap, rinfo->cfg_addr,
 						 mask, val);
 			if (ret < 0) {
-				dev_err(pmic->dev, "Reg 0x%02x update failed %d\n",
+				dev_err(pmic->dev,
+					"Reg 0x%02x update failed %d\n",
 					rinfo->cfg_addr, ret);
 				return ret;
 			}
 		}
-		break;
-
-	default:
-		break;
 	}
 
 	return 0;
@@ -612,39 +613,56 @@ static int max77620_of_parse_cb(struct device_node *np,
 	int ret;
 
 	ret = of_property_read_u32(np, "maxim,active-fps-source", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "active-fps-source", &pval);
 	rpdata->active_fps_src = (!ret) ? pval : MAX77620_FPS_SRC_DEF;
 
 	ret = of_property_read_u32(np, "maxim,active-fps-power-up-slot", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "active-fps-power-up-slot",
+					   &pval);
 	rpdata->active_fps_pu_slot = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(
 			np, "maxim,active-fps-power-down-slot", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "active-fps-power-down-slot",
+					   &pval);
 	rpdata->active_fps_pd_slot = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(np, "maxim,suspend-fps-source", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "suspend-fps-source", &pval);
 	rpdata->suspend_fps_src = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(
 			np, "maxim,suspend-fps-power-up-slot", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "suspend-fps-power-up-slot",
+					   &pval);
 	rpdata->suspend_fps_pu_slot = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(
 			np, "maxim,suspend-fps-power-down-slot", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "suspend-fps-power-down-slot",
+					   &pval);
 	rpdata->suspend_fps_pd_slot = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(np, "maxim,power-ok-control", &pval);
-	if (!ret)
-		rpdata->power_ok = pval;
-	else
-		rpdata->power_ok = -1;
+	if (ret < 0)
+		ret = of_property_read_u32(np, "power-ok-control", &pval);
+	rpdata->power_ok = (!ret) ? pval : -1;
 
 	ret = of_property_read_u32(np, "maxim,ramp-rate-setting", &pval);
+	if (ret < 0)
+		ret = of_property_read_u32(np, "ramp-rate-setting", &pval);
 	rpdata->ramp_rate_setting = (!ret) ? pval : 0;
 
 	return max77620_init_pmic(pmic, desc->id);
 }
 
-static const struct regulator_ops max77620_regulator_ops = {
+static struct regulator_ops max77620_regulator_ops = {
 	.is_enabled = max77620_regulator_is_enabled,
 	.enable = max77620_regulator_enable,
 	.disable = max77620_regulator_disable,
@@ -690,6 +708,7 @@ static const struct regulator_ops max77620_regulator_ops = {
 			.active_discharge_mask = MAX77620_SD_CFG1_ADE_MASK, \
 			.active_discharge_reg = MAX77620_REG_##_id##_CFG, \
 			.type = REGULATOR_VOLTAGE,			\
+			.of_map_mode = max77620_map_mode,		\
 		},							\
 	}
 
@@ -795,6 +814,7 @@ static int max77620_regulator_probe(struct platform_device *pdev)
 	for (id = 0; id < MAX77620_NUM_REGS; id++) {
 		struct regulator_dev *rdev;
 		struct regulator_desc *rdesc;
+		struct max77620_regulator_pdata *rpdata;
 
 		if ((max77620_chip->chip_id == MAX77620) &&
 		    (id == MAX77620_REGULATOR_ID_SD4))
@@ -802,6 +822,7 @@ static int max77620_regulator_probe(struct platform_device *pdev)
 
 		rdesc = &rinfo[id].desc;
 		pmic->rinfo[id] = &max77620_regs_info[id];
+		rpdata = &pmic->reg_pdata[id];
 		pmic->enable_power_mode[id] = MAX77620_POWER_MODE_NORMAL;
 		pmic->reg_pdata[id].active_fps_src = -1;
 		pmic->reg_pdata[id].active_fps_pd_slot = -1;
@@ -823,6 +844,13 @@ static int max77620_regulator_probe(struct platform_device *pdev)
 				rdesc->name, ret);
 			return ret;
 		}
+
+		/* there is no SW control for rails which are part of FPS
+		 * set always no contraint to true to avoid regulator
+		 * enable/disable notification
+		 */
+		if (rpdata->active_fps_src != MAX77620_FPS_SRC_NONE)
+			rdev->constraints->always_on = true;
 	}
 
 	return 0;
@@ -892,7 +920,17 @@ static struct platform_driver max77620_regulator_driver = {
 	},
 };
 
-module_platform_driver(max77620_regulator_driver);
+static int __init max77620_regulator_init(void)
+{
+	return platform_driver_register(&max77620_regulator_driver);
+}
+subsys_initcall(max77620_regulator_init);
+
+static void __exit max77620_reg_exit(void)
+{
+	platform_driver_unregister(&max77620_regulator_driver);
+}
+module_exit(max77620_reg_exit);
 
 MODULE_DESCRIPTION("MAX77620/MAX20024 regulator driver");
 MODULE_AUTHOR("Mallikarjun Kasoju <mkasoju@nvidia.com>");

@@ -1,11 +1,11 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_MMU_H_
 #define _ASM_POWERPC_MMU_H_
 #ifdef __KERNEL__
 
 #include <linux/types.h>
 
-#include <asm/asm-const.h>
+#include <asm/asm-compat.h>
+#include <asm/feature-fixups.h>
 
 /*
  * MMU features bit definitions
@@ -28,10 +28,6 @@
  * Individual features below.
  */
 
-/*
- * Support for 68 bit VA space. We added that from ISA 2.05
- */
-#define MMU_FTR_68_BIT_VA		ASM_CONST(0x00002000)
 /*
  * Kernel read only support.
  * We added the ppp value 0b110 in ISA 2.04.
@@ -110,13 +106,13 @@
 /* MMU feature bit sets for various CPUs */
 #define MMU_FTRS_DEFAULT_HPTE_ARCH_V2	\
 	MMU_FTR_HPTE_TABLE | MMU_FTR_PPCAS_ARCH_V2
-#define MMU_FTRS_POWER		MMU_FTRS_DEFAULT_HPTE_ARCH_V2
-#define MMU_FTRS_PPC970		MMU_FTRS_POWER | MMU_FTR_TLBIE_CROP_VA
-#define MMU_FTRS_POWER5		MMU_FTRS_POWER | MMU_FTR_LOCKLESS_TLBIE
-#define MMU_FTRS_POWER6		MMU_FTRS_POWER5 | MMU_FTR_KERNEL_RO | MMU_FTR_68_BIT_VA
-#define MMU_FTRS_POWER7		MMU_FTRS_POWER6
-#define MMU_FTRS_POWER8		MMU_FTRS_POWER6
-#define MMU_FTRS_POWER9		MMU_FTRS_POWER6
+#define MMU_FTRS_POWER4		MMU_FTRS_DEFAULT_HPTE_ARCH_V2
+#define MMU_FTRS_PPC970		MMU_FTRS_POWER4 | MMU_FTR_TLBIE_CROP_VA
+#define MMU_FTRS_POWER5		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE
+#define MMU_FTRS_POWER6		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
+#define MMU_FTRS_POWER7		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
+#define MMU_FTRS_POWER8		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
+#define MMU_FTRS_POWER9		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
 #define MMU_FTRS_CELL		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
 				MMU_FTR_CI_LARGE_PAGE
 #define MMU_FTRS_PA6T		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
@@ -140,7 +136,7 @@ enum {
 		MMU_FTR_NO_SLBIE_B | MMU_FTR_16M_PAGE | MMU_FTR_TLBIEL |
 		MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_CI_LARGE_PAGE |
 		MMU_FTR_1T_SEGMENT | MMU_FTR_TLBIE_CROP_VA |
-		MMU_FTR_KERNEL_RO | MMU_FTR_68_BIT_VA |
+		MMU_FTR_KERNEL_RO |
 #ifdef CONFIG_PPC_RADIX_MMU
 		MMU_FTR_TYPE_RADIX |
 #endif
@@ -221,11 +217,6 @@ extern u64 ppc64_rma_size;
 /* Cleanup function used by kexec */
 extern void mmu_cleanup_all(void);
 extern void radix__mmu_cleanup_all(void);
-
-/* Functions for creating and updating partition table on POWER9 */
-extern void mmu_partition_table_init(void);
-extern void mmu_partition_table_set_entry(unsigned int lpid, unsigned long dw0,
-					  unsigned long dw1);
 #endif /* CONFIG_PPC64 */
 
 struct mm_struct;
@@ -259,15 +250,6 @@ static inline bool early_radix_enabled(void)
 }
 #endif
 
-#ifdef CONFIG_PPC_MEM_KEYS
-extern u16 get_mm_addr_key(struct mm_struct *mm, unsigned long address);
-#else
-static inline u16 get_mm_addr_key(struct mm_struct *mm, unsigned long address)
-{
-	return 0;
-}
-#endif /* CONFIG_PPC_MEM_KEYS */
-
 #endif /* !__ASSEMBLY__ */
 
 /* The kernel use the constants below to index in the page sizes array.
@@ -291,23 +273,19 @@ static inline u16 get_mm_addr_key(struct mm_struct *mm, unsigned long address)
 #define MMU_PAGE_64K	2
 #define MMU_PAGE_64K_AP	3	/* "Admixed pages" (hash64 only) */
 #define MMU_PAGE_256K	4
-#define MMU_PAGE_512K	5
-#define MMU_PAGE_1M	6
-#define MMU_PAGE_2M	7
-#define MMU_PAGE_4M	8
-#define MMU_PAGE_8M	9
-#define MMU_PAGE_16M	10
-#define MMU_PAGE_64M	11
-#define MMU_PAGE_256M	12
-#define MMU_PAGE_1G	13
-#define MMU_PAGE_16G	14
-#define MMU_PAGE_64G	15
+#define MMU_PAGE_1M	5
+#define MMU_PAGE_2M	6
+#define MMU_PAGE_4M	7
+#define MMU_PAGE_8M	8
+#define MMU_PAGE_16M	9
+#define MMU_PAGE_64M	10
+#define MMU_PAGE_256M	11
+#define MMU_PAGE_1G	12
+#define MMU_PAGE_16G	13
+#define MMU_PAGE_64G	14
 
-/*
- * N.B. we need to change the type of hpte_page_sizes if this gets to be > 16
- * Also we need to change he type of mm_context.low/high_slices_psize.
- */
-#define MMU_PAGE_COUNT	16
+/* N.B. we need to change the type of hpte_page_sizes if this gets to be > 16 */
+#define MMU_PAGE_COUNT	15
 
 #ifdef CONFIG_PPC_BOOK3S_64
 #include <asm/book3s/64/mmu.h>

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This provides an optimized implementation of memcpy, and a simplified
  * implementation of memset and memmove. These are used here because the

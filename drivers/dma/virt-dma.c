@@ -26,11 +26,11 @@ dma_cookie_t vchan_tx_submit(struct dma_async_tx_descriptor *tx)
 	unsigned long flags;
 	dma_cookie_t cookie;
 
-	spin_lock_irqsave(&vc->lock, flags);
+	raw_spin_lock_irqsave(&vc->lock, flags);
 	cookie = dma_cookie_assign(tx);
 
 	list_move_tail(&vd->node, &vc->desc_submitted);
-	spin_unlock_irqrestore(&vc->lock, flags);
+	raw_spin_unlock_irqrestore(&vc->lock, flags);
 
 	dev_dbg(vc->chan.device->dev, "vchan %p: txd %p[%x]: submitted\n",
 		vc, vd, cookie);
@@ -55,9 +55,9 @@ int vchan_tx_desc_free(struct dma_async_tx_descriptor *tx)
 	struct virt_dma_desc *vd = to_virt_desc(tx);
 	unsigned long flags;
 
-	spin_lock_irqsave(&vc->lock, flags);
+	raw_spin_lock_irqsave(&vc->lock, flags);
 	list_del(&vd->node);
-	spin_unlock_irqrestore(&vc->lock, flags);
+	raw_spin_unlock_irqrestore(&vc->lock, flags);
 
 	dev_dbg(vc->chan.device->dev, "vchan %p: txd %p[%x]: freeing\n",
 		vc, vd, vd->tx.cookie);
@@ -86,11 +86,11 @@ EXPORT_SYMBOL_GPL(vchan_find_desc);
 static void vchan_complete(unsigned long arg)
 {
 	struct virt_dma_chan *vc = (struct virt_dma_chan *)arg;
-	struct virt_dma_desc *vd, *_vd;
+	struct virt_dma_desc *vd;
 	struct dmaengine_desc_callback cb;
 	LIST_HEAD(head);
 
-	spin_lock_irq(&vc->lock);
+	raw_spin_lock_irq(&vc->lock);
 	list_splice_tail_init(&vc->desc_completed, &head);
 	vd = vc->cyclic;
 	if (vd) {
@@ -99,15 +99,19 @@ static void vchan_complete(unsigned long arg)
 	} else {
 		memset(&cb, 0, sizeof(cb));
 	}
-	spin_unlock_irq(&vc->lock);
+	raw_spin_unlock_irq(&vc->lock);
 
 	dmaengine_desc_callback_invoke(&cb, NULL);
 
-	list_for_each_entry_safe(vd, _vd, &head, node) {
+	while (!list_empty(&head)) {
+		vd = list_first_entry(&head, struct virt_dma_desc, node);
 		dmaengine_desc_get_callback(&vd->tx, &cb);
 
 		list_del(&vd->node);
-		vchan_vdesc_fini(vd);
+		if (dmaengine_desc_test_reuse(&vd->tx))
+			list_add(&vd->node, &vc->desc_allocated);
+		else
+			vc->desc_free(vd);
 
 		dmaengine_desc_callback_invoke(&cb, NULL);
 	}
@@ -115,9 +119,9 @@ static void vchan_complete(unsigned long arg)
 
 void vchan_dma_desc_free_list(struct virt_dma_chan *vc, struct list_head *head)
 {
-	struct virt_dma_desc *vd, *_vd;
-
-	list_for_each_entry_safe(vd, _vd, head, node) {
+	while (!list_empty(head)) {
+		struct virt_dma_desc *vd = list_first_entry(head,
+			struct virt_dma_desc, node);
 		if (dmaengine_desc_test_reuse(&vd->tx)) {
 			list_move_tail(&vd->node, &vc->desc_allocated);
 		} else {
@@ -133,7 +137,7 @@ void vchan_init(struct virt_dma_chan *vc, struct dma_device *dmadev)
 {
 	dma_cookie_init(&vc->chan);
 
-	spin_lock_init(&vc->lock);
+	raw_spin_lock_init(&vc->lock);
 	INIT_LIST_HEAD(&vc->desc_allocated);
 	INIT_LIST_HEAD(&vc->desc_submitted);
 	INIT_LIST_HEAD(&vc->desc_issued);

@@ -1,55 +1,54 @@
-// SPDX-License-Identifier: (GPL-2.0 OR MPL-1.1)
 /* src/prism2/driver/prism2mib.c
- *
- * Management request for mibset/mibget
- *
- * Copyright (C) 1999 AbsoluteValue Systems, Inc.  All Rights Reserved.
- * --------------------------------------------------------------------
- *
- * linux-wlan
- *
- *   The contents of this file are subject to the Mozilla Public
- *   License Version 1.1 (the "License"); you may not use this file
- *   except in compliance with the License. You may obtain a copy of
- *   the License at http://www.mozilla.org/MPL/
- *
- *   Software distributed under the License is distributed on an "AS
- *   IS" basis, WITHOUT WARRANTY OF ANY KIND, either express or
- *   implied. See the License for the specific language governing
- *   rights and limitations under the License.
- *
- *   Alternatively, the contents of this file may be used under the
- *   terms of the GNU Public License version 2 (the "GPL"), in which
- *   case the provisions of the GPL are applicable instead of the
- *   above.  If you wish to allow the use of your version of this file
- *   only under the terms of the GPL and not to allow others to use
- *   your version of this file under the MPL, indicate your decision
- *   by deleting the provisions above and replace them with the notice
- *   and other provisions required by the GPL.  If you do not delete
- *   the provisions above, a recipient may use your version of this
- *   file under either the MPL or the GPL.
- *
- * --------------------------------------------------------------------
- *
- * Inquiries regarding the linux-wlan Open Source project can be
- * made directly to:
- *
- * AbsoluteValue Systems Inc.
- * info@linux-wlan.com
- * http://www.linux-wlan.com
- *
- * --------------------------------------------------------------------
- *
- * Portions of the development of this software were funded by
- * Intersil Corporation as part of PRISM(R) chipset product development.
- *
- * --------------------------------------------------------------------
- *
- * The functions in this file handle the mibset/mibget management
- * functions.
- *
- * --------------------------------------------------------------------
- */
+*
+* Management request for mibset/mibget
+*
+* Copyright (C) 1999 AbsoluteValue Systems, Inc.  All Rights Reserved.
+* --------------------------------------------------------------------
+*
+* linux-wlan
+*
+*   The contents of this file are subject to the Mozilla Public
+*   License Version 1.1 (the "License"); you may not use this file
+*   except in compliance with the License. You may obtain a copy of
+*   the License at http://www.mozilla.org/MPL/
+*
+*   Software distributed under the License is distributed on an "AS
+*   IS" basis, WITHOUT WARRANTY OF ANY KIND, either express or
+*   implied. See the License for the specific language governing
+*   rights and limitations under the License.
+*
+*   Alternatively, the contents of this file may be used under the
+*   terms of the GNU Public License version 2 (the "GPL"), in which
+*   case the provisions of the GPL are applicable instead of the
+*   above.  If you wish to allow the use of your version of this file
+*   only under the terms of the GPL and not to allow others to use
+*   your version of this file under the MPL, indicate your decision
+*   by deleting the provisions above and replace them with the notice
+*   and other provisions required by the GPL.  If you do not delete
+*   the provisions above, a recipient may use your version of this
+*   file under either the MPL or the GPL.
+*
+* --------------------------------------------------------------------
+*
+* Inquiries regarding the linux-wlan Open Source project can be
+* made directly to:
+*
+* AbsoluteValue Systems Inc.
+* info@linux-wlan.com
+* http://www.linux-wlan.com
+*
+* --------------------------------------------------------------------
+*
+* Portions of the development of this software were funded by
+* Intersil Corporation as part of PRISM(R) chipset product development.
+*
+* --------------------------------------------------------------------
+*
+* The functions in this file handle the mibset/mibget management
+* functions.
+*
+* --------------------------------------------------------------------
+*/
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -87,10 +86,10 @@ struct mibrec {
 	u16 parm2;
 	u16 parm3;
 	int (*func)(struct mibrec *mib,
-		    int isget,
-		    struct wlandevice *wlandev,
-		    struct hfa384x *hw,
-		    struct p80211msg_dot11req_mibset *msg, void *data);
+		     int isget,
+		     struct wlandevice *wlandev,
+		     struct hfa384x *hw,
+		     struct p80211msg_dot11req_mibset *msg, void *data);
 };
 
 static int prism2mib_bytearea2pstr(struct mibrec *mib,
@@ -147,6 +146,7 @@ static int prism2mib_priv(struct mibrec *mib,
 			  struct p80211msg_dot11req_mibset *msg, void *data);
 
 static struct mibrec mibtab[] = {
+
 	/* dot11smt MIB's */
 	{DIDmib_dot11smt_dot11WEPDefaultKeysTable_key(1),
 	 F_STA | F_WRITE,
@@ -624,6 +624,7 @@ static int prism2mib_excludeunencrypted(struct mibrec *mib,
 					struct p80211msg_dot11req_mibset *msg,
 					void *data)
 {
+
 	return prism2mib_flag(mib, isget, wlandev, hw, msg, data);
 }
 
@@ -708,7 +709,7 @@ static int prism2mib_priv(struct mibrec *mib,
 
 	switch (mib->did) {
 	case DIDmib_lnx_lnxConfigTable_lnxRSNAIE:{
-			struct hfa384x_wpa_data wpa;
+			struct hfa384x_WPAData wpa;
 
 			if (isget) {
 				hfa384x_drvr_getconfig(hw,
@@ -746,7 +747,7 @@ static int prism2mib_priv(struct mibrec *mib,
  *	pstr		wlan message data
  *
  * Returns:
- *	Nothing
+ * 	Nothing
  *
  */
 
@@ -775,7 +776,7 @@ void prism2mgmt_pstr2bytestr(struct hfa384x_bytestr *bytestr,
 void prism2mgmt_bytestr2pstr(struct hfa384x_bytestr *bytestr,
 			     struct p80211pstrd *pstr)
 {
-	pstr->len = (u8)(le16_to_cpu(bytestr->len));
+	pstr->len = (u8)(le16_to_cpu((u16)(bytestr->len)));
 	memcpy(pstr->data, bytestr->data, pstr->len);
 }
 

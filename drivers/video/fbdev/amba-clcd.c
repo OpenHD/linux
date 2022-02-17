@@ -10,22 +10,27 @@
  *
  *  ARM PrimeCell PL110 Color LCD Controller
  */
-#include <linux/amba/bus.h>
-#include <linux/amba/clcd.h>
-#include <linux/backlight.h>
-#include <linux/clk.h>
-#include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/errno.h>
+#include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/delay.h>
+#include <linux/mm.h>
 #include <linux/fb.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/list.h>
-#include <linux/mm.h>
-#include <linux/module.h>
+#include <linux/amba/bus.h>
+#include <linux/amba/clcd.h>
+#include <linux/bitops.h>
+#include <linux/clk.h>
+#include <linux/hardirq.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_graph.h>
-#include <linux/slab.h>
-#include <linux/string.h>
+#include <linux/backlight.h>
 #include <video/display_timing.h>
 #include <video/of_display_timing.h>
 #include <video/videomode.h>
@@ -624,10 +629,15 @@ static int clcdfb_snprintf_mode(char *buf, int size, struct fb_videomode *mode)
 			mode->refresh);
 }
 
-static int clcdfb_of_get_backlight(struct device_node *panel,
+static int clcdfb_of_get_backlight(struct device_node *endpoint,
 				   struct clcd_panel *clcd_panel)
 {
+	struct device_node *panel;
 	struct device_node *backlight;
+
+	panel = of_graph_get_remote_port_parent(endpoint);
+	if (!panel)
+		return -ENODEV;
 
 	/* Look up the optional backlight phandle */
 	backlight = of_parse_phandle(panel, "backlight", 0);
@@ -641,13 +651,18 @@ static int clcdfb_of_get_backlight(struct device_node *panel,
 	return 0;
 }
 
-static int clcdfb_of_get_mode(struct device *dev, struct device_node *panel,
-			      struct clcd_panel *clcd_panel)
+static int clcdfb_of_get_mode(struct device *dev, struct device_node *endpoint,
+		struct clcd_panel *clcd_panel)
 {
 	int err;
+	struct device_node *panel;
 	struct fb_videomode *mode;
 	char *name;
 	int len;
+
+	panel = of_graph_get_remote_port_parent(endpoint);
+	if (!panel)
+		return -ENODEV;
 
 	/* Only directly connected DPI panels supported for now */
 	if (of_device_is_compatible(panel, "panel-dpi"))
@@ -754,7 +769,7 @@ static int clcdfb_of_init_tft_panel(struct clcd_fb *fb, u32 r0, u32 g0, u32 b0)
 
 static int clcdfb_of_init_display(struct clcd_fb *fb)
 {
-	struct device_node *endpoint, *panel;
+	struct device_node *endpoint;
 	int err;
 	unsigned int bpp;
 	u32 max_bandwidth;
@@ -771,21 +786,17 @@ static int clcdfb_of_init_display(struct clcd_fb *fb)
 	if (!endpoint)
 		return -ENODEV;
 
-	panel = of_graph_get_remote_port_parent(endpoint);
-	if (!panel)
-		return -ENODEV;
-
 	if (fb->vendor->init_panel) {
-		err = fb->vendor->init_panel(fb, panel);
+		err = fb->vendor->init_panel(fb, endpoint);
 		if (err)
 			return err;
 	}
 
-	err = clcdfb_of_get_backlight(panel, fb->panel);
+	err = clcdfb_of_get_backlight(endpoint, fb->panel);
 	if (err)
 		return err;
 
-	err = clcdfb_of_get_mode(&fb->dev->dev, panel, fb->panel);
+	err = clcdfb_of_get_mode(&fb->dev->dev, endpoint, fb->panel);
 	if (err)
 		return err;
 
@@ -967,8 +978,9 @@ static int clcdfb_probe(struct amba_device *dev, const struct amba_id *id)
 		goto out;
 	}
 
-	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
+	fb = kzalloc(sizeof(struct clcd_fb), GFP_KERNEL);
 	if (!fb) {
+		printk(KERN_INFO "CLCD: could not allocate new clcd_fb struct\n");
 		ret = -ENOMEM;
 		goto free_region;
 	}
@@ -1034,7 +1046,7 @@ static struct clcd_vendor_data vendor_nomadik = {
 	.init_panel = nomadik_clcd_init_panel,
 };
 
-static const struct amba_id clcdfb_id_table[] = {
+static struct amba_id clcdfb_id_table[] = {
 	{
 		.id	= 0x00041110,
 		.mask	= 0x000ffffe,

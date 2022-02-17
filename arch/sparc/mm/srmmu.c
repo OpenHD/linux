@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * srmmu.c:  SRMMU specific routines for memory management.
  *
@@ -37,6 +36,7 @@
 #include <asm/mbus.h>
 #include <asm/page.h>
 #include <asm/asi.h>
+#include <asm/msi.h>
 #include <asm/smp.h>
 #include <asm/io.h>
 
@@ -113,25 +113,6 @@ static inline void srmmu_ctxd_set(ctxd_t *ctxp, pgd_t *pgdp)
 
 	pte = __pte((SRMMU_ET_PTD | (__nocache_pa(pgdp) >> 4)));
 	set_pte((pte_t *)ctxp, pte);
-}
-
-/*
- * Locations of MSI Registers.
- */
-#define MSI_MBUS_ARBEN	0xe0001008	/* MBus Arbiter Enable register */
-
-/*
- * Useful bits in the MSI Registers.
- */
-#define MSI_ASYNC_MODE  0x80000000	/* Operate the MSI asynchronously */
-
-static void msi_set_sync(void)
-{
-	__asm__ __volatile__ ("lda [%0] %1, %%g3\n\t"
-			      "andn %%g3, %2, %%g3\n\t"
-			      "sta %%g3, [%0] %1\n\t" : :
-			      "r" (MSI_MBUS_ARBEN),
-			      "i" (ASI_M_CTL), "r" (MSI_ASYNC_MODE) : "g3");
 }
 
 void pmd_set(pmd_t *pmdp, pte_t *ptep)
@@ -1464,7 +1445,7 @@ static void poke_viking(void)
 	srmmu_set_mmureg(mreg);
 }
 
-static struct sparc32_cachetlb_ops viking_ops __ro_after_init = {
+static struct sparc32_cachetlb_ops viking_ops = {
 	.cache_all	= viking_flush_cache_all,
 	.cache_mm	= viking_flush_cache_mm,
 	.cache_page	= viking_flush_cache_page,
@@ -1495,7 +1476,7 @@ static struct sparc32_cachetlb_ops viking_ops __ro_after_init = {
  * flushes going at once will require SMP locking anyways so there's
  * no real value in trying any harder than this.
  */
-static struct sparc32_cachetlb_ops viking_sun4d_smp_ops __ro_after_init = {
+static struct sparc32_cachetlb_ops viking_sun4d_smp_ops = {
 	.cache_all	= viking_flush_cache_all,
 	.cache_mm	= viking_flush_cache_mm,
 	.cache_page	= viking_flush_cache_page,
@@ -1779,7 +1760,7 @@ static void smp_flush_sig_insns(struct mm_struct *mm, unsigned long insn_addr)
 	local_ops->sig_insns(mm, insn_addr);
 }
 
-static struct sparc32_cachetlb_ops smp_cachetlb_ops __ro_after_init = {
+static struct sparc32_cachetlb_ops smp_cachetlb_ops = {
 	.cache_all	= smp_flush_cache_all,
 	.cache_mm	= smp_flush_cache_mm,
 	.cache_page	= smp_flush_cache_page,

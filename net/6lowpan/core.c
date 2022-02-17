@@ -23,18 +23,10 @@ int lowpan_register_netdevice(struct net_device *dev,
 {
 	int i, ret;
 
-	switch (lltype) {
-	case LOWPAN_LLTYPE_IEEE802154:
-		dev->addr_len = EUI64_ADDR_LEN;
-		break;
-
-	case LOWPAN_LLTYPE_BTLE:
-		dev->addr_len = ETH_ALEN;
-		break;
-	}
-
+	dev->addr_len = EUI64_ADDR_LEN;
 	dev->type = ARPHRD_6LOWPAN;
 	dev->mtu = IPV6_MIN_MTU;
+	dev->priv_flags |= IFF_NO_QUEUE;
 
 	lowpan_dev(dev)->lltype = lltype;
 

@@ -16,7 +16,6 @@
 #include <linux/clk.h>
 #include <linux/of_graph.h>
 #include <linux/component.h>
-#include <linux/pm_runtime.h>
 #include <video/of_display_timing.h>
 #include <video/of_videomode.h>
 #include <video/videomode.h>
@@ -24,7 +23,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 
 #include <drm/bridge/analogix_dp.h>
@@ -42,7 +40,6 @@ struct exynos_dp_device {
 	struct device              *dev;
 
 	struct videomode           vm;
-	struct analogix_dp_device *adp;
 	struct analogix_dp_plat_data plat_data;
 };
 
@@ -102,13 +99,17 @@ static int exynos_dp_bridge_attach(struct analogix_dp_plat_data *plat_data,
 				   struct drm_connector *connector)
 {
 	struct exynos_dp_device *dp = to_dp(plat_data);
+	struct drm_encoder *encoder = &dp->encoder;
 	int ret;
 
+	drm_connector_register(connector);
 	dp->connector = connector;
 
 	/* Pre-empt DP connector creation if there's a bridge */
 	if (dp->ptn_bridge) {
-		ret = drm_bridge_attach(&dp->encoder, dp->ptn_bridge, bridge);
+		bridge->next = dp->ptn_bridge;
+		dp->ptn_bridge->encoder = encoder;
+		ret = drm_bridge_attach(encoder->dev, dp->ptn_bridge);
 		if (ret) {
 			DRM_ERROR("Failed to attach bridge to drm\n");
 			bridge->next = NULL;
@@ -157,13 +158,20 @@ static int exynos_dp_bind(struct device *dev, struct device *master, void *data)
 	struct exynos_dp_device *dp = dev_get_drvdata(dev);
 	struct drm_encoder *encoder = &dp->encoder;
 	struct drm_device *drm_dev = data;
-	int ret;
+	int pipe, ret;
+
+	/*
+	 * Just like the probe function said, we don't need the
+	 * device drvrate anymore, we should leave the charge to
+	 * analogix dp driver, set the device drvdata to NULL.
+	 */
+	dev_set_drvdata(dev, NULL);
 
 	dp->dev = dev;
 	dp->drm_dev = drm_dev;
 
 	dp->plat_data.dev_type = EXYNOS_DP;
-	dp->plat_data.power_on_start = exynos_dp_poweron;
+	dp->plat_data.power_on = exynos_dp_poweron;
 	dp->plat_data.power_off = exynos_dp_poweroff;
 	dp->plat_data.attach = exynos_dp_bridge_attach;
 	dp->plat_data.get_modes = exynos_dp_get_modes;
@@ -174,33 +182,29 @@ static int exynos_dp_bind(struct device *dev, struct device *master, void *data)
 			return ret;
 	}
 
+	pipe = exynos_drm_crtc_get_pipe_from_type(drm_dev,
+						  EXYNOS_DISPLAY_TYPE_LCD);
+	if (pipe < 0)
+		return pipe;
+
+	encoder->possible_crtcs = 1 << pipe;
+
+	DRM_DEBUG_KMS("possible_crtcs = 0x%x\n", encoder->possible_crtcs);
+
 	drm_encoder_init(drm_dev, encoder, &exynos_dp_encoder_funcs,
 			 DRM_MODE_ENCODER_TMDS, NULL);
 
 	drm_encoder_helper_add(encoder, &exynos_dp_encoder_helper_funcs);
 
-	ret = exynos_drm_set_possible_crtcs(encoder, EXYNOS_DISPLAY_TYPE_LCD);
-	if (ret < 0)
-		return ret;
-
 	dp->plat_data.encoder = encoder;
 
-	dp->adp = analogix_dp_bind(dev, dp->drm_dev, &dp->plat_data);
-	if (IS_ERR(dp->adp)) {
-		dp->encoder.funcs->destroy(&dp->encoder);
-		return PTR_ERR(dp->adp);
-	}
-
-	return 0;
+	return analogix_dp_bind(dev, dp->drm_dev, &dp->plat_data);
 }
 
 static void exynos_dp_unbind(struct device *dev, struct device *master,
 			     void *data)
 {
-	struct exynos_dp_device *dp = dev_get_drvdata(dev);
-
-	analogix_dp_unbind(dp->adp);
-	dp->encoder.funcs->destroy(&dp->encoder);
+	return analogix_dp_unbind(dev, master, data);
 }
 
 static const struct component_ops exynos_dp_ops = {
@@ -211,11 +215,8 @@ static const struct component_ops exynos_dp_ops = {
 static int exynos_dp_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np;
+	struct device_node *np = NULL, *endpoint = NULL;
 	struct exynos_dp_device *dp;
-	struct drm_panel *panel;
-	struct drm_bridge *bridge;
-	int ret;
 
 	dp = devm_kzalloc(&pdev->dev, sizeof(struct exynos_dp_device),
 			  GFP_KERNEL);
@@ -233,22 +234,34 @@ static int exynos_dp_probe(struct platform_device *pdev)
 	np = of_parse_phandle(dev->of_node, "panel", 0);
 	if (np) {
 		dp->plat_data.panel = of_drm_find_panel(np);
-
 		of_node_put(np);
-		if (IS_ERR(dp->plat_data.panel))
-			return PTR_ERR(dp->plat_data.panel);
-
+		if (!dp->plat_data.panel)
+			return -EPROBE_DEFER;
 		goto out;
 	}
 
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 0, 0, &panel, &bridge);
-	if (ret)
-		return ret;
-
-	/* The remote port can be either a panel or a bridge */
-	dp->plat_data.panel = panel;
-	dp->plat_data.skip_connector = !!bridge;
-	dp->ptn_bridge = bridge;
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (endpoint) {
+		np = of_graph_get_remote_port_parent(endpoint);
+		if (np) {
+			/* The remote port can be either a panel or a bridge */
+			dp->plat_data.panel = of_drm_find_panel(np);
+			if (!dp->plat_data.panel) {
+				dp->ptn_bridge = of_drm_find_bridge(np);
+				if (!dp->ptn_bridge) {
+					of_node_put(np);
+					return -EPROBE_DEFER;
+				}
+			}
+			of_node_put(np);
+		} else {
+			DRM_ERROR("no remote endpoint device node found.\n");
+			return -EINVAL;
+		}
+	} else {
+		DRM_ERROR("no port endpoint subnode found.\n");
+		return -EINVAL;
+	}
 
 out:
 	return component_add(&pdev->dev, &exynos_dp_ops);
@@ -264,23 +277,17 @@ static int exynos_dp_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM
 static int exynos_dp_suspend(struct device *dev)
 {
-	struct exynos_dp_device *dp = dev_get_drvdata(dev);
-
-	return analogix_dp_suspend(dp->adp);
+	return analogix_dp_suspend(dev);
 }
 
 static int exynos_dp_resume(struct device *dev)
 {
-	struct exynos_dp_device *dp = dev_get_drvdata(dev);
-
-	return analogix_dp_resume(dp->adp);
+	return analogix_dp_resume(dev);
 }
 #endif
 
 static const struct dev_pm_ops exynos_dp_pm_ops = {
 	SET_RUNTIME_PM_OPS(exynos_dp_suspend, exynos_dp_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
 };
 
 static const struct of_device_id exynos_dp_match[] = {

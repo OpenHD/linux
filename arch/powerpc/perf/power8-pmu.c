@@ -31,73 +31,6 @@ enum {
 #define	POWER8_MMCRA_IFM3		0x00000000C0000000UL
 #define	POWER8_MMCRA_BHRB_MASK		0x00000000C0000000UL
 
-/*
- * Raw event encoding for PowerISA v2.07 (Power8):
- *
- *        60        56        52        48        44        40        36        32
- * | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - |
- *   | | [ ]                           [      thresh_cmp     ]   [  thresh_ctl   ]
- *   | |  |                                                              |
- *   | |  *- IFM (Linux)                 thresh start/stop OR FAB match -*
- *   | *- BHRB (Linux)
- *   *- EBB (Linux)
- *
- *        28        24        20        16        12         8         4         0
- * | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - | - - - - |
- *   [   ] [  sample ]   [cache]   [ pmc ]   [unit ]   c     m   [    pmcxsel    ]
- *     |        |           |                          |     |
- *     |        |           |                          |     *- mark
- *     |        |           *- L1/L2/L3 cache_sel      |
- *     |        |                                      |
- *     |        *- sampling mode for marked events     *- combine
- *     |
- *     *- thresh_sel
- *
- * Below uses IBM bit numbering.
- *
- * MMCR1[x:y] = unit    (PMCxUNIT)
- * MMCR1[x]   = combine (PMCxCOMB)
- *
- * if pmc == 3 and unit == 0 and pmcxsel[0:6] == 0b0101011
- *	# PM_MRK_FAB_RSP_MATCH
- *	MMCR1[20:27] = thresh_ctl   (FAB_CRESP_MATCH / FAB_TYPE_MATCH)
- * else if pmc == 4 and unit == 0xf and pmcxsel[0:6] == 0b0101001
- *	# PM_MRK_FAB_RSP_MATCH_CYC
- *	MMCR1[20:27] = thresh_ctl   (FAB_CRESP_MATCH / FAB_TYPE_MATCH)
- * else
- *	MMCRA[48:55] = thresh_ctl   (THRESH START/END)
- *
- * if thresh_sel:
- *	MMCRA[45:47] = thresh_sel
- *
- * if thresh_cmp:
- *	MMCRA[22:24] = thresh_cmp[0:2]
- *	MMCRA[25:31] = thresh_cmp[3:9]
- *
- * if unit == 6 or unit == 7
- *	MMCRC[53:55] = cache_sel[1:3]      (L2EVENT_SEL)
- * else if unit == 8 or unit == 9:
- *	if cache_sel[0] == 0: # L3 bank
- *		MMCRC[47:49] = cache_sel[1:3]  (L3EVENT_SEL0)
- *	else if cache_sel[0] == 1:
- *		MMCRC[50:51] = cache_sel[2:3]  (L3EVENT_SEL1)
- * else if cache_sel[1]: # L1 event
- *	MMCR1[16] = cache_sel[2]
- *	MMCR1[17] = cache_sel[3]
- *
- * if mark:
- *	MMCRA[63]    = 1		(SAMPLE_ENABLE)
- *	MMCRA[57:59] = sample[0:2]	(RAND_SAMP_ELIG)
- *	MMCRA[61:62] = sample[3:4]	(RAND_SAMP_MODE)
- *
- * if EBB and BHRB:
- *	MMCRA[32:33] = IFM
- *
- */
-
-/* PowerISA v2.07 format attribute structure*/
-extern struct attribute_group isa207_pmu_format_group;
-
 /* Table of alternatives, sorted by column 0 */
 static const unsigned int event_alternatives[][MAX_ALT] = {
 	{ PM_MRK_ST_CMPL,		PM_MRK_ST_CMPL_ALT },
@@ -113,13 +46,67 @@ static const unsigned int event_alternatives[][MAX_ALT] = {
 	{ PM_RUN_INST_CMPL_ALT,		PM_RUN_INST_CMPL },
 };
 
+/*
+ * Scan the alternatives table for a match and return the
+ * index into the alternatives table if found, else -1.
+ */
+static int find_alternative(u64 event)
+{
+	int i, j;
+
+	for (i = 0; i < ARRAY_SIZE(event_alternatives); ++i) {
+		if (event < event_alternatives[i][0])
+			break;
+
+		for (j = 0; j < MAX_ALT && event_alternatives[i][j]; ++j)
+			if (event == event_alternatives[i][j])
+				return i;
+	}
+
+	return -1;
+}
+
 static int power8_get_alternatives(u64 event, unsigned int flags, u64 alt[])
 {
-	int num_alt = 0;
+	int i, j, num_alt = 0;
+	u64 alt_event;
 
-	num_alt = isa207_get_alternatives(event, alt,
-					  ARRAY_SIZE(event_alternatives), flags,
-					  event_alternatives);
+	alt[num_alt++] = event;
+
+	i = find_alternative(event);
+	if (i >= 0) {
+		/* Filter out the original event, it's already in alt[0] */
+		for (j = 0; j < MAX_ALT; ++j) {
+			alt_event = event_alternatives[i][j];
+			if (alt_event && alt_event != event)
+				alt[num_alt++] = alt_event;
+		}
+	}
+
+	if (flags & PPMU_ONLY_COUNT_RUN) {
+		/*
+		 * We're only counting in RUN state, so PM_CYC is equivalent to
+		 * PM_RUN_CYC and PM_INST_CMPL === PM_RUN_INST_CMPL.
+		 */
+		j = num_alt;
+		for (i = 0; i < num_alt; ++i) {
+			switch (alt[i]) {
+			case PM_CYC:
+				alt[j++] = PM_RUN_CYC;
+				break;
+			case PM_RUN_CYC:
+				alt[j++] = PM_CYC;
+				break;
+			case PM_INST_CMPL:
+				alt[j++] = PM_RUN_INST_CMPL;
+				break;
+			case PM_RUN_INST_CMPL:
+				alt[j++] = PM_INST_CMPL;
+				break;
+			}
+		}
+		num_alt = j;
+	}
 
 	return num_alt;
 }
@@ -132,7 +119,6 @@ GENERIC_EVENT_ATTR(branch-instructions,		PM_BRU_FIN);
 GENERIC_EVENT_ATTR(branch-misses,		PM_BR_MPRED_CMPL);
 GENERIC_EVENT_ATTR(cache-references,		PM_LD_REF_L1);
 GENERIC_EVENT_ATTR(cache-misses,		PM_LD_MISS_L1);
-GENERIC_EVENT_ATTR(mem_access,			MEM_ACCESS);
 
 CACHE_EVENT_ATTR(L1-dcache-load-misses,		PM_LD_MISS_L1);
 CACHE_EVENT_ATTR(L1-dcache-loads,		PM_LD_REF_L1);
@@ -163,7 +149,6 @@ static struct attribute *power8_events_attr[] = {
 	GENERIC_EVENT_PTR(PM_BR_MPRED_CMPL),
 	GENERIC_EVENT_PTR(PM_LD_REF_L1),
 	GENERIC_EVENT_PTR(PM_LD_MISS_L1),
-	GENERIC_EVENT_PTR(MEM_ACCESS),
 
 	CACHE_EVENT_PTR(PM_LD_MISS_L1),
 	CACHE_EVENT_PTR(PM_LD_REF_L1),
@@ -191,8 +176,42 @@ static struct attribute_group power8_pmu_events_group = {
 	.attrs = power8_events_attr,
 };
 
+PMU_FORMAT_ATTR(event,		"config:0-49");
+PMU_FORMAT_ATTR(pmcxsel,	"config:0-7");
+PMU_FORMAT_ATTR(mark,		"config:8");
+PMU_FORMAT_ATTR(combine,	"config:11");
+PMU_FORMAT_ATTR(unit,		"config:12-15");
+PMU_FORMAT_ATTR(pmc,		"config:16-19");
+PMU_FORMAT_ATTR(cache_sel,	"config:20-23");
+PMU_FORMAT_ATTR(sample_mode,	"config:24-28");
+PMU_FORMAT_ATTR(thresh_sel,	"config:29-31");
+PMU_FORMAT_ATTR(thresh_stop,	"config:32-35");
+PMU_FORMAT_ATTR(thresh_start,	"config:36-39");
+PMU_FORMAT_ATTR(thresh_cmp,	"config:40-49");
+
+static struct attribute *power8_pmu_format_attr[] = {
+	&format_attr_event.attr,
+	&format_attr_pmcxsel.attr,
+	&format_attr_mark.attr,
+	&format_attr_combine.attr,
+	&format_attr_unit.attr,
+	&format_attr_pmc.attr,
+	&format_attr_cache_sel.attr,
+	&format_attr_sample_mode.attr,
+	&format_attr_thresh_sel.attr,
+	&format_attr_thresh_stop.attr,
+	&format_attr_thresh_start.attr,
+	&format_attr_thresh_cmp.attr,
+	NULL,
+};
+
+static struct attribute_group power8_pmu_format_group = {
+	.name = "format",
+	.attrs = power8_pmu_format_attr,
+};
+
 static const struct attribute_group *power8_pmu_attr_groups[] = {
-	&isa207_pmu_format_group,
+	&power8_pmu_format_group,
 	&power8_pmu_events_group,
 	NULL,
 };
@@ -371,8 +390,6 @@ static struct power_pmu power8_pmu = {
 	.bhrb_filter_map	= power8_bhrb_filter_map,
 	.get_constraint		= isa207_get_constraint,
 	.get_alternatives	= power8_get_alternatives,
-	.get_mem_data_src	= isa207_get_mem_data_src,
-	.get_mem_weight		= isa207_get_mem_weight,
 	.disable_pmc		= isa207_disable_pmc,
 	.flags			= PPMU_HAS_SIER | PPMU_ARCH_207S,
 	.n_generic		= ARRAY_SIZE(power8_generic_events),

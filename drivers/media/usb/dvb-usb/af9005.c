@@ -15,7 +15,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * see Documentation/media/dvb-drivers/dvb-usb.rst for more information
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ * see Documentation/dvb/README.dvb-usb for more information
  */
 #include "af9005.h"
 
@@ -822,6 +826,7 @@ static int af9005_frontend_attach(struct dvb_usb_adapter *adap)
 		printk("EEPROM DUMP\n");
 		for (i = 0; i < 255; i += 8) {
 			af9005_read_eeprom(adap->dev, i, buf, 8);
+			printk("ADDR %x ", i);
 			debug_dump(buf, 8, printk);
 		}
 	}

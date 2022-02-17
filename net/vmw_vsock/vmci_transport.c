@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/kmod.h>
 #include <linux/list.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/net.h>
@@ -95,23 +96,31 @@ static int PROTOCOL_OVERRIDE = -1;
 
 static s32 vmci_transport_error_to_vsock_error(s32 vmci_error)
 {
+	int err;
+
 	switch (vmci_error) {
 	case VMCI_ERROR_NO_MEM:
-		return -ENOMEM;
+		err = ENOMEM;
+		break;
 	case VMCI_ERROR_DUPLICATE_ENTRY:
 	case VMCI_ERROR_ALREADY_EXISTS:
-		return -EADDRINUSE;
+		err = EADDRINUSE;
+		break;
 	case VMCI_ERROR_NO_ACCESS:
-		return -EPERM;
+		err = EPERM;
+		break;
 	case VMCI_ERROR_NO_RESOURCES:
-		return -ENOBUFS;
+		err = ENOBUFS;
+		break;
 	case VMCI_ERROR_INVALID_RESOURCE:
-		return -EHOSTUNREACH;
+		err = EHOSTUNREACH;
+		break;
 	case VMCI_ERROR_INVALID_ARGS:
 	default:
-		break;
+		err = EINVAL;
 	}
-	return -EINVAL;
+
+	return err > 0 ? -err : err;
 }
 
 static u32 vmci_transport_peer_rid(u32 peer_cid)
@@ -775,7 +784,7 @@ static int vmci_transport_recv_stream_cb(void *data, struct vmci_datagram *dg)
 		/* The local context ID may be out of date, update it. */
 		vsk->local_addr.svm_cid = dst.svm_cid;
 
-		if (sk->sk_state == TCP_ESTABLISHED)
+		if (sk->sk_state == SS_CONNECTED)
 			vmci_trans(vsk)->notify_ops->handle_notify_pkt(
 					sk, pkt, true, &dst, &src,
 					&bh_process_pkt);
@@ -830,14 +839,10 @@ static void vmci_transport_handle_detach(struct sock *sk)
 
 		/* We should not be sending anymore since the peer won't be
 		 * there to receive, but we can still receive if there is data
-		 * left in our consume queue. If the local endpoint is a host,
-		 * we can't call vsock_stream_has_data, since that may block,
-		 * but a host endpoint can't read data once the VM has
-		 * detached, so there is no available data in that case.
+		 * left in our consume queue.
 		 */
-		if (vsk->local_addr.svm_cid == VMADDR_CID_HOST ||
-		    vsock_stream_has_data(vsk) <= 0) {
-			if (sk->sk_state == TCP_SYN_SENT) {
+		if (vsock_stream_has_data(vsk) <= 0) {
+			if (sk->sk_state == SS_CONNECTING) {
 				/* The peer may detach from a queue pair while
 				 * we are still in the connecting state, i.e.,
 				 * if the peer VM is killed after attaching to
@@ -846,12 +851,12 @@ static void vmci_transport_handle_detach(struct sock *sk)
 				 * event like a reset.
 				 */
 
-				sk->sk_state = TCP_CLOSE;
+				sk->sk_state = SS_UNCONNECTED;
 				sk->sk_err = ECONNRESET;
 				sk->sk_error_report(sk);
 				return;
 			}
-			sk->sk_state = TCP_CLOSE;
+			sk->sk_state = SS_UNCONNECTED;
 		}
 		sk->sk_state_change(sk);
 	}
@@ -919,17 +924,17 @@ static void vmci_transport_recv_pkt_work(struct work_struct *work)
 	vsock_sk(sk)->local_addr.svm_cid = pkt->dg.dst.context;
 
 	switch (sk->sk_state) {
-	case TCP_LISTEN:
+	case VSOCK_SS_LISTEN:
 		vmci_transport_recv_listen(sk, pkt);
 		break;
-	case TCP_SYN_SENT:
+	case SS_CONNECTING:
 		/* Processing of pending connections for servers goes through
 		 * the listening socket, so see vmci_transport_recv_listen()
 		 * for that path.
 		 */
 		vmci_transport_recv_connecting_client(sk, pkt);
 		break;
-	case TCP_ESTABLISHED:
+	case SS_CONNECTED:
 		vmci_transport_recv_connected(sk, pkt);
 		break;
 	default:
@@ -978,7 +983,7 @@ static int vmci_transport_recv_listen(struct sock *sk,
 		vsock_sk(pending)->local_addr.svm_cid = pkt->dg.dst.context;
 
 		switch (pending->sk_state) {
-		case TCP_SYN_SENT:
+		case SS_CONNECTING:
 			err = vmci_transport_recv_connecting_server(sk,
 								    pending,
 								    pkt);
@@ -1108,7 +1113,7 @@ static int vmci_transport_recv_listen(struct sock *sk,
 	vsock_add_pending(sk, pending);
 	sk->sk_ack_backlog++;
 
-	pending->sk_state = TCP_SYN_SENT;
+	pending->sk_state = SS_CONNECTING;
 	vmci_trans(vpending)->produce_size =
 		vmci_trans(vpending)->consume_size = qp_size;
 	vmci_trans(vpending)->queue_pair_size = qp_size;
@@ -1232,11 +1237,11 @@ vmci_transport_recv_connecting_server(struct sock *listener,
 	 * the socket will be valid until it is removed from the queue.
 	 *
 	 * If we fail sending the attach below, we remove the socket from the
-	 * connected list and move the socket to TCP_CLOSE before
+	 * connected list and move the socket to SS_UNCONNECTED before
 	 * releasing the lock, so a pending slow path processing of an incoming
 	 * packet will not see the socket in the connected state in that case.
 	 */
-	pending->sk_state = TCP_ESTABLISHED;
+	pending->sk_state = SS_CONNECTED;
 
 	vsock_insert_connected(vpending);
 
@@ -1267,7 +1272,7 @@ vmci_transport_recv_connecting_server(struct sock *listener,
 
 destroy:
 	pending->sk_err = skerr;
-	pending->sk_state = TCP_CLOSE;
+	pending->sk_state = SS_UNCONNECTED;
 	/* As long as we drop our reference, all necessary cleanup will handle
 	 * when the cleanup function drops its reference and our destruct
 	 * implementation is called.  Note that since the listen handler will
@@ -1305,7 +1310,7 @@ vmci_transport_recv_connecting_client(struct sock *sk,
 		 * accounting (it can already be found since it's in the bound
 		 * table).
 		 */
-		sk->sk_state = TCP_ESTABLISHED;
+		sk->sk_state = SS_CONNECTED;
 		sk->sk_socket->state = SS_CONNECTED;
 		vsock_insert_connected(vsk);
 		sk->sk_state_change(sk);
@@ -1373,7 +1378,7 @@ vmci_transport_recv_connecting_client(struct sock *sk,
 destroy:
 	vmci_transport_send_reset(sk, pkt);
 
-	sk->sk_state = TCP_CLOSE;
+	sk->sk_state = SS_UNCONNECTED;
 	sk->sk_err = skerr;
 	sk->sk_error_report(sk);
 	return err;
@@ -1561,7 +1566,7 @@ static int vmci_transport_recv_connected(struct sock *sk,
 		sock_set_flag(sk, SOCK_DONE);
 		vsk->peer_shutdown = SHUTDOWN_MASK;
 		if (vsock_stream_has_data(vsk) <= 0)
-			sk->sk_state = TCP_CLOSING;
+			sk->sk_state = SS_DISCONNECTING;
 
 		sk->sk_state_change(sk);
 		break;
@@ -1829,7 +1834,7 @@ static int vmci_transport_connect(struct vsock_sock *vsk)
 		err = vmci_transport_send_conn_request(
 			sk, vmci_trans(vsk)->queue_pair_size);
 		if (err < 0) {
-			sk->sk_state = TCP_CLOSE;
+			sk->sk_state = SS_UNCONNECTED;
 			return err;
 		}
 	} else {
@@ -1839,7 +1844,7 @@ static int vmci_transport_connect(struct vsock_sock *vsk)
 				sk, vmci_trans(vsk)->queue_pair_size,
 				supported_proto_versions);
 		if (err < 0) {
-			sk->sk_state = TCP_CLOSE;
+			sk->sk_state = SS_UNCONNECTED;
 			return err;
 		}
 
@@ -2184,7 +2189,7 @@ module_exit(vmci_transport_exit);
 
 MODULE_AUTHOR("VMware, Inc.");
 MODULE_DESCRIPTION("VMCI transport for Virtual Sockets");
-MODULE_VERSION("1.0.5.0-k");
+MODULE_VERSION("1.0.4.0-k");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("vmware_vsock");
 MODULE_ALIAS_NETPROTO(PF_VSOCK);

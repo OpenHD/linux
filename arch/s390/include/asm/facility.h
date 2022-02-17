@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright IBM Corp. 1999, 2009
  *
@@ -8,7 +7,10 @@
 #ifndef __ASM_FACILITY_H
 #define __ASM_FACILITY_H
 
-#include <asm/facility-defs.h>
+#include <generated/facilities.h>
+
+#ifndef __ASSEMBLY__
+
 #include <linux/string.h>
 #include <linux/preempt.h>
 #include <asm/lowcore.h>
@@ -95,4 +97,5 @@ static inline void stfle(u64 *stfle_fac_list, int size)
 	preempt_enable();
 }
 
+#endif /* __ASSEMBLY__ */
 #endif /* __ASM_FACILITY_H */

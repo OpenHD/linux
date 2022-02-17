@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-2-Clause) */
 /*
     This file defines the kernel interface of FUSE
     Copyright (C) 2001-2008  Miklos Szeredi <miklos@szeredi.hu>
@@ -113,9 +112,6 @@
  *  7.26
  *  - add FUSE_HANDLE_KILLPRIV
  *  - add FUSE_POSIX_ACL
- *
- *  7.27
- *  - add FUSE_ABORT_ERROR
  */
 
 #ifndef _LINUX_FUSE_H
@@ -151,7 +147,7 @@
 #define FUSE_KERNEL_VERSION 7
 
 /** Minor version number of this interface */
-#define FUSE_KERNEL_MINOR_VERSION 27
+#define FUSE_KERNEL_MINOR_VERSION 26
 
 /** The node ID of the root inode */
 #define FUSE_ROOT_ID 1
@@ -250,7 +246,6 @@ struct fuse_file_lock {
  * FUSE_PARALLEL_DIROPS: allow parallel lookups and readdir
  * FUSE_HANDLE_KILLPRIV: fs handles killing suid/sgid/cap on write/chown/trunc
  * FUSE_POSIX_ACL: filesystem supports posix acls
- * FUSE_ABORT_ERROR: reading the device after abort returns ECONNABORTED
  */
 #define FUSE_ASYNC_READ		(1 << 0)
 #define FUSE_POSIX_LOCKS	(1 << 1)
@@ -273,7 +268,6 @@ struct fuse_file_lock {
 #define FUSE_PARALLEL_DIROPS    (1 << 18)
 #define FUSE_HANDLE_KILLPRIV	(1 << 19)
 #define FUSE_POSIX_ACL		(1 << 20)
-#define FUSE_ABORT_ERROR	(1 << 21)
 
 /**
  * CUSE INIT request/reply flags
@@ -383,6 +377,7 @@ enum fuse_opcode {
 	FUSE_READDIRPLUS   = 44,
 	FUSE_RENAME2       = 45,
 	FUSE_LSEEK         = 46,
+	FUSE_CANONICAL_PATH= 2016,
 
 	/* CUSE specific operations */
 	CUSE_INIT          = 4096,

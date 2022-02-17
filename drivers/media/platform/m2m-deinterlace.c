@@ -181,6 +181,20 @@ static void deinterlace_job_abort(void *priv)
 	v4l2_m2m_job_finish(pcdev->m2m_dev, ctx->m2m_ctx);
 }
 
+static void deinterlace_lock(void *priv)
+{
+	struct deinterlace_ctx *ctx = priv;
+	struct deinterlace_dev *pcdev = ctx->dev;
+	mutex_lock(&pcdev->dev_mutex);
+}
+
+static void deinterlace_unlock(void *priv)
+{
+	struct deinterlace_ctx *ctx = priv;
+	struct deinterlace_dev *pcdev = ctx->dev;
+	mutex_unlock(&pcdev->dev_mutex);
+}
+
 static void dma_callback(void *data)
 {
 	struct deinterlace_ctx *curr_ctx = data;
@@ -370,16 +384,16 @@ static void deinterlace_device_run(void *priv)
 	 * 4 possible field conversions are possible at the moment:
 	 *  V4L2_FIELD_SEQ_TB --> V4L2_FIELD_INTERLACED_TB:
 	 *	two separate fields in the same input buffer are interlaced
-	 *	in the output buffer using weaving. Top field comes first.
+	 * 	in the output buffer using weaving. Top field comes first.
 	 *  V4L2_FIELD_SEQ_TB --> V4L2_FIELD_NONE:
-	 *	top field from the input buffer is copied to the output buffer
-	 *	using line doubling. Bottom field from the input buffer is discarded.
+	 * 	top field from the input buffer is copied to the output buffer
+	 * 	using line doubling. Bottom field from the input buffer is discarded.
 	 * V4L2_FIELD_SEQ_BT --> V4L2_FIELD_INTERLACED_BT:
 	 *	two separate fields in the same input buffer are interlaced
-	 *	in the output buffer using weaving. Bottom field comes first.
+	 * 	in the output buffer using weaving. Bottom field comes first.
 	 * V4L2_FIELD_SEQ_BT --> V4L2_FIELD_NONE:
-	 *	bottom field from the input buffer is copied to the output buffer
-	 *	using line doubling. Top field from the input buffer is discarded.
+	 * 	bottom field from the input buffer is copied to the output buffer
+	 * 	using line doubling. Top field from the input buffer is discarded.
 	 */
 	switch (dst_q_data->fmt->fourcc) {
 	case V4L2_PIX_FMT_YUV420:
@@ -842,8 +856,6 @@ static const struct vb2_ops deinterlace_qops = {
 	.queue_setup	 = deinterlace_queue_setup,
 	.buf_prepare	 = deinterlace_buf_prepare,
 	.buf_queue	 = deinterlace_buf_queue,
-	.wait_prepare	 = vb2_ops_wait_prepare,
-	.wait_finish	 = vb2_ops_wait_finish,
 };
 
 static int queue_init(void *priv, struct vb2_queue *src_vq,
@@ -860,7 +872,6 @@ static int queue_init(void *priv, struct vb2_queue *src_vq,
 	src_vq->mem_ops = &vb2_dma_contig_memops;
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
-	src_vq->lock = &ctx->dev->dev_mutex;
 	q_data[V4L2_M2M_SRC].fmt = &formats[0];
 	q_data[V4L2_M2M_SRC].width = 640;
 	q_data[V4L2_M2M_SRC].height = 480;
@@ -879,7 +890,6 @@ static int queue_init(void *priv, struct vb2_queue *src_vq,
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->dev = ctx->dev->v4l2_dev.dev;
-	dst_vq->lock = &ctx->dev->dev_mutex;
 	q_data[V4L2_M2M_DST].fmt = &formats[0];
 	q_data[V4L2_M2M_DST].width = 640;
 	q_data[V4L2_M2M_DST].height = 480;
@@ -940,15 +950,15 @@ static int deinterlace_release(struct file *file)
 	return 0;
 }
 
-static __poll_t deinterlace_poll(struct file *file,
+static unsigned int deinterlace_poll(struct file *file,
 				 struct poll_table_struct *wait)
 {
 	struct deinterlace_ctx *ctx = file->private_data;
-	__poll_t ret;
+	int ret;
 
-	mutex_lock(&ctx->dev->dev_mutex);
+	deinterlace_lock(ctx);
 	ret = v4l2_m2m_poll(file, ctx->m2m_ctx, wait);
-	mutex_unlock(&ctx->dev->dev_mutex);
+	deinterlace_unlock(ctx);
 
 	return ret;
 }
@@ -969,7 +979,7 @@ static const struct v4l2_file_operations deinterlace_fops = {
 	.mmap		= deinterlace_mmap,
 };
 
-static const struct video_device deinterlace_videodev = {
+static struct video_device deinterlace_videodev = {
 	.name		= MEM2MEM_NAME,
 	.fops		= &deinterlace_fops,
 	.ioctl_ops	= &deinterlace_ioctl_ops,
@@ -978,10 +988,12 @@ static const struct video_device deinterlace_videodev = {
 	.vfl_dir	= VFL_DIR_M2M,
 };
 
-static const struct v4l2_m2m_ops m2m_ops = {
+static struct v4l2_m2m_ops m2m_ops = {
 	.device_run	= deinterlace_device_run,
 	.job_ready	= deinterlace_job_ready,
 	.job_abort	= deinterlace_job_abort,
+	.lock		= deinterlace_lock,
+	.unlock		= deinterlace_unlock,
 };
 
 static int deinterlace_probe(struct platform_device *pdev)
@@ -1005,7 +1017,6 @@ static int deinterlace_probe(struct platform_device *pdev)
 
 	if (!dma_has_cap(DMA_INTERLEAVE, pcdev->dma_chan->device->cap_mask)) {
 		dev_err(&pdev->dev, "DMA does not support INTERLEAVE\n");
-		ret = -ENODEV;
 		goto rel_dma;
 	}
 
@@ -1028,6 +1039,7 @@ static int deinterlace_probe(struct platform_device *pdev)
 	}
 
 	video_set_drvdata(vfd, pcdev);
+	snprintf(vfd->name, sizeof(vfd->name), "%s", deinterlace_videodev.name);
 	v4l2_info(&pcdev->v4l2_dev, MEM2MEM_TEST_MODULE_NAME
 			" Device registered as /dev/video%d\n", vfd->num);
 

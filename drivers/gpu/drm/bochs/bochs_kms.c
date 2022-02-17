@@ -96,8 +96,7 @@ static void bochs_crtc_commit(struct drm_crtc *crtc)
 static int bochs_crtc_page_flip(struct drm_crtc *crtc,
 				struct drm_framebuffer *fb,
 				struct drm_pending_vblank_event *event,
-				uint32_t page_flip_flags,
-				struct drm_modeset_acquire_ctx *ctx)
+				uint32_t page_flip_flags)
 {
 	struct bochs_device *bochs =
 		container_of(crtc, struct bochs_device, crtc);
@@ -188,7 +187,7 @@ static int bochs_connector_get_modes(struct drm_connector *connector)
 	return count;
 }
 
-static enum drm_mode_status bochs_connector_mode_valid(struct drm_connector *connector,
+static int bochs_connector_mode_valid(struct drm_connector *connector,
 				      struct drm_display_mode *mode)
 {
 	struct bochs_device *bochs =
@@ -213,8 +212,14 @@ bochs_connector_best_encoder(struct drm_connector *connector)
 	int enc_id = connector->encoder_ids[0];
 	/* pick the encoder ids */
 	if (enc_id)
-		return drm_encoder_find(connector->dev, NULL, enc_id);
+		return drm_encoder_find(connector->dev, enc_id);
 	return NULL;
+}
+
+static enum drm_connector_status bochs_connector_detect(struct drm_connector
+							*connector, bool force)
+{
+	return connector_status_connected;
 }
 
 static const struct drm_connector_helper_funcs bochs_connector_connector_helper_funcs = {
@@ -225,6 +230,7 @@ static const struct drm_connector_helper_funcs bochs_connector_connector_helper_
 
 static const struct drm_connector_funcs bochs_connector_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
+	.detect = bochs_connector_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = drm_connector_cleanup,
 };
@@ -259,7 +265,7 @@ int bochs_kms_init(struct bochs_device *bochs)
 	bochs_crtc_init(bochs->dev);
 	bochs_encoder_init(bochs->dev);
 	bochs_connector_init(bochs->dev);
-	drm_connector_attach_encoder(&bochs->connector,
+	drm_mode_connector_attach_encoder(&bochs->connector,
 					  &bochs->encoder);
 
 	return 0;

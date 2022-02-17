@@ -21,18 +21,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 
 #include "../perf.h"
-#include "debug.h"
+#include "util.h"
 #include "trace-event.h"
-
-#include "sane_ctype.h"
 
 static int get_common_field(struct scripting_context *context,
 			    int *offset, int *size, const char *type)
 {
-	struct tep_handle *pevent = context->pevent;
+	struct pevent *pevent = context->pevent;
 	struct event_format *event;
 	struct format_field *field;
 
@@ -41,14 +40,14 @@ static int get_common_field(struct scripting_context *context,
 			return 0;
 
 		event = pevent->events[0];
-		field = tep_find_common_field(event, type);
+		field = pevent_find_common_field(event, type);
 		if (!field)
 			return 0;
 		*offset = field->offset;
 		*size = field->size;
 	}
 
-	return tep_read_number(pevent, context->event_data + *offset, *size);
+	return pevent_read_number(pevent, context->event_data + *offset, *size);
 }
 
 int common_lock_depth(struct scripting_context *context)
@@ -99,24 +98,24 @@ raw_field_value(struct event_format *event, const char *name, void *data)
 	struct format_field *field;
 	unsigned long long val;
 
-	field = tep_find_any_field(event, name);
+	field = pevent_find_any_field(event, name);
 	if (!field)
 		return 0ULL;
 
-	tep_read_number_field(field, data, &val);
+	pevent_read_number_field(field, data, &val);
 
 	return val;
 }
 
 unsigned long long read_size(struct event_format *event, void *ptr, int size)
 {
-	return tep_read_number(event->pevent, ptr, size);
+	return pevent_read_number(event->pevent, ptr, size);
 }
 
 void event_format__fprintf(struct event_format *event,
 			   int cpu, void *data, int size, FILE *fp)
 {
-	struct tep_record record;
+	struct pevent_record record;
 	struct trace_seq s;
 
 	memset(&record, 0, sizeof(record));
@@ -125,7 +124,7 @@ void event_format__fprintf(struct event_format *event,
 	record.data = data;
 
 	trace_seq_init(&s);
-	tep_event_info(&s, event, &record);
+	pevent_event_info(&s, event, &record);
 	trace_seq_do_fprintf(&s, fp);
 	trace_seq_destroy(&s);
 }
@@ -136,7 +135,7 @@ void event_format__print(struct event_format *event,
 	return event_format__fprintf(event, cpu, data, size, stdout);
 }
 
-void parse_ftrace_printk(struct tep_handle *pevent,
+void parse_ftrace_printk(struct pevent *pevent,
 			 char *file, unsigned int size __maybe_unused)
 {
 	unsigned long long addr;
@@ -150,46 +149,29 @@ void parse_ftrace_printk(struct tep_handle *pevent,
 	while (line) {
 		addr_str = strtok_r(line, ":", &fmt);
 		if (!addr_str) {
-			pr_warning("printk format with empty entry");
+			warning("printk format with empty entry");
 			break;
 		}
 		addr = strtoull(addr_str, NULL, 16);
 		/* fmt still has a space, skip it */
 		printk = strdup(fmt+1);
 		line = strtok_r(NULL, "\n", &next);
-		tep_register_print_string(pevent, printk, addr);
-		free(printk);
+		pevent_register_print_string(pevent, printk, addr);
 	}
 }
 
-void parse_saved_cmdline(struct tep_handle *pevent,
-			 char *file, unsigned int size __maybe_unused)
+int parse_ftrace_file(struct pevent *pevent, char *buf, unsigned long size)
 {
-	char comm[17]; /* Max comm length in the kernel is 16. */
-	char *line;
-	char *next = NULL;
-	int pid;
-
-	line = strtok_r(file, "\n", &next);
-	while (line) {
-		if (sscanf(line, "%d %16s", &pid, comm) == 2)
-			tep_register_comm(pevent, comm, pid);
-		line = strtok_r(NULL, "\n", &next);
-	}
+	return pevent_parse_event(pevent, buf, size, "ftrace");
 }
 
-int parse_ftrace_file(struct tep_handle *pevent, char *buf, unsigned long size)
-{
-	return tep_parse_event(pevent, buf, size, "ftrace");
-}
-
-int parse_event_file(struct tep_handle *pevent,
+int parse_event_file(struct pevent *pevent,
 		     char *buf, unsigned long size, char *sys)
 {
-	return tep_parse_event(pevent, buf, size, sys);
+	return pevent_parse_event(pevent, buf, size, sys);
 }
 
-struct event_format *trace_find_next_event(struct tep_handle *pevent,
+struct event_format *trace_find_next_event(struct pevent *pevent,
 					   struct event_format *event)
 {
 	static int idx;

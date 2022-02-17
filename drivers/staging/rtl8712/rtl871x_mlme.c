@@ -137,10 +137,11 @@ static void free_network_nolock(struct mlme_priv *pmlmepriv,
 }
 
 
-/* return the wlan_network with the matching addr
- * Shall be called under atomic context...
- * to avoid possible racing condition...
- */
+/*
+	return the wlan_network with the matching addr
+	Shall be called under atomic context...
+	to avoid possible racing condition...
+*/
 static struct wlan_network *_r8712_find_network(struct  __queue *scanned_queue,
 					 u8 *addr)
 {
@@ -238,10 +239,11 @@ void r8712_free_network_queue(struct _adapter *dev)
 }
 
 /*
- * return the wlan_network with the matching addr
- * Shall be called under atomic context...
- * to avoid possible racing condition...
- */
+	return the wlan_network with the matching addr
+
+	Shall be called under atomic context...
+	to avoid possible racing condition...
+*/
 static struct wlan_network *r8712_find_network(struct  __queue *scanned_queue,
 					       u8 *addr)
 {
@@ -257,10 +259,10 @@ int r8712_is_same_ibss(struct _adapter *adapter, struct wlan_network *pnetwork)
 	struct security_priv *psecuritypriv = &adapter->securitypriv;
 
 	if ((psecuritypriv->PrivacyAlgrthm != _NO_PRIVACY_) &&
-		    (pnetwork->network.Privacy == cpu_to_le32(0)))
+		    (pnetwork->network.Privacy == 0))
 		ret = false;
 	else if ((psecuritypriv->PrivacyAlgrthm == _NO_PRIVACY_) &&
-		 (pnetwork->network.Privacy == cpu_to_le32(1)))
+		 (pnetwork->network.Privacy == 1))
 		ret = false;
 	else
 		ret = true;
@@ -319,7 +321,6 @@ static void update_network(struct wlan_bssid_ex *dst,
 			   struct _adapter *padapter)
 {
 	u32 last_evm = 0, tmpVal;
-	struct smooth_rssi_data *sqd = &padapter->recvpriv.signal_qual_data;
 
 	if (check_fwstate(&padapter->mlmepriv, _FW_LINKED) &&
 	    is_same_network(&(padapter->mlmepriv.cur_network.network), src)) {
@@ -327,13 +328,17 @@ static void update_network(struct wlan_bssid_ex *dst,
 		    PHY_LINKQUALITY_SLID_WIN_MAX) {
 			padapter->recvpriv.signal_qual_data.total_num =
 				   PHY_LINKQUALITY_SLID_WIN_MAX;
-			last_evm = sqd->elements[sqd->index];
+			last_evm = padapter->recvpriv.signal_qual_data.
+				   elements[padapter->recvpriv.
+				   signal_qual_data.index];
 			padapter->recvpriv.signal_qual_data.total_val -=
 				 last_evm;
 		}
 		padapter->recvpriv.signal_qual_data.total_val += src->Rssi;
 
-		sqd->elements[sqd->index++] = src->Rssi;
+		padapter->recvpriv.signal_qual_data.
+			  elements[padapter->recvpriv.signal_qual_data.
+			  index++] = src->Rssi;
 		if (padapter->recvpriv.signal_qual_data.index >=
 		    PHY_LINKQUALITY_SLID_WIN_MAX)
 			padapter->recvpriv.signal_qual_data.index = 0;
@@ -364,7 +369,9 @@ static void update_current_network(struct _adapter *adapter,
 	}
 }
 
-/* Caller must hold pmlmepriv->lock first */
+/*
+Caller must hold pmlmepriv->lock first.
+*/
 static void update_scanned_network(struct _adapter *adapter,
 			    struct wlan_bssid_ex *target)
 {
@@ -571,10 +578,10 @@ void r8712_surveydone_event_callback(struct _adapter *adapter, u8 *pbuf)
 				set_fwstate(pmlmepriv, _FW_UNDER_LINKING);
 
 				if (r8712_select_and_join_from_scan(pmlmepriv)
-				    == _SUCCESS) {
+				    == _SUCCESS)
 					mod_timer(&pmlmepriv->assoc_timer, jiffies +
 						  msecs_to_jiffies(MAX_JOIN_TIMEOUT));
-				} else {
+				else {
 					struct wlan_bssid_ex *pdev_network =
 					  &(adapter->registrypriv.dev_network);
 					u8 *pibss =
@@ -644,8 +651,8 @@ void r8712_free_assoc_resources(struct _adapter *adapter)
 }
 
 /*
- * r8712_indicate_connect: the caller has to lock pmlmepriv->lock
- */
+*r8712_indicate_connect: the caller has to lock pmlmepriv->lock
+*/
 void r8712_indicate_connect(struct _adapter *padapter)
 {
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -661,8 +668,8 @@ void r8712_indicate_connect(struct _adapter *padapter)
 
 
 /*
- * r8712_ind_disconnect: the caller has to lock pmlmepriv->lock
- */
+*r8712_ind_disconnect: the caller has to lock pmlmepriv->lock
+*/
 void r8712_ind_disconnect(struct _adapter *padapter)
 {
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -930,7 +937,7 @@ void r8712_stassoc_event_callback(struct _adapter *adapter, u8 *pbuf)
 		return;
 	/* to do : init sta_info variable */
 	psta->qos_option = 0;
-	psta->mac_id = le32_to_cpu(pstassoc->cam_id);
+	psta->mac_id = le32_to_cpu((uint)pstassoc->cam_id);
 	/* psta->aid = (uint)pstassoc->cam_id; */
 
 	if (adapter->securitypriv.AuthAlgrthm == 2)
@@ -1340,8 +1347,8 @@ static int SecIsInPMKIDList(struct _adapter *Adapter, u8 *bssid)
 		   (!memcmp(psecuritypriv->PMKIDList[i].Bssid,
 			    bssid, ETH_ALEN)))
 			break;
-		i++;
-
+		else
+			i++;
 	} while (i < NUM_PMKID_CACHE);
 
 	if (i == NUM_PMKID_CACHE) {
@@ -1634,23 +1641,25 @@ void r8712_update_registrypriv_dev_network(struct _adapter *adapter)
 	pdev_network->Rssi = 0;
 	switch (pregistrypriv->wireless_mode) {
 	case WIRELESS_11B:
-		pdev_network->NetworkTypeInUse = Ndis802_11DS;
+		pdev_network->NetworkTypeInUse = cpu_to_le32(Ndis802_11DS);
 		break;
 	case WIRELESS_11G:
 	case WIRELESS_11BG:
-		pdev_network->NetworkTypeInUse = Ndis802_11OFDM24;
+		pdev_network->NetworkTypeInUse = cpu_to_le32(Ndis802_11OFDM24);
 		break;
 	case WIRELESS_11A:
-		pdev_network->NetworkTypeInUse = Ndis802_11OFDM5;
+		pdev_network->NetworkTypeInUse = cpu_to_le32(Ndis802_11OFDM5);
 		break;
 	default:
 		/* TODO */
 		break;
 	}
-	pdev_network->Configuration.DSConfig = pregistrypriv->channel;
+	pdev_network->Configuration.DSConfig = cpu_to_le32(
+					       pregistrypriv->channel);
 	if (cur_network->network.InfrastructureMode == Ndis802_11IBSS)
-		pdev_network->Configuration.ATIMWindow = 3;
-	pdev_network->InfrastructureMode = cur_network->network.InfrastructureMode;
+		pdev_network->Configuration.ATIMWindow = cpu_to_le32(3);
+	pdev_network->InfrastructureMode = cpu_to_le32(
+				cur_network->network.InfrastructureMode);
 	/* 1. Supported rates
 	 * 2. IE
 	 */
@@ -1705,12 +1714,12 @@ unsigned int r8712_restructure_ht_ie(struct _adapter *padapter, u8 *in_ie,
 		}
 		out_len = *pout_len;
 		memset(&ht_capie, 0, sizeof(struct ieee80211_ht_cap));
-		ht_capie.cap_info = cpu_to_le16(IEEE80211_HT_CAP_SUP_WIDTH |
+		ht_capie.cap_info = IEEE80211_HT_CAP_SUP_WIDTH |
 				    IEEE80211_HT_CAP_SGI_20 |
 				    IEEE80211_HT_CAP_SGI_40 |
 				    IEEE80211_HT_CAP_TX_STBC |
 				    IEEE80211_HT_CAP_MAX_AMSDU |
-				    IEEE80211_HT_CAP_DSSSCCK40);
+				    IEEE80211_HT_CAP_DSSSCCK40;
 		ht_capie.ampdu_params_info = (IEEE80211_HT_CAP_AMPDU_FACTOR &
 				0x03) | (IEEE80211_HT_CAP_AMPDU_DENSITY & 0x00);
 		r8712_set_ie(out_ie + out_len, _HT_CAPABILITY_IE_,
@@ -1725,8 +1734,7 @@ unsigned int r8712_restructure_ht_ie(struct _adapter *padapter, u8 *in_ie,
 static void update_ht_cap(struct _adapter *padapter, u8 *pie, uint ie_len)
 {
 	u8 *p, max_ampdu_sz;
-	int i;
-	uint len;
+	int i, len;
 	struct sta_info *bmc_sta, *psta;
 	struct ieee80211_ht_cap *pht_capie;
 	struct recv_reorder_ctrl *preorder_ctrl;

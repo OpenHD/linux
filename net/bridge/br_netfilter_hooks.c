@@ -26,7 +26,6 @@
 #include <linux/if_pppox.h>
 #include <linux/ppp_defs.h>
 #include <linux/netfilter_bridge.h>
-#include <uapi/linux/netfilter_bridge.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
 #include <linux/netfilter_arp.h>
@@ -41,13 +40,13 @@
 #include <net/netfilter/br_netfilter.h>
 #include <net/netns/generic.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include "br_private.h"
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>
 #endif
 
-static unsigned int brnf_net_id __read_mostly;
+static int brnf_net_id __read_mostly;
 
 struct brnf_net {
 	bool enabled;
@@ -150,12 +149,12 @@ static inline struct nf_bridge_info *nf_bridge_unshare(struct sk_buff *skb)
 {
 	struct nf_bridge_info *nf_bridge = skb->nf_bridge;
 
-	if (refcount_read(&nf_bridge->use) > 1) {
+	if (atomic_read(&nf_bridge->use) > 1) {
 		struct nf_bridge_info *tmp = nf_bridge_alloc(skb);
 
 		if (tmp) {
 			memcpy(tmp, nf_bridge, sizeof(struct nf_bridge_info));
-			refcount_set(&tmp->use, 1);
+			atomic_set(&tmp->use, 1);
 		}
 		nf_bridge_put(nf_bridge);
 		nf_bridge = tmp;
@@ -215,7 +214,7 @@ static int br_validate_ipv4(struct net *net, struct sk_buff *skb)
 
 	iph = ip_hdr(skb);
 	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
-		goto csum_error;
+		goto inhdr_error;
 
 	len = ntohs(iph->tot_len);
 	if (skb->len < len) {
@@ -237,8 +236,6 @@ static int br_validate_ipv4(struct net *net, struct sk_buff *skb)
 	 */
 	return 0;
 
-csum_error:
-	__IP_INC_STATS(net, IPSTATS_MIB_CSUMERRORS);
 inhdr_error:
 	__IP_INC_STATS(net, IPSTATS_MIB_INHDRERRORS);
 drop:
@@ -550,8 +547,8 @@ static int br_nf_forward_finish(struct net *net, struct sock *sk, struct sk_buff
 	}
 	nf_bridge_push_encap_header(skb);
 
-	br_nf_hook_thresh(NF_BR_FORWARD, net, sk, skb, in, skb->dev,
-			  br_forward_finish);
+	NF_HOOK_THRESH(NFPROTO_BRIDGE, NF_BR_FORWARD, net, sk, skb,
+		       in, skb->dev, br_forward_finish, 1);
 	return 0;
 }
 
@@ -719,6 +716,11 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
 	mtu_reserved = nf_bridge_mtu_reduction(skb);
 	mtu = skb->dev->mtu;
 
+	if (nf_bridge->pkt_otherhost) {
+		skb->pkt_type = PACKET_OTHERHOST;
+		nf_bridge->pkt_otherhost = false;
+	}
+
 	if (nf_bridge->frag_max_size && nf_bridge->frag_max_size < mtu)
 		mtu = nf_bridge->frag_max_size;
 
@@ -812,8 +814,6 @@ static unsigned int br_nf_post_routing(void *priv,
 	else
 		return NF_ACCEPT;
 
-	/* We assume any code from br_dev_queue_push_xmit onwards doesn't care
-	 * about the value of skb->pkt_type. */
 	if (skb->pkt_type == PACKET_OTHERHOST) {
 		skb->pkt_type = PACKET_HOST;
 		nf_bridge->pkt_otherhost = true;
@@ -839,11 +839,8 @@ static unsigned int ip_sabotage_in(void *priv,
 				   struct sk_buff *skb,
 				   const struct nf_hook_state *state)
 {
-	if (skb->nf_bridge && !skb->nf_bridge->in_prerouting &&
-	    !netif_is_l3_master(skb->dev)) {
-		state->okfn(state->net, state->sk, skb);
-		return NF_STOLEN;
-	}
+	if (skb->nf_bridge && !skb->nf_bridge->in_prerouting)
+		return NF_STOP;
 
 	return NF_ACCEPT;
 }
@@ -890,7 +887,7 @@ static const struct nf_br_ops br_ops = {
 
 /* For br_nf_post_routing, we need (prio = NF_BR_PRI_LAST), because
  * br_dev_queue_push_xmit is called afterwards */
-static const struct nf_hook_ops br_nf_ops[] = {
+static struct nf_hook_ops br_nf_ops[] __read_mostly = {
 	{
 		.hook = br_nf_pre_routing,
 		.pf = NFPROTO_BRIDGE,
@@ -988,25 +985,25 @@ int br_nf_hook_thresh(unsigned int hook, struct net *net,
 		      int (*okfn)(struct net *, struct sock *,
 				  struct sk_buff *))
 {
-	const struct nf_hook_entries *e;
+	struct nf_hook_entry *elem;
 	struct nf_hook_state state;
-	struct nf_hook_ops **ops;
-	unsigned int i;
 	int ret;
 
-	e = rcu_dereference(net->nf.hooks_bridge[hook]);
-	if (!e)
+	elem = rcu_dereference(net->nf.hooks[NFPROTO_BRIDGE][hook]);
+
+	while (elem && (elem->ops.priority <= NF_BR_PRI_BRNF))
+		elem = rcu_dereference(elem->next);
+
+	if (!elem)
 		return okfn(net, sk, skb);
 
-	ops = nf_hook_entries_get_hook_ops(e);
-	for (i = 0; i < e->num_hook_entries &&
-	      ops[i]->priority <= NF_BR_PRI_BRNF; i++)
-		;
+	/* We may already have this, but read-locks nest anyway */
+	rcu_read_lock();
+	nf_hook_state_init(&state, elem, hook, NF_BR_PRI_BRNF + 1,
+			   NFPROTO_BRIDGE, indev, outdev, sk, net, okfn);
 
-	nf_hook_state_init(&state, hook, NFPROTO_BRIDGE, indev, outdev,
-			   sk, net, okfn);
-
-	ret = nf_hook_slow(skb, &state, e, i);
+	ret = nf_hook_slow(skb, &state);
+	rcu_read_unlock();
 	if (ret == 1)
 		ret = okfn(net, sk, skb);
 

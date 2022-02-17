@@ -18,6 +18,7 @@
 #include <asm/errno.h>
 #include "internal.h"
 
+static int proc_keys_open(struct inode *inode, struct file *file);
 static void *proc_keys_start(struct seq_file *p, loff_t *_pos);
 static void *proc_keys_next(struct seq_file *p, void *v, loff_t *_pos);
 static void proc_keys_stop(struct seq_file *p, void *v);
@@ -30,6 +31,14 @@ static const struct seq_operations proc_keys_ops = {
 	.show	= proc_keys_show,
 };
 
+static const struct file_operations proc_keys_fops = {
+	.open		= proc_keys_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
+static int proc_key_users_open(struct inode *inode, struct file *file);
 static void *proc_key_users_start(struct seq_file *p, loff_t *_pos);
 static void *proc_key_users_next(struct seq_file *p, void *v, loff_t *_pos);
 static void proc_key_users_stop(struct seq_file *p, void *v);
@@ -42,6 +51,13 @@ static const struct seq_operations proc_key_users_ops = {
 	.show	= proc_key_users_show,
 };
 
+static const struct file_operations proc_key_users_fops = {
+	.open		= proc_key_users_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
 /*
  * Declare the /proc files.
  */
@@ -49,11 +65,11 @@ static int __init key_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = proc_create_seq("keys", 0, NULL, &proc_keys_ops);
+	p = proc_create("keys", 0, NULL, &proc_keys_fops);
 	if (!p)
 		panic("Cannot create /proc/keys\n");
 
-	p = proc_create_seq("key-users", 0, NULL, &proc_key_users_ops);
+	p = proc_create("key-users", 0, NULL, &proc_key_users_fops);
 	if (!p)
 		panic("Cannot create /proc/key-users\n");
 
@@ -78,6 +94,11 @@ static struct rb_node *key_serial_next(struct seq_file *p, struct rb_node *n)
 		n = rb_next(n);
 	}
 	return n;
+}
+
+static int proc_keys_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &proc_keys_ops);
 }
 
 static struct key *find_ge_key(struct seq_file *p, key_serial_t id)
@@ -157,12 +178,11 @@ static int proc_keys_show(struct seq_file *m, void *v)
 {
 	struct rb_node *_p = v;
 	struct key *key = rb_entry(_p, struct key, serial_node);
-	unsigned long flags;
+	struct timespec now;
+	unsigned long timo;
 	key_ref_t key_ref, skey_ref;
-	time64_t now, expiry;
 	char xbuf[16];
 	short state;
-	u64 timo;
 	int rc;
 
 	struct keyring_search_context ctx = {
@@ -192,47 +212,45 @@ static int proc_keys_show(struct seq_file *m, void *v)
 	if (rc < 0)
 		return 0;
 
-	now = ktime_get_real_seconds();
+	now = current_kernel_time();
 
 	rcu_read_lock();
 
 	/* come up with a suitable timeout value */
-	expiry = READ_ONCE(key->expiry);
-	if (expiry == 0) {
+	if (key->expiry == 0) {
 		memcpy(xbuf, "perm", 5);
-	} else if (now >= expiry) {
+	} else if (now.tv_sec >= key->expiry) {
 		memcpy(xbuf, "expd", 5);
 	} else {
-		timo = expiry - now;
+		timo = key->expiry - now.tv_sec;
 
 		if (timo < 60)
-			sprintf(xbuf, "%llus", timo);
+			sprintf(xbuf, "%lus", timo);
 		else if (timo < 60*60)
-			sprintf(xbuf, "%llum", div_u64(timo, 60));
+			sprintf(xbuf, "%lum", timo / 60);
 		else if (timo < 60*60*24)
-			sprintf(xbuf, "%lluh", div_u64(timo, 60 * 60));
+			sprintf(xbuf, "%luh", timo / (60*60));
 		else if (timo < 60*60*24*7)
-			sprintf(xbuf, "%llud", div_u64(timo, 60 * 60 * 24));
+			sprintf(xbuf, "%lud", timo / (60*60*24));
 		else
-			sprintf(xbuf, "%lluw", div_u64(timo, 60 * 60 * 24 * 7));
+			sprintf(xbuf, "%luw", timo / (60*60*24*7));
 	}
 
 	state = key_read_state(key);
 
-#define showflag(FLAGS, LETTER, FLAG) \
-	((FLAGS & (1 << FLAG)) ? LETTER : '-')
+#define showflag(KEY, LETTER, FLAG) \
+	(test_bit(FLAG,	&(KEY)->flags) ? LETTER : '-')
 
-	flags = READ_ONCE(key->flags);
 	seq_printf(m, "%08x %c%c%c%c%c%c%c %5d %4s %08x %5d %5d %-9.9s ",
 		   key->serial,
 		   state != KEY_IS_UNINSTANTIATED ? 'I' : '-',
-		   showflag(flags, 'R', KEY_FLAG_REVOKED),
-		   showflag(flags, 'D', KEY_FLAG_DEAD),
-		   showflag(flags, 'Q', KEY_FLAG_IN_QUOTA),
-		   showflag(flags, 'U', KEY_FLAG_USER_CONSTRUCT),
+		   showflag(key, 'R', KEY_FLAG_REVOKED),
+		   showflag(key, 'D', KEY_FLAG_DEAD),
+		   showflag(key, 'Q', KEY_FLAG_IN_QUOTA),
+		   showflag(key, 'U', KEY_FLAG_USER_CONSTRUCT),
 		   state < 0 ? 'N' : '-',
-		   showflag(flags, 'i', KEY_FLAG_INVALIDATED),
-		   refcount_read(&key->usage),
+		   showflag(key, 'i', KEY_FLAG_INVALIDATED),
+		   atomic_read(&key->usage),
 		   xbuf,
 		   key->perm,
 		   from_kuid_munged(seq_user_ns(m), key->uid),
@@ -269,6 +287,15 @@ static struct rb_node *key_user_first(struct user_namespace *user_ns, struct rb_
 {
 	struct rb_node *n = rb_first(r);
 	return __key_user_next(user_ns, n);
+}
+
+/*
+ * Implement "/proc/key-users" to provides a list of the key users and their
+ * quotas.
+ */
+static int proc_key_users_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &proc_key_users_ops);
 }
 
 static void *proc_key_users_start(struct seq_file *p, loff_t *_pos)
@@ -311,7 +338,7 @@ static int proc_key_users_show(struct seq_file *m, void *v)
 
 	seq_printf(m, "%5u: %5d %d/%d %d/%d %d/%d\n",
 		   from_kuid_munged(seq_user_ns(m), user->uid),
-		   refcount_read(&user->usage),
+		   atomic_read(&user->usage),
 		   atomic_read(&user->nkeys),
 		   atomic_read(&user->nikeys),
 		   user->qnkeys,

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PARISC_DMA_MAPPING_H
 #define _PARISC_DMA_MAPPING_H
 
@@ -21,11 +20,26 @@
 ** flush/purge and allocate "regular" cacheable pages for everything.
 */
 
-extern const struct dma_map_ops *hppa_dma_ops;
+#define DMA_ERROR_CODE	(~(dma_addr_t)0)
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+#ifdef CONFIG_PA11
+extern struct dma_map_ops pcxl_dma_ops;
+extern struct dma_map_ops pcx_dma_ops;
+#endif
+
+extern struct dma_map_ops *hppa_dma_ops;
+
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	return hppa_dma_ops;
+}
+
+static inline void
+dma_cache_sync(struct device *dev, void *vaddr, size_t size,
+	       enum dma_data_direction direction)
+{
+	if (hppa_dma_ops->sync_single_for_cpu)
+		flush_kernel_dcache_range((unsigned long)vaddr, size);
 }
 
 static inline void *

@@ -43,7 +43,7 @@ config PWM_AB8500
 
 config PWM_ATMEL
 	tristate "Atmel PWM support"
-	depends on ARCH_AT91
+	depends on ARCH_AT91 || AVR32
 	help
 	  Generic PWM framework driver for Atmel SoC.
 
@@ -76,9 +76,7 @@ config PWM_ATMEL_TCB
 
 config PWM_BCM_IPROC
 	tristate "iProc PWM support"
-	depends on ARCH_BCM_IPROC || COMPILE_TEST
-	depends on COMMON_CLK
-	default ARCH_BCM_IPROC
+	depends on ARCH_BCM_IPROC
 	help
 	  Generic PWM framework driver for Broadcom iProc PWM block. This
 	  block is used in Broadcom iProc SoC's.
@@ -112,6 +110,15 @@ config PWM_BERLIN
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-berlin.
+
+config PWM_BFIN
+	tristate "Blackfin PWM support"
+	depends on BFIN_GPTIMERS
+	help
+	  Generic PWM framework driver for Blackfin.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-bfin.
 
 config PWM_BRCMSTB
 	tristate "Broadcom STB PWM support"
@@ -168,15 +175,6 @@ config PWM_FSL_FTM
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-fsl-ftm.
 
-config PWM_HIBVT
-	tristate "HiSilicon BVT PWM support"
-	depends on ARCH_HISI || COMPILE_TEST
-	help
-	  Generic PWM framework driver for HiSilicon BVT SoCs.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-hibvt.
-
 config PWM_IMG
 	tristate "Imagination Technologies PWM driver"
 	depends on HAS_IOMEM
@@ -200,10 +198,10 @@ config PWM_IMX
 	  will be called pwm-imx.
 
 config PWM_JZ4740
-	tristate "Ingenic JZ47xx PWM support"
-	depends on MACH_INGENIC
+	tristate "Ingenic JZ4740 PWM support"
+	depends on MACH_JZ4740
 	help
-	  Generic PWM framework driver for Ingenic JZ47xx based
+	  Generic PWM framework driver for Ingenic JZ4740 based
 	  machines.
 
 	  To compile this driver as a module, choose M here: the module
@@ -283,15 +281,6 @@ config PWM_MTK_DISP
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-mtk-disp.
-
-config PWM_MEDIATEK
-	tristate "MediaTek PWM support"
-	depends on ARCH_MEDIATEK || RALINK || COMPILE_TEST
-	help
-	  Generic PWM framework driver for Mediatek ARM SoC.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-mediatek.
 
 config PWM_MXS
 	tristate "Freescale MXS PWM support"
@@ -399,25 +388,6 @@ config PWM_STI
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-sti.
 
-config PWM_STM32
-	tristate "STMicroelectronics STM32 PWM"
-	depends on MFD_STM32_TIMERS
-	help
-	  Generic PWM framework driver for STM32 SoCs.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-stm32.
-
-config PWM_STM32_LP
-	tristate "STMicroelectronics STM32 PWM LP"
-	depends on MFD_STM32_LPTIMER || COMPILE_TEST
-	help
-	  Generic PWM framework driver for STMicroelectronics STM32 SoCs
-	  with Low-Power Timer (LPTIM).
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-stm32-lp.
-
 config PWM_STMPE
 	bool "STMPE expander PWM export"
 	depends on MFD_STMPE
@@ -445,9 +415,47 @@ config PWM_TEGRA
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-tegra.
 
+config PWM_TEGRA_TACHOMETER
+	tristate "NVIDIA Tegra Tachometer PWM driver "
+	depends on ARCH_TEGRA
+	help
+	  NVIDIA Tegra Tachometer reads the PWM signal and reports the PWM
+	  signal periods. This helps in measuign the fan speed where Fan
+	  output for speed is PWM signal.
+
+	  This driver support the Tachometer driver in PWM framwork.
+
+config PWM_TEGRA_PMC_BLINK
+	tristate "NVIDIA Tegra PMC blink PWM support"
+	depends on ARCH_TEGRA
+	help
+	  PWM driver support for the Tegra PMC blink module found on NVIDIA
+	  Tegra SoCs.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-tegra-blink.
+
+config PWM_TEGRA_DFLL
+	tristate "NVIDIA Tegra DFLL PWM support"
+	depends on ARCH_TEGRA
+	help
+	  PWM driver support for the Tegra DFLL module found on NVIDIA
+	  Tegra SoCs.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-tegra-dfll.
+
+config PWM_TEGRA_PMC_SOFT_LED_BLINK
+	tristate "NVIDIA Tegra PMC Soft LED Blink driver"
+	depends on ARCH_TEGRA
+	help
+	  NVIDIA Tegra PMC LED soft blink control the LED blinking and
+	  blinking control is a PWM signal,PWM driver support for the
+	  PMC LED soft blink module found on NVIDIA Tegra SoCs.
+
 config  PWM_TIECAP
 	tristate "ECAP PWM support"
-	depends on ARCH_OMAP2PLUS || ARCH_DAVINCI_DA8XX || ARCH_KEYSTONE
+	depends on ARCH_OMAP2PLUS || ARCH_DAVINCI_DA8XX
 	help
 	  PWM driver support for the ECAP APWM controller found on AM33XX
 	  TI SOC
@@ -500,14 +508,5 @@ config PWM_VT8500
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-vt8500.
-
-config PWM_ZX
-	tristate "ZTE ZX PWM support"
-	depends on ARCH_ZX
-	help
-	  Generic PWM framework driver for ZTE ZX family SoCs.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-zx.
 
 endif

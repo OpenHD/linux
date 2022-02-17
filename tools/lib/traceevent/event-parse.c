@@ -1,7 +1,21 @@
-// SPDX-License-Identifier: LGPL-2.1
 /*
  * Copyright (C) 2009, 2010 Red Hat Inc, Steven Rostedt <srostedt@redhat.com>
  *
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation;
+ * version 2.1 of the License (not later!)
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not,  see <http://www.gnu.org/licenses>
+ *
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
  *  The parts for function graph printing was taken and modified from the
  *  Linux Kernel that were written by
@@ -19,7 +33,6 @@
 #include <stdint.h>
 #include <limits.h>
 #include <linux/string.h>
-#include <linux/time64.h>
 
 #include <netinet/in.h>
 #include "event-parse.h"
@@ -59,12 +72,12 @@ static void init_input_buf(const char *buf, unsigned long long size)
 	input_buf_ptr = 0;
 }
 
-const char *tep_get_input_buf(void)
+const char *pevent_get_input_buf(void)
 {
 	return input_buf;
 }
 
-unsigned long long tep_get_input_buf_ptr(void)
+unsigned long long pevent_get_input_buf_ptr(void)
 {
 	return input_buf_ptr;
 }
@@ -74,21 +87,21 @@ struct event_handler {
 	int				id;
 	const char			*sys_name;
 	const char			*event_name;
-	tep_event_handler_func		func;
+	pevent_event_handler_func	func;
 	void				*context;
 };
 
-struct func_params {
-	struct func_params	*next;
-	enum tep_func_arg_type	type;
+struct pevent_func_params {
+	struct pevent_func_params	*next;
+	enum pevent_func_arg_type	type;
 };
 
-struct tep_function_handler {
-	struct tep_function_handler	*next;
-	enum tep_func_arg_type		ret_type;
+struct pevent_function_handler {
+	struct pevent_function_handler	*next;
+	enum pevent_func_arg_type	ret_type;
 	char				*name;
-	tep_func_handler		func;
-	struct func_params		*params;
+	pevent_func_handler		func;
+	struct pevent_func_params	*params;
 	int				nr_args;
 };
 
@@ -96,17 +109,17 @@ static unsigned long long
 process_defined_func(struct trace_seq *s, void *data, int size,
 		     struct event_format *event, struct print_arg *arg);
 
-static void free_func_handle(struct tep_function_handler *func);
+static void free_func_handle(struct pevent_function_handler *func);
 
 /**
- * tep_buffer_init - init buffer for parsing
+ * pevent_buffer_init - init buffer for parsing
  * @buf: buffer to parse
  * @size: the size of the buffer
  *
- * For use with tep_read_token(), this initializes the internal
- * buffer that tep_read_token() will parse.
+ * For use with pevent_read_token(), this initializes the internal
+ * buffer that pevent_read_token() will parse.
  */
-void tep_buffer_init(const char *buf, unsigned long long size)
+void pevent_buffer_init(const char *buf, unsigned long long size)
 {
 	init_input_buf(buf, size);
 }
@@ -146,7 +159,7 @@ struct cmdline_list {
 	int			pid;
 };
 
-static int cmdline_init(struct tep_handle *pevent)
+static int cmdline_init(struct pevent *pevent)
 {
 	struct cmdline_list *cmdlist = pevent->cmdlist;
 	struct cmdline_list *item;
@@ -175,7 +188,7 @@ static int cmdline_init(struct tep_handle *pevent)
 	return 0;
 }
 
-static const char *find_cmdline(struct tep_handle *pevent, int pid)
+static const char *find_cmdline(struct pevent *pevent, int pid)
 {
 	const struct cmdline *comm;
 	struct cmdline key;
@@ -197,14 +210,14 @@ static const char *find_cmdline(struct tep_handle *pevent, int pid)
 }
 
 /**
- * tep_pid_is_registered - return if a pid has a cmdline registered
+ * pevent_pid_is_registered - return if a pid has a cmdline registered
  * @pevent: handle for the pevent
  * @pid: The pid to check if it has a cmdline registered with.
  *
  * Returns 1 if the pid has a cmdline mapped to it
  * 0 otherwise.
  */
-int tep_pid_is_registered(struct tep_handle *pevent, int pid)
+int pevent_pid_is_registered(struct pevent *pevent, int pid)
 {
 	const struct cmdline *comm;
 	struct cmdline key;
@@ -230,7 +243,7 @@ int tep_pid_is_registered(struct tep_handle *pevent, int pid)
  * we must add this pid. This is much slower than when cmdlines
  * are added before the array is initialized.
  */
-static int add_new_comm(struct tep_handle *pevent, const char *comm, int pid)
+static int add_new_comm(struct pevent *pevent, const char *comm, int pid)
 {
 	struct cmdline *cmdlines = pevent->cmdlines;
 	const struct cmdline *cmdline;
@@ -273,7 +286,7 @@ static int add_new_comm(struct tep_handle *pevent, const char *comm, int pid)
 }
 
 /**
- * tep_register_comm - register a pid / comm mapping
+ * pevent_register_comm - register a pid / comm mapping
  * @pevent: handle for the pevent
  * @comm: the command line to register
  * @pid: the pid to map the command line to
@@ -281,7 +294,7 @@ static int add_new_comm(struct tep_handle *pevent, const char *comm, int pid)
  * This adds a mapping to search for command line names with
  * a given pid. The comm is duplicated.
  */
-int tep_register_comm(struct tep_handle *pevent, const char *comm, int pid)
+int pevent_register_comm(struct pevent *pevent, const char *comm, int pid)
 {
 	struct cmdline_list *item;
 
@@ -309,7 +322,7 @@ int tep_register_comm(struct tep_handle *pevent, const char *comm, int pid)
 	return 0;
 }
 
-int tep_register_trace_clock(struct tep_handle *pevent, const char *trace_clock)
+int pevent_register_trace_clock(struct pevent *pevent, const char *trace_clock)
 {
 	pevent->trace_clock = strdup(trace_clock);
 	if (!pevent->trace_clock) {
@@ -366,7 +379,7 @@ static int func_bcmp(const void *a, const void *b)
 	return 1;
 }
 
-static int func_map_init(struct tep_handle *pevent)
+static int func_map_init(struct pevent *pevent)
 {
 	struct func_list *funclist;
 	struct func_list *item;
@@ -406,7 +419,7 @@ static int func_map_init(struct tep_handle *pevent)
 }
 
 static struct func_map *
-__find_func(struct tep_handle *pevent, unsigned long long addr)
+__find_func(struct pevent *pevent, unsigned long long addr)
 {
 	struct func_map *func;
 	struct func_map key;
@@ -423,13 +436,13 @@ __find_func(struct tep_handle *pevent, unsigned long long addr)
 }
 
 struct func_resolver {
-	tep_func_resolver_t	*func;
-	void			*priv;
-	struct func_map		map;
+	pevent_func_resolver_t *func;
+	void		       *priv;
+	struct func_map	       map;
 };
 
 /**
- * tep_set_function_resolver - set an alternative function resolver
+ * pevent_set_function_resolver - set an alternative function resolver
  * @pevent: handle for the pevent
  * @resolver: function to be used
  * @priv: resolver function private state.
@@ -438,8 +451,8 @@ struct func_resolver {
  * keep using it instead of duplicating all the entries inside
  * pevent->funclist.
  */
-int tep_set_function_resolver(struct tep_handle *pevent,
-			      tep_func_resolver_t *func, void *priv)
+int pevent_set_function_resolver(struct pevent *pevent,
+				 pevent_func_resolver_t *func, void *priv)
 {
 	struct func_resolver *resolver = malloc(sizeof(*resolver));
 
@@ -456,20 +469,20 @@ int tep_set_function_resolver(struct tep_handle *pevent,
 }
 
 /**
- * tep_reset_function_resolver - reset alternative function resolver
+ * pevent_reset_function_resolver - reset alternative function resolver
  * @pevent: handle for the pevent
  *
  * Stop using whatever alternative resolver was set, use the default
  * one instead.
  */
-void tep_reset_function_resolver(struct tep_handle *pevent)
+void pevent_reset_function_resolver(struct pevent *pevent)
 {
 	free(pevent->func_resolver);
 	pevent->func_resolver = NULL;
 }
 
 static struct func_map *
-find_func(struct tep_handle *pevent, unsigned long long addr)
+find_func(struct pevent *pevent, unsigned long long addr)
 {
 	struct func_map *map;
 
@@ -488,7 +501,7 @@ find_func(struct tep_handle *pevent, unsigned long long addr)
 }
 
 /**
- * tep_find_function - find a function by a given address
+ * pevent_find_function - find a function by a given address
  * @pevent: handle for the pevent
  * @addr: the address to find the function with
  *
@@ -496,7 +509,7 @@ find_func(struct tep_handle *pevent, unsigned long long addr)
  * address. Note, the address does not have to be exact, it
  * will select the function that would contain the address.
  */
-const char *tep_find_function(struct tep_handle *pevent, unsigned long long addr)
+const char *pevent_find_function(struct pevent *pevent, unsigned long long addr)
 {
 	struct func_map *map;
 
@@ -508,16 +521,16 @@ const char *tep_find_function(struct tep_handle *pevent, unsigned long long addr
 }
 
 /**
- * tep_find_function_address - find a function address by a given address
+ * pevent_find_function_address - find a function address by a given address
  * @pevent: handle for the pevent
  * @addr: the address to find the function with
  *
  * Returns the address the function starts at. This can be used in
- * conjunction with tep_find_function to print both the function
+ * conjunction with pevent_find_function to print both the function
  * name and the function offset.
  */
 unsigned long long
-tep_find_function_address(struct tep_handle *pevent, unsigned long long addr)
+pevent_find_function_address(struct pevent *pevent, unsigned long long addr)
 {
 	struct func_map *map;
 
@@ -529,7 +542,7 @@ tep_find_function_address(struct tep_handle *pevent, unsigned long long addr)
 }
 
 /**
- * tep_register_function - register a function with a given address
+ * pevent_register_function - register a function with a given address
  * @pevent: handle for the pevent
  * @function: the function name to register
  * @addr: the address the function starts at
@@ -538,8 +551,8 @@ tep_find_function_address(struct tep_handle *pevent, unsigned long long addr)
  * This registers a function name with an address and module.
  * The @func passed in is duplicated.
  */
-int tep_register_function(struct tep_handle *pevent, char *func,
-			  unsigned long long addr, char *mod)
+int pevent_register_function(struct pevent *pevent, char *func,
+			     unsigned long long addr, char *mod)
 {
 	struct func_list *item = malloc(sizeof(*item));
 
@@ -574,12 +587,12 @@ out_free:
 }
 
 /**
- * tep_print_funcs - print out the stored functions
+ * pevent_print_funcs - print out the stored functions
  * @pevent: handle for the pevent
  *
  * This prints out the stored functions.
  */
-void tep_print_funcs(struct tep_handle *pevent)
+void pevent_print_funcs(struct pevent *pevent)
 {
 	int i;
 
@@ -621,7 +634,7 @@ static int printk_cmp(const void *a, const void *b)
 	return 0;
 }
 
-static int printk_map_init(struct tep_handle *pevent)
+static int printk_map_init(struct pevent *pevent)
 {
 	struct printk_list *printklist;
 	struct printk_list *item;
@@ -653,7 +666,7 @@ static int printk_map_init(struct tep_handle *pevent)
 }
 
 static struct printk_map *
-find_printk(struct tep_handle *pevent, unsigned long long addr)
+find_printk(struct pevent *pevent, unsigned long long addr)
 {
 	struct printk_map *printk;
 	struct printk_map key;
@@ -670,7 +683,7 @@ find_printk(struct tep_handle *pevent, unsigned long long addr)
 }
 
 /**
- * tep_register_print_string - register a string by its address
+ * pevent_register_print_string - register a string by its address
  * @pevent: handle for the pevent
  * @fmt: the string format to register
  * @addr: the address the string was located at
@@ -678,8 +691,8 @@ find_printk(struct tep_handle *pevent, unsigned long long addr)
  * This registers a string by the address it was stored in the kernel.
  * The @fmt passed in is duplicated.
  */
-int tep_register_print_string(struct tep_handle *pevent, const char *fmt,
-			      unsigned long long addr)
+int pevent_register_print_string(struct pevent *pevent, const char *fmt,
+				 unsigned long long addr)
 {
 	struct printk_list *item = malloc(sizeof(*item));
 	char *p;
@@ -717,12 +730,12 @@ out_free:
 }
 
 /**
- * tep_print_printk - print out the stored strings
+ * pevent_print_printk - print out the stored strings
  * @pevent: handle for the pevent
  *
  * This prints the string formats that were stored.
  */
-void tep_print_printk(struct tep_handle *pevent)
+void pevent_print_printk(struct pevent *pevent)
 {
 	int i;
 
@@ -741,7 +754,7 @@ static struct event_format *alloc_event(void)
 	return calloc(1, sizeof(struct event_format));
 }
 
-static int add_event(struct tep_handle *pevent, struct event_format *event)
+static int add_event(struct pevent *pevent, struct event_format *event)
 {
 	int i;
 	struct event_format **events = realloc(pevent->events, sizeof(event) *
@@ -816,7 +829,6 @@ static void free_arg(struct print_arg *arg)
 		free_flag_sym(arg->symbol.symbols);
 		break;
 	case PRINT_HEX:
-	case PRINT_HEX_STR:
 		free_arg(arg->hex.field);
 		free_arg(arg->hex.size);
 		break;
@@ -898,11 +910,11 @@ static int __peek_char(void)
 }
 
 /**
- * tep_peek_char - peek at the next character that will be read
+ * pevent_peek_char - peek at the next character that will be read
  *
  * Returns the next character read, or -1 if end of buffer.
  */
-int tep_peek_char(void)
+int pevent_peek_char(void)
 {
 	return __peek_char();
 }
@@ -1079,7 +1091,7 @@ static enum event_type __read_token(char **tok)
 		if (strcmp(*tok, "LOCAL_PR_FMT") == 0) {
 			free(*tok);
 			*tok = NULL;
-			return force_token("\"%s\" ", tok);
+			return force_token("\"\%s\" ", tok);
 		} else if (strcmp(*tok, "STA_PR_FMT") == 0) {
 			free(*tok);
 			*tok = NULL;
@@ -1142,24 +1154,24 @@ static enum event_type read_token(char **tok)
 }
 
 /**
- * tep_read_token - access to utilites to use the pevent parser
+ * pevent_read_token - access to utilites to use the pevent parser
  * @tok: The token to return
  *
  * This will parse tokens from the string given by
- * tep_init_data().
+ * pevent_init_data().
  *
  * Returns the token type.
  */
-enum event_type tep_read_token(char **tok)
+enum event_type pevent_read_token(char **tok)
 {
 	return read_token(tok);
 }
 
 /**
- * tep_free_token - free a token returned by tep_read_token
+ * pevent_free_token - free a token returned by pevent_read_token
  * @token: the token to free
  */
-void tep_free_token(char *token)
+void pevent_free_token(char *token)
 {
 	free_token(token);
 }
@@ -2086,11 +2098,11 @@ process_entry(struct event_format *event __maybe_unused, struct print_arg *arg,
 	arg->field.name = field;
 
 	if (is_flag_field) {
-		arg->field.field = tep_find_any_field(event, arg->field.name);
+		arg->field.field = pevent_find_any_field(event, arg->field.name);
 		arg->field.field->flags |= FIELD_IS_FLAG;
 		is_flag_field = 0;
 	} else if (is_symbolic_field) {
-		arg->field.field = tep_find_any_field(event, arg->field.name);
+		arg->field.field = pevent_find_any_field(event, arg->field.name);
 		arg->field.field->flags |= FIELD_IS_SYMBOLIC;
 		is_symbolic_field = 0;
 	}
@@ -2615,11 +2627,10 @@ out_free:
 }
 
 static enum event_type
-process_hex_common(struct event_format *event, struct print_arg *arg,
-		   char **tok, enum print_arg_type type)
+process_hex(struct event_format *event, struct print_arg *arg, char **tok)
 {
 	memset(arg, 0, sizeof(*arg));
-	arg->type = type;
+	arg->type = PRINT_HEX;
 
 	if (alloc_and_process_delim(event, ",", &arg->hex.field))
 		goto out;
@@ -2635,19 +2646,6 @@ free_field:
 out:
 	*tok = NULL;
 	return EVENT_ERROR;
-}
-
-static enum event_type
-process_hex(struct event_format *event, struct print_arg *arg, char **tok)
-{
-	return process_hex_common(event, arg, tok, PRINT_HEX);
-}
-
-static enum event_type
-process_hex_str(struct event_format *event, struct print_arg *arg,
-		char **tok)
-{
-	return process_hex_common(event, arg, tok, PRINT_HEX_STR);
 }
 
 static enum event_type
@@ -2699,7 +2697,7 @@ process_dynamic_array(struct event_format *event, struct print_arg *arg, char **
 
 	/* Find the field */
 
-	field = tep_find_field(event, token);
+	field = pevent_find_field(event, token);
 	if (!field)
 		goto out_free;
 
@@ -2756,7 +2754,7 @@ process_dynamic_array_len(struct event_format *event, struct print_arg *arg,
 	arg->type = PRINT_DYNAMIC_ARRAY_LEN;
 
 	/* Find the field */
-	field = tep_find_field(event, token);
+	field = pevent_find_field(event, token);
 	if (!field)
 		goto out_free;
 
@@ -2766,6 +2764,7 @@ process_dynamic_array_len(struct event_format *event, struct print_arg *arg,
 	if (read_expected(EVENT_DELIM, ")") < 0)
 		goto out_err;
 
+	free_token(token);
 	type = read_token(&token);
 	*tok = token;
 
@@ -2899,10 +2898,10 @@ process_bitmask(struct event_format *event __maybe_unused, struct print_arg *arg
 	return EVENT_ERROR;
 }
 
-static struct tep_function_handler *
-find_func_handler(struct tep_handle *pevent, char *func_name)
+static struct pevent_function_handler *
+find_func_handler(struct pevent *pevent, char *func_name)
 {
-	struct tep_function_handler *func;
+	struct pevent_function_handler *func;
 
 	if (!pevent)
 		return NULL;
@@ -2915,10 +2914,10 @@ find_func_handler(struct tep_handle *pevent, char *func_name)
 	return func;
 }
 
-static void remove_func_handler(struct tep_handle *pevent, char *func_name)
+static void remove_func_handler(struct pevent *pevent, char *func_name)
 {
-	struct tep_function_handler *func;
-	struct tep_function_handler **next;
+	struct pevent_function_handler *func;
+	struct pevent_function_handler **next;
 
 	next = &pevent->func_handlers;
 	while ((func = *next)) {
@@ -2932,7 +2931,7 @@ static void remove_func_handler(struct tep_handle *pevent, char *func_name)
 }
 
 static enum event_type
-process_func_handler(struct event_format *event, struct tep_function_handler *func,
+process_func_handler(struct event_format *event, struct pevent_function_handler *func,
 		     struct print_arg *arg, char **tok)
 {
 	struct print_arg **next_arg;
@@ -2993,7 +2992,7 @@ static enum event_type
 process_function(struct event_format *event, struct print_arg *arg,
 		 char *token, char **tok)
 {
-	struct tep_function_handler *func;
+	struct pevent_function_handler *func;
 
 	if (strcmp(token, "__print_flags") == 0) {
 		free_token(token);
@@ -3008,10 +3007,6 @@ process_function(struct event_format *event, struct print_arg *arg,
 	if (strcmp(token, "__print_hex") == 0) {
 		free_token(token);
 		return process_hex(event, arg, tok);
-	}
-	if (strcmp(token, "__print_hex_str") == 0) {
-		free_token(token);
-		return process_hex_str(event, arg, tok);
 	}
 	if (strcmp(token, "__print_array") == 0) {
 		free_token(token);
@@ -3250,7 +3245,7 @@ static int event_read_print(struct event_format *event)
 }
 
 /**
- * tep_find_common_field - return a common field by event
+ * pevent_find_common_field - return a common field by event
  * @event: handle for the event
  * @name: the name of the common field to return
  *
@@ -3258,7 +3253,7 @@ static int event_read_print(struct event_format *event)
  * This only searchs the common fields and not all field.
  */
 struct format_field *
-tep_find_common_field(struct event_format *event, const char *name)
+pevent_find_common_field(struct event_format *event, const char *name)
 {
 	struct format_field *format;
 
@@ -3272,7 +3267,7 @@ tep_find_common_field(struct event_format *event, const char *name)
 }
 
 /**
- * tep_find_field - find a non-common field
+ * pevent_find_field - find a non-common field
  * @event: handle for the event
  * @name: the name of the non-common field
  *
@@ -3280,7 +3275,7 @@ tep_find_common_field(struct event_format *event, const char *name)
  * This does not search common fields.
  */
 struct format_field *
-tep_find_field(struct event_format *event, const char *name)
+pevent_find_field(struct event_format *event, const char *name)
 {
 	struct format_field *format;
 
@@ -3294,7 +3289,7 @@ tep_find_field(struct event_format *event, const char *name)
 }
 
 /**
- * tep_find_any_field - find any field by name
+ * pevent_find_any_field - find any field by name
  * @event: handle for the event
  * @name: the name of the field
  *
@@ -3303,18 +3298,18 @@ tep_find_field(struct event_format *event, const char *name)
  * the non-common ones if a common one was not found.
  */
 struct format_field *
-tep_find_any_field(struct event_format *event, const char *name)
+pevent_find_any_field(struct event_format *event, const char *name)
 {
 	struct format_field *format;
 
-	format = tep_find_common_field(event, name);
+	format = pevent_find_common_field(event, name);
 	if (format)
 		return format;
-	return tep_find_field(event, name);
+	return pevent_find_field(event, name);
 }
 
 /**
- * tep_read_number - read a number from data
+ * pevent_read_number - read a number from data
  * @pevent: handle for the pevent
  * @ptr: the raw data
  * @size: the size of the data that holds the number
@@ -3322,8 +3317,8 @@ tep_find_any_field(struct event_format *event, const char *name)
  * Returns the number (converted to host) from the
  * raw data.
  */
-unsigned long long tep_read_number(struct tep_handle *pevent,
-				   const void *ptr, int size)
+unsigned long long pevent_read_number(struct pevent *pevent,
+				      const void *ptr, int size)
 {
 	switch (size) {
 	case 1:
@@ -3341,7 +3336,7 @@ unsigned long long tep_read_number(struct tep_handle *pevent,
 }
 
 /**
- * tep_read_number_field - read a number from data
+ * pevent_read_number_field - read a number from data
  * @field: a handle to the field
  * @data: the raw data to read
  * @value: the value to place the number in
@@ -3351,8 +3346,8 @@ unsigned long long tep_read_number(struct tep_handle *pevent,
  *
  * Returns 0 on success, -1 otherwise.
  */
-int tep_read_number_field(struct format_field *field, const void *data,
-			  unsigned long long *value)
+int pevent_read_number_field(struct format_field *field, const void *data,
+			     unsigned long long *value)
 {
 	if (!field)
 		return -1;
@@ -3361,15 +3356,15 @@ int tep_read_number_field(struct format_field *field, const void *data,
 	case 2:
 	case 4:
 	case 8:
-		*value = tep_read_number(field->event->pevent,
-					 data + field->offset, field->size);
+		*value = pevent_read_number(field->event->pevent,
+					    data + field->offset, field->size);
 		return 0;
 	default:
 		return -1;
 	}
 }
 
-static int get_common_info(struct tep_handle *pevent,
+static int get_common_info(struct pevent *pevent,
 			   const char *type, int *offset, int *size)
 {
 	struct event_format *event;
@@ -3385,7 +3380,7 @@ static int get_common_info(struct tep_handle *pevent,
 	}
 
 	event = pevent->events[0];
-	field = tep_find_common_field(event, type);
+	field = pevent_find_common_field(event, type);
 	if (!field)
 		return -1;
 
@@ -3395,7 +3390,7 @@ static int get_common_info(struct tep_handle *pevent,
 	return 0;
 }
 
-static int __parse_common(struct tep_handle *pevent, void *data,
+static int __parse_common(struct pevent *pevent, void *data,
 			  int *size, int *offset, const char *name)
 {
 	int ret;
@@ -3405,45 +3400,45 @@ static int __parse_common(struct tep_handle *pevent, void *data,
 		if (ret < 0)
 			return ret;
 	}
-	return tep_read_number(pevent, data + *offset, *size);
+	return pevent_read_number(pevent, data + *offset, *size);
 }
 
-static int trace_parse_common_type(struct tep_handle *pevent, void *data)
+static int trace_parse_common_type(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->type_size, &pevent->type_offset,
 			      "common_type");
 }
 
-static int parse_common_pid(struct tep_handle *pevent, void *data)
+static int parse_common_pid(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->pid_size, &pevent->pid_offset,
 			      "common_pid");
 }
 
-static int parse_common_pc(struct tep_handle *pevent, void *data)
+static int parse_common_pc(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->pc_size, &pevent->pc_offset,
 			      "common_preempt_count");
 }
 
-static int parse_common_flags(struct tep_handle *pevent, void *data)
+static int parse_common_flags(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->flags_size, &pevent->flags_offset,
 			      "common_flags");
 }
 
-static int parse_common_lock_depth(struct tep_handle *pevent, void *data)
+static int parse_common_lock_depth(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->ld_size, &pevent->ld_offset,
 			      "common_lock_depth");
 }
 
-static int parse_common_migrate_disable(struct tep_handle *pevent, void *data)
+static int parse_common_migrate_disable(struct pevent *pevent, void *data)
 {
 	return __parse_common(pevent, data,
 			      &pevent->ld_size, &pevent->ld_offset,
@@ -3453,13 +3448,13 @@ static int parse_common_migrate_disable(struct tep_handle *pevent, void *data)
 static int events_id_cmp(const void *a, const void *b);
 
 /**
- * tep_find_event - find an event by given id
+ * pevent_find_event - find an event by given id
  * @pevent: a handle to the pevent
  * @id: the id of the event
  *
  * Returns an event that has a given @id.
  */
-struct event_format *tep_find_event(struct tep_handle *pevent, int id)
+struct event_format *pevent_find_event(struct pevent *pevent, int id)
 {
 	struct event_format **eventptr;
 	struct event_format key;
@@ -3483,7 +3478,7 @@ struct event_format *tep_find_event(struct tep_handle *pevent, int id)
 }
 
 /**
- * tep_find_event_by_name - find an event by given name
+ * pevent_find_event_by_name - find an event by given name
  * @pevent: a handle to the pevent
  * @sys: the system name to search for
  * @name: the name of the event to search for
@@ -3492,8 +3487,8 @@ struct event_format *tep_find_event(struct tep_handle *pevent, int id)
  * @sys. If @sys is NULL the first event with @name is returned.
  */
 struct event_format *
-tep_find_event_by_name(struct tep_handle *pevent,
-		       const char *sys, const char *name)
+pevent_find_event_by_name(struct pevent *pevent,
+			  const char *sys, const char *name)
 {
 	struct event_format *event;
 	int i;
@@ -3522,7 +3517,7 @@ tep_find_event_by_name(struct tep_handle *pevent,
 static unsigned long long
 eval_num_arg(void *data, int size, struct event_format *event, struct print_arg *arg)
 {
-	struct tep_handle *pevent = event->pevent;
+	struct pevent *pevent = event->pevent;
 	unsigned long long val = 0;
 	unsigned long long left, right;
 	struct print_arg *typearg = NULL;
@@ -3538,20 +3533,19 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 		return strtoull(arg->atom.atom, NULL, 0);
 	case PRINT_FIELD:
 		if (!arg->field.field) {
-			arg->field.field = tep_find_any_field(event, arg->field.name);
+			arg->field.field = pevent_find_any_field(event, arg->field.name);
 			if (!arg->field.field)
 				goto out_warning_field;
 			
 		}
 		/* must be a number */
-		val = tep_read_number(pevent, data + arg->field.field->offset,
-				      arg->field.field->size);
+		val = pevent_read_number(pevent, data + arg->field.field->offset,
+				arg->field.field->size);
 		break;
 	case PRINT_FLAGS:
 	case PRINT_SYMBOL:
 	case PRINT_INT_ARRAY:
 	case PRINT_HEX:
-	case PRINT_HEX_STR:
 		break;
 	case PRINT_TYPE:
 		val = eval_num_arg(data, size, event, arg->typecast.item);
@@ -3588,7 +3582,7 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 
 			switch (larg->type) {
 			case PRINT_DYNAMIC_ARRAY:
-				offset = tep_read_number(pevent,
+				offset = pevent_read_number(pevent,
 						   data + larg->dynarray.field->offset,
 						   larg->dynarray.field->size);
 				if (larg->dynarray.field->elementsize)
@@ -3604,7 +3598,7 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 			case PRINT_FIELD:
 				if (!larg->field.field) {
 					larg->field.field =
-						tep_find_any_field(event, larg->field.name);
+						pevent_find_any_field(event, larg->field.name);
 					if (!larg->field.field) {
 						arg = larg;
 						goto out_warning_field;
@@ -3617,8 +3611,8 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 			default:
 				goto default_op; /* oops, all bets off */
 			}
-			val = tep_read_number(pevent,
-					      data + offset, field_size);
+			val = pevent_read_number(pevent,
+						 data + offset, field_size);
 			if (typearg)
 				val = eval_type(val, typearg, 1);
 			break;
@@ -3718,9 +3712,9 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 		}
 		break;
 	case PRINT_DYNAMIC_ARRAY_LEN:
-		offset = tep_read_number(pevent,
-					 data + arg->dynarray.field->offset,
-					 arg->dynarray.field->size);
+		offset = pevent_read_number(pevent,
+					    data + arg->dynarray.field->offset,
+					    arg->dynarray.field->size);
 		/*
 		 * The total allocated length of the dynamic array is
 		 * stored in the top half of the field, and the offset
@@ -3730,9 +3724,9 @@ eval_num_arg(void *data, int size, struct event_format *event, struct print_arg 
 		break;
 	case PRINT_DYNAMIC_ARRAY:
 		/* Without [], we pass the address to the dynamic data */
-		offset = tep_read_number(pevent,
-					 data + arg->dynarray.field->offset,
-					 arg->dynarray.field->size);
+		offset = pevent_read_number(pevent,
+					    data + arg->dynarray.field->offset,
+					    arg->dynarray.field->size);
 		/*
 		 * The total allocated length of the dynamic array is
 		 * stored in the top half of the field, and the offset
@@ -3805,7 +3799,7 @@ static void print_str_to_seq(struct trace_seq *s, const char *format,
 		trace_seq_printf(s, format, str);
 }
 
-static void print_bitmask_to_seq(struct tep_handle *pevent,
+static void print_bitmask_to_seq(struct pevent *pevent,
 				 struct trace_seq *s, const char *format,
 				 int len_arg, const void *data, int size)
 {
@@ -3863,7 +3857,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 			  struct event_format *event, const char *format,
 			  int len_arg, struct print_arg *arg)
 {
-	struct tep_handle *pevent = event->pevent;
+	struct pevent *pevent = event->pevent;
 	struct print_flag_sym *flag;
 	struct format_field *field;
 	struct printk_map *printk;
@@ -3884,7 +3878,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 	case PRINT_FIELD:
 		field = arg->field.field;
 		if (!field) {
-			field = tep_find_any_field(event, arg->field.name);
+			field = pevent_find_any_field(event, arg->field.name);
 			if (!field) {
 				str = arg->field.name;
 				goto out_warning_field;
@@ -3955,11 +3949,6 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 				val &= ~fval;
 			}
 		}
-		if (val) {
-			if (print && arg->flags.delim)
-				trace_seq_puts(s, arg->flags.delim);
-			trace_seq_printf(s, "0x%llx", val);
-		}
 		break;
 	case PRINT_SYMBOL:
 		val = eval_num_arg(data, size, event, arg->symbol.field);
@@ -3970,14 +3959,11 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 				break;
 			}
 		}
-		if (!flag)
-			trace_seq_printf(s, "0x%llx", val);
 		break;
 	case PRINT_HEX:
-	case PRINT_HEX_STR:
 		if (arg->hex.field->type == PRINT_DYNAMIC_ARRAY) {
 			unsigned long offset;
-			offset = tep_read_number(pevent,
+			offset = pevent_read_number(pevent,
 				data + arg->hex.field->dynarray.field->offset,
 				arg->hex.field->dynarray.field->size);
 			hex = data + (offset & 0xffff);
@@ -3985,7 +3971,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 			field = arg->hex.field->field.field;
 			if (!field) {
 				str = arg->hex.field->field.name;
-				field = tep_find_any_field(event, str);
+				field = pevent_find_any_field(event, str);
 				if (!field)
 					goto out_warning_field;
 				arg->hex.field->field.field = field;
@@ -3994,7 +3980,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 		}
 		len = eval_num_arg(data, size, event, arg->hex.size);
 		for (i = 0; i < len; i++) {
-			if (i && arg->type == PRINT_HEX)
+			if (i)
 				trace_seq_putc(s, ' ');
 			trace_seq_printf(s, "%02x", hex[i]);
 		}
@@ -4008,15 +3994,15 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 			unsigned long offset;
 			struct format_field *field =
 				arg->int_array.field->dynarray.field;
-			offset = tep_read_number(pevent,
-						 data + field->offset,
-						 field->size);
+			offset = pevent_read_number(pevent,
+						    data + field->offset,
+						    field->size);
 			num = data + (offset & 0xffff);
 		} else {
 			field = arg->int_array.field->field.field;
 			if (!field) {
 				str = arg->int_array.field->field.name;
-				field = tep_find_any_field(event, str);
+				field = pevent_find_any_field(event, str);
 				if (!field)
 					goto out_warning_field;
 				arg->int_array.field->field.field = field;
@@ -4056,7 +4042,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 		if (arg->string.offset == -1) {
 			struct format_field *f;
 
-			f = tep_find_any_field(event, arg->string.string);
+			f = pevent_find_any_field(event, arg->string.string);
 			arg->string.offset = f->offset;
 		}
 		str_offset = data2host4(pevent, data + arg->string.offset);
@@ -4074,7 +4060,7 @@ static void print_str_arg(struct trace_seq *s, void *data, int size,
 		if (arg->bitmask.offset == -1) {
 			struct format_field *f;
 
-			f = tep_find_any_field(event, arg->bitmask.bitmask);
+			f = pevent_find_any_field(event, arg->bitmask.bitmask);
 			arg->bitmask.offset = f->offset;
 		}
 		bitmask_offset = data2host4(pevent, data + arg->bitmask.offset);
@@ -4117,8 +4103,8 @@ static unsigned long long
 process_defined_func(struct trace_seq *s, void *data, int size,
 		     struct event_format *event, struct print_arg *arg)
 {
-	struct tep_function_handler *func_handle = arg->func.func;
-	struct func_params *param;
+	struct pevent_function_handler *func_handle = arg->func.func;
+	struct pevent_func_params *param;
 	unsigned long long *args;
 	unsigned long long ret;
 	struct print_arg *farg;
@@ -4144,12 +4130,12 @@ process_defined_func(struct trace_seq *s, void *data, int size,
 
 	for (i = 0; i < func_handle->nr_args; i++) {
 		switch (param->type) {
-		case TEP_FUNC_ARG_INT:
-		case TEP_FUNC_ARG_LONG:
-		case TEP_FUNC_ARG_PTR:
+		case PEVENT_FUNC_ARG_INT:
+		case PEVENT_FUNC_ARG_LONG:
+		case PEVENT_FUNC_ARG_PTR:
 			args[i] = eval_num_arg(data, size, event, farg);
 			break;
-		case TEP_FUNC_ARG_STRING:
+		case PEVENT_FUNC_ARG_STRING:
 			trace_seq_init(&str);
 			print_str_arg(&str, data, size, event, "%s", -1, farg);
 			trace_seq_terminate(&str);
@@ -4212,7 +4198,7 @@ static void free_args(struct print_arg *args)
 
 static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struct event_format *event)
 {
-	struct tep_handle *pevent = event->pevent;
+	struct pevent *pevent = event->pevent;
 	struct format_field *field, *ip_field;
 	struct print_arg *args, *arg, **next;
 	unsigned long long ip, val;
@@ -4224,12 +4210,12 @@ static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struc
 	ip_field = pevent->bprint_ip_field;
 
 	if (!field) {
-		field = tep_find_field(event, "buf");
+		field = pevent_find_field(event, "buf");
 		if (!field) {
 			do_warning_event(event, "can't find buffer field for binary printk");
 			return NULL;
 		}
-		ip_field = tep_find_field(event, "ip");
+		ip_field = pevent_find_field(event, "ip");
 		if (!ip_field) {
 			do_warning_event(event, "can't find ip field for binary printk");
 			return NULL;
@@ -4238,7 +4224,7 @@ static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struc
 		pevent->bprint_ip_field = ip_field;
 	}
 
-	ip = tep_read_number(pevent, data + ip_field->offset, ip_field->size);
+	ip = pevent_read_number(pevent, data + ip_field->offset, ip_field->size);
 
 	/*
 	 * The first arg is the IP pointer.
@@ -4285,26 +4271,6 @@ static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struc
 				goto process_again;
 			case 'p':
 				ls = 1;
-				if (isalnum(ptr[1])) {
-					ptr++;
-					/* Check for special pointers */
-					switch (*ptr) {
-					case 's':
-					case 'S':
-					case 'f':
-					case 'F':
-						break;
-					default:
-						/*
-						 * Older kernels do not process
-						 * dereferenced pointers.
-						 * Only process if the pointer
-						 * value is a printable.
-						 */
-						if (isprint(*(char *)bptr))
-							goto process_string;
-					}
-				}
 				/* fall through */
 			case 'd':
 			case 'u':
@@ -4332,7 +4298,7 @@ static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struc
 				/* the pointers are always 4 bytes aligned */
 				bptr = (void *)(((unsigned long)bptr + 3) &
 						~3);
-				val = tep_read_number(pevent, bptr, vsize);
+				val = pevent_read_number(pevent, bptr, vsize);
 				bptr += vsize;
 				arg = alloc_arg();
 				if (!arg) {
@@ -4357,7 +4323,6 @@ static struct print_arg *make_bprint_args(char *fmt, void *data, int size, struc
 
 				break;
 			case 's':
- process_string:
 				arg = alloc_arg();
 				if (!arg) {
 					do_warning_event(event, "%s(%d): not enough memory!",
@@ -4389,7 +4354,7 @@ static char *
 get_bprint_format(void *data, int size __maybe_unused,
 		  struct event_format *event)
 {
-	struct tep_handle *pevent = event->pevent;
+	struct pevent *pevent = event->pevent;
 	unsigned long long addr;
 	struct format_field *field;
 	struct printk_map *printk;
@@ -4398,7 +4363,7 @@ get_bprint_format(void *data, int size __maybe_unused,
 	field = pevent->bprint_fmt_field;
 
 	if (!field) {
-		field = tep_find_field(event, "fmt");
+		field = pevent_find_field(event, "fmt");
 		if (!field) {
 			do_warning_event(event, "can't find format field for binary printk");
 			return NULL;
@@ -4406,7 +4371,7 @@ get_bprint_format(void *data, int size __maybe_unused,
 		pevent->bprint_fmt_field = field;
 	}
 
-	addr = tep_read_number(pevent, data + field->offset, field->size);
+	addr = pevent_read_number(pevent, data + field->offset, field->size);
 
 	printk = find_printk(pevent, addr);
 	if (!printk) {
@@ -4442,7 +4407,7 @@ static void print_mac_arg(struct trace_seq *s, int mac, void *data, int size,
 		fmt = "%.2x%.2x%.2x%.2x%.2x%.2x";
 	if (!arg->field.field) {
 		arg->field.field =
-			tep_find_any_field(event, arg->field.name);
+			pevent_find_any_field(event, arg->field.name);
 		if (!arg->field.field) {
 			do_warning_event(event, "%s: field %s not found",
 					 __func__, arg->field.name);
@@ -4592,7 +4557,7 @@ static int print_ipv4_arg(struct trace_seq *s, const char *ptr, char i,
 
 	if (!arg->field.field) {
 		arg->field.field =
-			tep_find_any_field(event, arg->field.name);
+			pevent_find_any_field(event, arg->field.name);
 		if (!arg->field.field) {
 			do_warning("%s: field %s not found",
 				   __func__, arg->field.name);
@@ -4638,7 +4603,7 @@ static int print_ipv6_arg(struct trace_seq *s, const char *ptr, char i,
 
 	if (!arg->field.field) {
 		arg->field.field =
-			tep_find_any_field(event, arg->field.name);
+			pevent_find_any_field(event, arg->field.name);
 		if (!arg->field.field) {
 			do_warning("%s: field %s not found",
 				   __func__, arg->field.name);
@@ -4696,7 +4661,7 @@ static int print_ipsa_arg(struct trace_seq *s, const char *ptr, char i,
 
 	if (!arg->field.field) {
 		arg->field.field =
-			tep_find_any_field(event, arg->field.name);
+			pevent_find_any_field(event, arg->field.name);
 		if (!arg->field.field) {
 			do_warning("%s: field %s not found",
 				   __func__, arg->field.name);
@@ -4785,18 +4750,18 @@ static int is_printable_array(char *p, unsigned int len)
 	return 1;
 }
 
-void tep_print_field(struct trace_seq *s, void *data,
-		     struct format_field *field)
+void pevent_print_field(struct trace_seq *s, void *data,
+			struct format_field *field)
 {
 	unsigned long long val;
 	unsigned int offset, len, i;
-	struct tep_handle *pevent = field->event->pevent;
+	struct pevent *pevent = field->event->pevent;
 
 	if (field->flags & FIELD_IS_ARRAY) {
 		offset = field->offset;
 		len = field->size;
 		if (field->flags & FIELD_IS_DYNAMIC) {
-			val = tep_read_number(pevent, data + offset, len);
+			val = pevent_read_number(pevent, data + offset, len);
 			offset = val;
 			len = offset >> 16;
 			offset &= 0xffff;
@@ -4816,8 +4781,8 @@ void tep_print_field(struct trace_seq *s, void *data,
 			field->flags &= ~FIELD_IS_STRING;
 		}
 	} else {
-		val = tep_read_number(pevent, data + field->offset,
-				      field->size);
+		val = pevent_read_number(pevent, data + field->offset,
+					 field->size);
 		if (field->flags & FIELD_IS_POINTER) {
 			trace_seq_printf(s, "0x%llx", val);
 		} else if (field->flags & FIELD_IS_SIGNED) {
@@ -4850,22 +4815,22 @@ void tep_print_field(struct trace_seq *s, void *data,
 	}
 }
 
-void tep_print_fields(struct trace_seq *s, void *data,
-		      int size __maybe_unused, struct event_format *event)
+void pevent_print_fields(struct trace_seq *s, void *data,
+			 int size __maybe_unused, struct event_format *event)
 {
 	struct format_field *field;
 
 	field = event->format.fields;
 	while (field) {
 		trace_seq_printf(s, " %s=", field->name);
-		tep_print_field(s, data, field);
+		pevent_print_field(s, data, field);
 		field = field->next;
 	}
 }
 
 static void pretty_print(struct trace_seq *s, void *data, int size, struct event_format *event)
 {
-	struct tep_handle *pevent = event->pevent;
+	struct pevent *pevent = event->pevent;
 	struct print_fmt *print_fmt = &event->print_fmt;
 	struct print_arg *arg = print_fmt->args;
 	struct print_arg *args = NULL;
@@ -4884,7 +4849,7 @@ static void pretty_print(struct trace_seq *s, void *data, int size, struct event
 
 	if (event->flags & EVENT_FL_FAILED) {
 		trace_seq_printf(s, "[FAILED TO PARSE]");
-		tep_print_fields(s, data, size, event);
+		pevent_print_fields(s, data, size, event);
 		return;
 	}
 
@@ -4964,12 +4929,6 @@ static void pretty_print(struct trace_seq *s, void *data, int size, struct event
 
 				if (isalnum(ptr[1]))
 					ptr++;
-
-				if (arg->type == PRINT_BSTRING) {
-					trace_seq_puts(s, arg->string.string);
-					arg = arg->next;
-					break;
-				}
 
 				if (*ptr == 'F' || *ptr == 'f' ||
 				    *ptr == 'S' || *ptr == 's') {
@@ -5126,7 +5085,7 @@ out_failed:
 }
 
 /**
- * tep_data_lat_fmt - parse the data for the latency format
+ * pevent_data_lat_fmt - parse the data for the latency format
  * @pevent: a handle to the pevent
  * @s: the trace_seq to write to
  * @record: the record to read from
@@ -5135,8 +5094,8 @@ out_failed:
  * need rescheduling, in hard/soft interrupt, preempt count
  * and lock depth) and places it into the trace_seq.
  */
-void tep_data_lat_fmt(struct tep_handle *pevent,
-		      struct trace_seq *s, struct tep_record *record)
+void pevent_data_lat_fmt(struct pevent *pevent,
+			 struct trace_seq *s, struct pevent_record *record)
 {
 	static int check_lock_depth = 1;
 	static int check_migrate_disable = 1;
@@ -5209,76 +5168,50 @@ void tep_data_lat_fmt(struct tep_handle *pevent,
 }
 
 /**
- * tep_data_type - parse out the given event type
+ * pevent_data_type - parse out the given event type
  * @pevent: a handle to the pevent
  * @rec: the record to read from
  *
  * This returns the event id from the @rec.
  */
-int tep_data_type(struct tep_handle *pevent, struct tep_record *rec)
+int pevent_data_type(struct pevent *pevent, struct pevent_record *rec)
 {
 	return trace_parse_common_type(pevent, rec->data);
 }
 
 /**
- * tep_data_event_from_type - find the event by a given type
+ * pevent_data_event_from_type - find the event by a given type
  * @pevent: a handle to the pevent
  * @type: the type of the event.
  *
  * This returns the event form a given @type;
  */
-struct event_format *tep_data_event_from_type(struct tep_handle *pevent, int type)
+struct event_format *pevent_data_event_from_type(struct pevent *pevent, int type)
 {
-	return tep_find_event(pevent, type);
+	return pevent_find_event(pevent, type);
 }
 
 /**
- * tep_data_pid - parse the PID from record
+ * pevent_data_pid - parse the PID from raw data
  * @pevent: a handle to the pevent
  * @rec: the record to parse
  *
- * This returns the PID from a record.
+ * This returns the PID from a raw data.
  */
-int tep_data_pid(struct tep_handle *pevent, struct tep_record *rec)
+int pevent_data_pid(struct pevent *pevent, struct pevent_record *rec)
 {
 	return parse_common_pid(pevent, rec->data);
 }
 
 /**
- * tep_data_preempt_count - parse the preempt count from the record
- * @pevent: a handle to the pevent
- * @rec: the record to parse
- *
- * This returns the preempt count from a record.
- */
-int tep_data_preempt_count(struct tep_handle *pevent, struct tep_record *rec)
-{
-	return parse_common_pc(pevent, rec->data);
-}
-
-/**
- * tep_data_flags - parse the latency flags from the record
- * @pevent: a handle to the pevent
- * @rec: the record to parse
- *
- * This returns the latency flags from a record.
- *
- *  Use trace_flag_type enum for the flags (see event-parse.h).
- */
-int tep_data_flags(struct tep_handle *pevent, struct tep_record *rec)
-{
-	return parse_common_flags(pevent, rec->data);
-}
-
-/**
- * tep_data_comm_from_pid - return the command line from PID
+ * pevent_data_comm_from_pid - return the command line from PID
  * @pevent: a handle to the pevent
  * @pid: the PID of the task to search for
  *
  * This returns a pointer to the command line that has the given
  * @pid.
  */
-const char *tep_data_comm_from_pid(struct tep_handle *pevent, int pid)
+const char *pevent_data_comm_from_pid(struct pevent *pevent, int pid)
 {
 	const char *comm;
 
@@ -5287,7 +5220,7 @@ const char *tep_data_comm_from_pid(struct tep_handle *pevent, int pid)
 }
 
 static struct cmdline *
-pid_from_cmdlist(struct tep_handle *pevent, const char *comm, struct cmdline *next)
+pid_from_cmdlist(struct pevent *pevent, const char *comm, struct cmdline *next)
 {
 	struct cmdline_list *cmdlist = (struct cmdline_list *)next;
 
@@ -5303,7 +5236,7 @@ pid_from_cmdlist(struct tep_handle *pevent, const char *comm, struct cmdline *ne
 }
 
 /**
- * tep_data_pid_from_comm - return the pid from a given comm
+ * pevent_data_pid_from_comm - return the pid from a given comm
  * @pevent: a handle to the pevent
  * @comm: the cmdline to find the pid from
  * @next: the cmdline structure to find the next comm
@@ -5315,8 +5248,8 @@ pid_from_cmdlist(struct tep_handle *pevent, const char *comm, struct cmdline *ne
  * next pid.
  * Also, it does a linear seach, so it may be slow.
  */
-struct cmdline *tep_data_pid_from_comm(struct tep_handle *pevent, const char *comm,
-				       struct cmdline *next)
+struct cmdline *pevent_data_pid_from_comm(struct pevent *pevent, const char *comm,
+					  struct cmdline *next)
 {
 	struct cmdline *cmdline;
 
@@ -5351,13 +5284,13 @@ struct cmdline *tep_data_pid_from_comm(struct tep_handle *pevent, const char *co
 }
 
 /**
- * tep_cmdline_pid - return the pid associated to a given cmdline
+ * pevent_cmdline_pid - return the pid associated to a given cmdline
  * @cmdline: The cmdline structure to get the pid from
  *
  * Returns the pid for a give cmdline. If @cmdline is NULL, then
  * -1 is returned.
  */
-int tep_cmdline_pid(struct tep_handle *pevent, struct cmdline *cmdline)
+int pevent_cmdline_pid(struct pevent *pevent, struct cmdline *cmdline)
 {
 	struct cmdline_list *cmdlist = (struct cmdline_list *)cmdline;
 
@@ -5377,7 +5310,7 @@ int tep_cmdline_pid(struct tep_handle *pevent, struct cmdline *cmdline)
 }
 
 /**
- * tep_event_info - parse the data into the print format
+ * pevent_data_comm_from_pid - parse the data into the print format
  * @s: the trace_seq to write to
  * @event: the handle to the event
  * @record: the record to read from
@@ -5385,13 +5318,13 @@ int tep_cmdline_pid(struct tep_handle *pevent, struct cmdline *cmdline)
  * This parses the raw @data using the given @event information and
  * writes the print format into the trace_seq.
  */
-void tep_event_info(struct trace_seq *s, struct event_format *event,
-		    struct tep_record *record)
+void pevent_event_info(struct trace_seq *s, struct event_format *event,
+		       struct pevent_record *record)
 {
 	int print_pretty = 1;
 
 	if (event->pevent->print_raw || (event->flags & EVENT_FL_PRINTRAW))
-		tep_print_fields(s, record->data, record->size, event);
+		pevent_print_fields(s, record->data, record->size, event);
 	else {
 
 		if (event->handler && !(event->flags & EVENT_FL_NOHANDLE))
@@ -5419,7 +5352,7 @@ static bool is_timestamp_in_us(char *trace_clock, bool use_trace_clock)
 }
 
 /**
- * tep_find_event_by_record - return the event from a given record
+ * pevent_find_event_by_record - return the event from a given record
  * @pevent: a handle to the pevent
  * @record: The record to get the event from
  *
@@ -5427,7 +5360,7 @@ static bool is_timestamp_in_us(char *trace_clock, bool use_trace_clock)
  * is found.
  */
 struct event_format *
-tep_find_event_by_record(struct tep_handle *pevent, struct tep_record *record)
+pevent_find_event_by_record(struct pevent *pevent, struct pevent_record *record)
 {
 	int type;
 
@@ -5438,11 +5371,11 @@ tep_find_event_by_record(struct tep_handle *pevent, struct tep_record *record)
 
 	type = trace_parse_common_type(pevent, record->data);
 
-	return tep_find_event(pevent, type);
+	return pevent_find_event(pevent, type);
 }
 
 /**
- * tep_print_event_task - Write the event task comm, pid and CPU
+ * pevent_print_event_task - Write the event task comm, pid and CPU
  * @pevent: a handle to the pevent
  * @s: the trace_seq to write to
  * @event: the handle to the record's event
@@ -5450,9 +5383,9 @@ tep_find_event_by_record(struct tep_handle *pevent, struct tep_record *record)
  *
  * Writes the tasks comm, pid and CPU to @s.
  */
-void tep_print_event_task(struct tep_handle *pevent, struct trace_seq *s,
-			  struct event_format *event,
-			  struct tep_record *record)
+void pevent_print_event_task(struct pevent *pevent, struct trace_seq *s,
+			     struct event_format *event,
+			     struct pevent_record *record)
 {
 	void *data = record->data;
 	const char *comm;
@@ -5469,7 +5402,7 @@ void tep_print_event_task(struct tep_handle *pevent, struct trace_seq *s,
 }
 
 /**
- * tep_print_event_time - Write the event timestamp
+ * pevent_print_event_time - Write the event timestamp
  * @pevent: a handle to the pevent
  * @s: the trace_seq to write to
  * @event: the handle to the record's event
@@ -5478,10 +5411,10 @@ void tep_print_event_task(struct tep_handle *pevent, struct trace_seq *s,
  *
  * Writes the timestamp of the record into @s.
  */
-void tep_print_event_time(struct tep_handle *pevent, struct trace_seq *s,
-			  struct event_format *event,
-			  struct tep_record *record,
-			  bool use_trace_clock)
+void pevent_print_event_time(struct pevent *pevent, struct trace_seq *s,
+			     struct event_format *event,
+			     struct pevent_record *record,
+			     bool use_trace_clock)
 {
 	unsigned long secs;
 	unsigned long usecs;
@@ -5492,23 +5425,23 @@ void tep_print_event_time(struct tep_handle *pevent, struct trace_seq *s,
 	use_usec_format = is_timestamp_in_us(pevent->trace_clock,
 							use_trace_clock);
 	if (use_usec_format) {
-		secs = record->ts / NSEC_PER_SEC;
-		nsecs = record->ts - secs * NSEC_PER_SEC;
+		secs = record->ts / NSECS_PER_SEC;
+		nsecs = record->ts - secs * NSECS_PER_SEC;
 	}
 
 	if (pevent->latency_format) {
-		tep_data_lat_fmt(pevent, s, record);
+		pevent_data_lat_fmt(pevent, s, record);
 	}
 
 	if (use_usec_format) {
-		if (pevent->flags & TEP_NSEC_OUTPUT) {
+		if (pevent->flags & PEVENT_NSEC_OUTPUT) {
 			usecs = nsecs;
 			p = 9;
 		} else {
-			usecs = (nsecs + 500) / NSEC_PER_USEC;
+			usecs = (nsecs + 500) / NSECS_PER_USEC;
 			/* To avoid usecs larger than 1 sec */
-			if (usecs >= USEC_PER_SEC) {
-				usecs -= USEC_PER_SEC;
+			if (usecs >= 1000000) {
+				usecs -= 1000000;
 				secs++;
 			}
 			p = 6;
@@ -5520,7 +5453,7 @@ void tep_print_event_time(struct tep_handle *pevent, struct trace_seq *s,
 }
 
 /**
- * tep_print_event_data - Write the event data section
+ * pevent_print_event_data - Write the event data section
  * @pevent: a handle to the pevent
  * @s: the trace_seq to write to
  * @event: the handle to the record's event
@@ -5528,9 +5461,9 @@ void tep_print_event_time(struct tep_handle *pevent, struct trace_seq *s,
  *
  * Writes the parsing of the record's data to @s.
  */
-void tep_print_event_data(struct tep_handle *pevent, struct trace_seq *s,
-			  struct event_format *event,
-			  struct tep_record *record)
+void pevent_print_event_data(struct pevent *pevent, struct trace_seq *s,
+			     struct event_format *event,
+			     struct pevent_record *record)
 {
 	static const char *spaces = "                    "; /* 20 spaces */
 	int len;
@@ -5542,30 +5475,24 @@ void tep_print_event_data(struct tep_handle *pevent, struct trace_seq *s,
 	if (len < 20)
 		trace_seq_printf(s, "%.*s", 20 - len, spaces);
 
-	tep_event_info(s, event, record);
+	pevent_event_info(s, event, record);
 }
 
-void tep_print_event(struct tep_handle *pevent, struct trace_seq *s,
-		     struct tep_record *record, bool use_trace_clock)
+void pevent_print_event(struct pevent *pevent, struct trace_seq *s,
+			struct pevent_record *record, bool use_trace_clock)
 {
 	struct event_format *event;
 
-	event = tep_find_event_by_record(pevent, record);
+	event = pevent_find_event_by_record(pevent, record);
 	if (!event) {
-		int i;
-		int type = trace_parse_common_type(pevent, record->data);
-
-		do_warning("ug! no event found for type %d", type);
-		trace_seq_printf(s, "[UNKNOWN TYPE %d]", type);
-		for (i = 0; i < record->size; i++)
-			trace_seq_printf(s, " %02x",
-					 ((unsigned char *)record->data)[i]);
+		do_warning("ug! no event found for type %d",
+			   trace_parse_common_type(pevent, record->data));
 		return;
 	}
 
-	tep_print_event_task(pevent, s, event, record);
-	tep_print_event_time(pevent, s, event, record, use_trace_clock);
-	tep_print_event_data(pevent, s, event, record);
+	pevent_print_event_task(pevent, s, event, record);
+	pevent_print_event_time(pevent, s, event, record, use_trace_clock);
+	pevent_print_event_data(pevent, s, event, record);
 }
 
 static int events_id_cmp(const void *a, const void *b)
@@ -5616,7 +5543,7 @@ static int events_system_cmp(const void *a, const void *b)
 	return events_id_cmp(a, b);
 }
 
-struct event_format **tep_list_events(struct tep_handle *pevent, enum event_sort_type sort_type)
+struct event_format **pevent_list_events(struct pevent *pevent, enum event_sort_type sort_type)
 {
 	struct event_format **events;
 	int (*sort)(const void *a, const void *b);
@@ -5695,13 +5622,13 @@ get_event_fields(const char *type, const char *name,
 }
 
 /**
- * tep_event_common_fields - return a list of common fields for an event
+ * pevent_event_common_fields - return a list of common fields for an event
  * @event: the event to return the common fields of.
  *
  * Returns an allocated array of fields. The last item in the array is NULL.
  * The array must be freed with free().
  */
-struct format_field **tep_event_common_fields(struct event_format *event)
+struct format_field **pevent_event_common_fields(struct event_format *event)
 {
 	return get_event_fields("common", event->name,
 				event->format.nr_common,
@@ -5709,13 +5636,13 @@ struct format_field **tep_event_common_fields(struct event_format *event)
 }
 
 /**
- * tep_event_fields - return a list of event specific fields for an event
+ * pevent_event_fields - return a list of event specific fields for an event
  * @event: the event to return the fields of.
  *
  * Returns an allocated array of fields. The last item in the array is NULL.
  * The array must be freed with free().
  */
-struct format_field **tep_event_fields(struct event_format *event)
+struct format_field **pevent_event_fields(struct event_format *event)
 {
 	return get_event_fields("event", event->name,
 				event->format.nr_fields,
@@ -5769,13 +5696,6 @@ static void print_args(struct print_arg *args)
 		break;
 	case PRINT_HEX:
 		printf("__print_hex(");
-		print_args(args->hex.field);
-		printf(", ");
-		print_args(args->hex.size);
-		printf(")");
-		break;
-	case PRINT_HEX_STR:
-		printf("__print_hex_str(");
 		print_args(args->hex.field);
 		printf(", ");
 		print_args(args->hex.size);
@@ -5916,7 +5836,7 @@ static void parse_header_field(const char *field,
 }
 
 /**
- * tep_parse_header_page - parse the data stored in the header page
+ * pevent_parse_header_page - parse the data stored in the header page
  * @pevent: the handle to the pevent
  * @buf: the buffer storing the header page format string
  * @size: the size of @buf
@@ -5927,8 +5847,8 @@ static void parse_header_field(const char *field,
  *
  * /sys/kernel/debug/tracing/events/header_page
  */
-int tep_parse_header_page(struct tep_handle *pevent, char *buf, unsigned long size,
-			  int long_size)
+int pevent_parse_header_page(struct pevent *pevent, char *buf, unsigned long size,
+			     int long_size)
 {
 	int ignore;
 
@@ -5980,7 +5900,7 @@ static void free_handler(struct event_handler *handle)
 	free(handle);
 }
 
-static int find_event_handle(struct tep_handle *pevent, struct event_format *event)
+static int find_event_handle(struct pevent *pevent, struct event_format *event)
 {
 	struct event_handler *handle, **next;
 
@@ -6009,7 +5929,7 @@ static int find_event_handle(struct tep_handle *pevent, struct event_format *eve
 }
 
 /**
- * __tep_parse_format - parse the event format
+ * __pevent_parse_format - parse the event format
  * @buf: the buffer storing the event format string
  * @size: the size of @buf
  * @sys: the system the event belongs to
@@ -6021,9 +5941,9 @@ static int find_event_handle(struct tep_handle *pevent, struct event_format *eve
  *
  * /sys/kernel/debug/tracing/events/.../.../format
  */
-enum tep_errno __tep_parse_format(struct event_format **eventp,
-				  struct tep_handle *pevent, const char *buf,
-				  unsigned long size, const char *sys)
+enum pevent_errno __pevent_parse_format(struct event_format **eventp,
+					struct pevent *pevent, const char *buf,
+					unsigned long size, const char *sys)
 {
 	struct event_format *event;
 	int ret;
@@ -6032,12 +5952,12 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 
 	*eventp = event = alloc_event();
 	if (!event)
-		return TEP_ERRNO__MEM_ALLOC_FAILED;
+		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 
 	event->name = event_read_name();
 	if (!event->name) {
 		/* Bad event? */
-		ret = TEP_ERRNO__MEM_ALLOC_FAILED;
+		ret = PEVENT_ERRNO__MEM_ALLOC_FAILED;
 		goto event_alloc_failed;
 	}
 
@@ -6050,7 +5970,7 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 		
 	event->id = event_read_id();
 	if (event->id < 0) {
-		ret = TEP_ERRNO__READ_ID_FAILED;
+		ret = PEVENT_ERRNO__READ_ID_FAILED;
 		/*
 		 * This isn't an allocation error actually.
 		 * But as the ID is critical, just bail out.
@@ -6060,7 +5980,7 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 
 	event->system = strdup(sys);
 	if (!event->system) {
-		ret = TEP_ERRNO__MEM_ALLOC_FAILED;
+		ret = PEVENT_ERRNO__MEM_ALLOC_FAILED;
 		goto event_alloc_failed;
 	}
 
@@ -6069,7 +5989,7 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 
 	ret = event_read_format(event);
 	if (ret < 0) {
-		ret = TEP_ERRNO__READ_FORMAT_FAILED;
+		ret = PEVENT_ERRNO__READ_FORMAT_FAILED;
 		goto event_parse_failed;
 	}
 
@@ -6084,7 +6004,7 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 	show_warning = 1;
 
 	if (ret < 0) {
-		ret = TEP_ERRNO__READ_PRINT_FAILED;
+		ret = PEVENT_ERRNO__READ_PRINT_FAILED;
 		goto event_parse_failed;
 	}
 
@@ -6098,14 +6018,14 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 			arg = alloc_arg();
 			if (!arg) {
 				event->flags |= EVENT_FL_FAILED;
-				return TEP_ERRNO__OLD_FTRACE_ARG_FAILED;
+				return PEVENT_ERRNO__OLD_FTRACE_ARG_FAILED;
 			}
 			arg->type = PRINT_FIELD;
 			arg->field.name = strdup(field->name);
 			if (!arg->field.name) {
 				event->flags |= EVENT_FL_FAILED;
 				free_arg(arg);
-				return TEP_ERRNO__OLD_FTRACE_ARG_FAILED;
+				return PEVENT_ERRNO__OLD_FTRACE_ARG_FAILED;
 			}
 			arg->field.field = field;
 			*list = arg;
@@ -6128,20 +6048,20 @@ enum tep_errno __tep_parse_format(struct event_format **eventp,
 	return ret;
 }
 
-static enum tep_errno
-__parse_event(struct tep_handle *pevent,
-	      struct event_format **eventp,
-	      const char *buf, unsigned long size,
-	      const char *sys)
+static enum pevent_errno
+__pevent_parse_event(struct pevent *pevent,
+		     struct event_format **eventp,
+		     const char *buf, unsigned long size,
+		     const char *sys)
 {
-	int ret = __tep_parse_format(eventp, pevent, buf, size, sys);
+	int ret = __pevent_parse_format(eventp, pevent, buf, size, sys);
 	struct event_format *event = *eventp;
 
 	if (event == NULL)
 		return ret;
 
 	if (pevent && add_event(pevent, event)) {
-		ret = TEP_ERRNO__MEM_ALLOC_FAILED;
+		ret = PEVENT_ERRNO__MEM_ALLOC_FAILED;
 		goto event_add_failed;
 	}
 
@@ -6152,12 +6072,12 @@ __parse_event(struct tep_handle *pevent,
 	return 0;
 
 event_add_failed:
-	tep_free_format(event);
+	pevent_free_format(event);
 	return ret;
 }
 
 /**
- * tep_parse_format - parse the event format
+ * pevent_parse_format - parse the event format
  * @pevent: the handle to the pevent
  * @eventp: returned format
  * @buf: the buffer storing the event format string
@@ -6171,16 +6091,16 @@ event_add_failed:
  *
  * /sys/kernel/debug/tracing/events/.../.../format
  */
-enum tep_errno tep_parse_format(struct tep_handle *pevent,
-				struct event_format **eventp,
-				const char *buf,
-				unsigned long size, const char *sys)
+enum pevent_errno pevent_parse_format(struct pevent *pevent,
+				      struct event_format **eventp,
+				      const char *buf,
+				      unsigned long size, const char *sys)
 {
-	return __parse_event(pevent, eventp, buf, size, sys);
+	return __pevent_parse_event(pevent, eventp, buf, size, sys);
 }
 
 /**
- * tep_parse_event - parse the event format
+ * pevent_parse_event - parse the event format
  * @pevent: the handle to the pevent
  * @buf: the buffer storing the event format string
  * @size: the size of @buf
@@ -6193,22 +6113,22 @@ enum tep_errno tep_parse_format(struct tep_handle *pevent,
  *
  * /sys/kernel/debug/tracing/events/.../.../format
  */
-enum tep_errno tep_parse_event(struct tep_handle *pevent, const char *buf,
-			       unsigned long size, const char *sys)
+enum pevent_errno pevent_parse_event(struct pevent *pevent, const char *buf,
+				     unsigned long size, const char *sys)
 {
 	struct event_format *event = NULL;
-	return __parse_event(pevent, &event, buf, size, sys);
+	return __pevent_parse_event(pevent, &event, buf, size, sys);
 }
 
 #undef _PE
 #define _PE(code, str) str
-static const char * const tep_error_str[] = {
-	TEP_ERRORS
+static const char * const pevent_error_str[] = {
+	PEVENT_ERRORS
 };
 #undef _PE
 
-int tep_strerror(struct tep_handle *pevent __maybe_unused,
-		 enum tep_errno errnum, char *buf, size_t buflen)
+int pevent_strerror(struct pevent *pevent __maybe_unused,
+		    enum pevent_errno errnum, char *buf, size_t buflen)
 {
 	int idx;
 	const char *msg;
@@ -6218,19 +6138,19 @@ int tep_strerror(struct tep_handle *pevent __maybe_unused,
 		return 0;
 	}
 
-	if (errnum <= __TEP_ERRNO__START ||
-	    errnum >= __TEP_ERRNO__END)
+	if (errnum <= __PEVENT_ERRNO__START ||
+	    errnum >= __PEVENT_ERRNO__END)
 		return -1;
 
-	idx = errnum - __TEP_ERRNO__START - 1;
-	msg = tep_error_str[idx];
+	idx = errnum - __PEVENT_ERRNO__START - 1;
+	msg = pevent_error_str[idx];
 	snprintf(buf, buflen, "%s", msg);
 
 	return 0;
 }
 
 int get_field_val(struct trace_seq *s, struct format_field *field,
-		  const char *name, struct tep_record *record,
+		  const char *name, struct pevent_record *record,
 		  unsigned long long *val, int err)
 {
 	if (!field) {
@@ -6239,7 +6159,7 @@ int get_field_val(struct trace_seq *s, struct format_field *field,
 		return -1;
 	}
 
-	if (tep_read_number_field(field, record->data, val)) {
+	if (pevent_read_number_field(field, record->data, val)) {
 		if (err)
 			trace_seq_printf(s, " %s=INVALID", name);
 		return -1;
@@ -6249,7 +6169,7 @@ int get_field_val(struct trace_seq *s, struct format_field *field,
 }
 
 /**
- * tep_get_field_raw - return the raw pointer into the data field
+ * pevent_get_field_raw - return the raw pointer into the data field
  * @s: The seq to print to on error
  * @event: the event that the field is for
  * @name: The name of the field
@@ -6262,9 +6182,9 @@ int get_field_val(struct trace_seq *s, struct format_field *field,
  *
  * On failure, it returns NULL.
  */
-void *tep_get_field_raw(struct trace_seq *s, struct event_format *event,
-			const char *name, struct tep_record *record,
-			int *len, int err)
+void *pevent_get_field_raw(struct trace_seq *s, struct event_format *event,
+			   const char *name, struct pevent_record *record,
+			   int *len, int err)
 {
 	struct format_field *field;
 	void *data = record->data;
@@ -6274,7 +6194,7 @@ void *tep_get_field_raw(struct trace_seq *s, struct event_format *event,
 	if (!event)
 		return NULL;
 
-	field = tep_find_field(event, name);
+	field = pevent_find_field(event, name);
 
 	if (!field) {
 		if (err)
@@ -6288,7 +6208,7 @@ void *tep_get_field_raw(struct trace_seq *s, struct event_format *event,
 
 	offset = field->offset;
 	if (field->flags & FIELD_IS_DYNAMIC) {
-		offset = tep_read_number(event->pevent,
+		offset = pevent_read_number(event->pevent,
 					    data + offset, field->size);
 		*len = offset >> 16;
 		offset &= 0xffff;
@@ -6299,7 +6219,7 @@ void *tep_get_field_raw(struct trace_seq *s, struct event_format *event,
 }
 
 /**
- * tep_get_field_val - find a field and return its value
+ * pevent_get_field_val - find a field and return its value
  * @s: The seq to print to on error
  * @event: the event that the field is for
  * @name: The name of the field
@@ -6309,22 +6229,22 @@ void *tep_get_field_raw(struct trace_seq *s, struct event_format *event,
  *
  * Returns 0 on success -1 on field not found.
  */
-int tep_get_field_val(struct trace_seq *s, struct event_format *event,
-		      const char *name, struct tep_record *record,
-		      unsigned long long *val, int err)
+int pevent_get_field_val(struct trace_seq *s, struct event_format *event,
+			 const char *name, struct pevent_record *record,
+			 unsigned long long *val, int err)
 {
 	struct format_field *field;
 
 	if (!event)
 		return -1;
 
-	field = tep_find_field(event, name);
+	field = pevent_find_field(event, name);
 
 	return get_field_val(s, field, name, record, val, err);
 }
 
 /**
- * tep_get_common_field_val - find a common field and return its value
+ * pevent_get_common_field_val - find a common field and return its value
  * @s: The seq to print to on error
  * @event: the event that the field is for
  * @name: The name of the field
@@ -6334,8 +6254,33 @@ int tep_get_field_val(struct trace_seq *s, struct event_format *event,
  *
  * Returns 0 on success -1 on field not found.
  */
-int tep_get_common_field_val(struct trace_seq *s, struct event_format *event,
-			     const char *name, struct tep_record *record,
+int pevent_get_common_field_val(struct trace_seq *s, struct event_format *event,
+				const char *name, struct pevent_record *record,
+				unsigned long long *val, int err)
+{
+	struct format_field *field;
+
+	if (!event)
+		return -1;
+
+	field = pevent_find_common_field(event, name);
+
+	return get_field_val(s, field, name, record, val, err);
+}
+
+/**
+ * pevent_get_any_field_val - find a any field and return its value
+ * @s: The seq to print to on error
+ * @event: the event that the field is for
+ * @name: The name of the field
+ * @record: The record with the field name.
+ * @val: place to store the value of the field.
+ * @err: print default error if failed.
+ *
+ * Returns 0 on success -1 on field not found.
+ */
+int pevent_get_any_field_val(struct trace_seq *s, struct event_format *event,
+			     const char *name, struct pevent_record *record,
 			     unsigned long long *val, int err)
 {
 	struct format_field *field;
@@ -6343,38 +6288,13 @@ int tep_get_common_field_val(struct trace_seq *s, struct event_format *event,
 	if (!event)
 		return -1;
 
-	field = tep_find_common_field(event, name);
+	field = pevent_find_any_field(event, name);
 
 	return get_field_val(s, field, name, record, val, err);
 }
 
 /**
- * tep_get_any_field_val - find a any field and return its value
- * @s: The seq to print to on error
- * @event: the event that the field is for
- * @name: The name of the field
- * @record: The record with the field name.
- * @val: place to store the value of the field.
- * @err: print default error if failed.
- *
- * Returns 0 on success -1 on field not found.
- */
-int tep_get_any_field_val(struct trace_seq *s, struct event_format *event,
-			  const char *name, struct tep_record *record,
-			  unsigned long long *val, int err)
-{
-	struct format_field *field;
-
-	if (!event)
-		return -1;
-
-	field = tep_find_any_field(event, name);
-
-	return get_field_val(s, field, name, record, val, err);
-}
-
-/**
- * tep_print_num_field - print a field and a format
+ * pevent_print_num_field - print a field and a format
  * @s: The seq to print to
  * @fmt: The printf format to print the field with.
  * @event: the event that the field is for
@@ -6384,17 +6304,17 @@ int tep_get_any_field_val(struct trace_seq *s, struct event_format *event,
  *
  * Returns: 0 on success, -1 field not found, or 1 if buffer is full.
  */
-int tep_print_num_field(struct trace_seq *s, const char *fmt,
-			struct event_format *event, const char *name,
-			struct tep_record *record, int err)
+int pevent_print_num_field(struct trace_seq *s, const char *fmt,
+			   struct event_format *event, const char *name,
+			   struct pevent_record *record, int err)
 {
-	struct format_field *field = tep_find_field(event, name);
+	struct format_field *field = pevent_find_field(event, name);
 	unsigned long long val;
 
 	if (!field)
 		goto failed;
 
-	if (tep_read_number_field(field, record->data, &val))
+	if (pevent_read_number_field(field, record->data, &val))
 		goto failed;
 
 	return trace_seq_printf(s, fmt, val);
@@ -6406,7 +6326,7 @@ int tep_print_num_field(struct trace_seq *s, const char *fmt,
 }
 
 /**
- * tep_print_func_field - print a field and a format for function pointers
+ * pevent_print_func_field - print a field and a format for function pointers
  * @s: The seq to print to
  * @fmt: The printf format to print the field with.
  * @event: the event that the field is for
@@ -6416,12 +6336,12 @@ int tep_print_num_field(struct trace_seq *s, const char *fmt,
  *
  * Returns: 0 on success, -1 field not found, or 1 if buffer is full.
  */
-int tep_print_func_field(struct trace_seq *s, const char *fmt,
-			 struct event_format *event, const char *name,
-			 struct tep_record *record, int err)
+int pevent_print_func_field(struct trace_seq *s, const char *fmt,
+			    struct event_format *event, const char *name,
+			    struct pevent_record *record, int err)
 {
-	struct format_field *field = tep_find_field(event, name);
-	struct tep_handle *pevent = event->pevent;
+	struct format_field *field = pevent_find_field(event, name);
+	struct pevent *pevent = event->pevent;
 	unsigned long long val;
 	struct func_map *func;
 	char tmp[128];
@@ -6429,7 +6349,7 @@ int tep_print_func_field(struct trace_seq *s, const char *fmt,
 	if (!field)
 		goto failed;
 
-	if (tep_read_number_field(field, record->data, &val))
+	if (pevent_read_number_field(field, record->data, &val))
 		goto failed;
 
 	func = find_func(pevent, val);
@@ -6447,9 +6367,9 @@ int tep_print_func_field(struct trace_seq *s, const char *fmt,
 	return -1;
 }
 
-static void free_func_handle(struct tep_function_handler *func)
+static void free_func_handle(struct pevent_function_handler *func)
 {
-	struct func_params *params;
+	struct pevent_func_params *params;
 
 	free(func->name);
 
@@ -6463,29 +6383,29 @@ static void free_func_handle(struct tep_function_handler *func)
 }
 
 /**
- * tep_register_print_function - register a helper function
+ * pevent_register_print_function - register a helper function
  * @pevent: the handle to the pevent
  * @func: the function to process the helper function
  * @ret_type: the return type of the helper function
  * @name: the name of the helper function
- * @parameters: A list of enum tep_func_arg_type
+ * @parameters: A list of enum pevent_func_arg_type
  *
  * Some events may have helper functions in the print format arguments.
  * This allows a plugin to dynamically create a way to process one
  * of these functions.
  *
- * The @parameters is a variable list of tep_func_arg_type enums that
- * must end with TEP_FUNC_ARG_VOID.
+ * The @parameters is a variable list of pevent_func_arg_type enums that
+ * must end with PEVENT_FUNC_ARG_VOID.
  */
-int tep_register_print_function(struct tep_handle *pevent,
-				tep_func_handler func,
-				enum tep_func_arg_type ret_type,
-				char *name, ...)
+int pevent_register_print_function(struct pevent *pevent,
+				   pevent_func_handler func,
+				   enum pevent_func_arg_type ret_type,
+				   char *name, ...)
 {
-	struct tep_function_handler *func_handle;
-	struct func_params **next_param;
-	struct func_params *param;
-	enum tep_func_arg_type type;
+	struct pevent_function_handler *func_handle;
+	struct pevent_func_params **next_param;
+	struct pevent_func_params *param;
+	enum pevent_func_arg_type type;
 	va_list ap;
 	int ret;
 
@@ -6503,7 +6423,7 @@ int tep_register_print_function(struct tep_handle *pevent,
 	func_handle = calloc(1, sizeof(*func_handle));
 	if (!func_handle) {
 		do_warning("Failed to allocate function handler");
-		return TEP_ERRNO__MEM_ALLOC_FAILED;
+		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 	}
 
 	func_handle->ret_type = ret_type;
@@ -6512,26 +6432,26 @@ int tep_register_print_function(struct tep_handle *pevent,
 	if (!func_handle->name) {
 		do_warning("Failed to allocate function name");
 		free(func_handle);
-		return TEP_ERRNO__MEM_ALLOC_FAILED;
+		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 	}
 
 	next_param = &(func_handle->params);
 	va_start(ap, name);
 	for (;;) {
-		type = va_arg(ap, enum tep_func_arg_type);
-		if (type == TEP_FUNC_ARG_VOID)
+		type = va_arg(ap, enum pevent_func_arg_type);
+		if (type == PEVENT_FUNC_ARG_VOID)
 			break;
 
-		if (type >= TEP_FUNC_ARG_MAX_TYPES) {
+		if (type >= PEVENT_FUNC_ARG_MAX_TYPES) {
 			do_warning("Invalid argument type %d", type);
-			ret = TEP_ERRNO__INVALID_ARG_TYPE;
+			ret = PEVENT_ERRNO__INVALID_ARG_TYPE;
 			goto out_free;
 		}
 
 		param = malloc(sizeof(*param));
 		if (!param) {
 			do_warning("Failed to allocate function param");
-			ret = TEP_ERRNO__MEM_ALLOC_FAILED;
+			ret = PEVENT_ERRNO__MEM_ALLOC_FAILED;
 			goto out_free;
 		}
 		param->type = type;
@@ -6555,7 +6475,7 @@ int tep_register_print_function(struct tep_handle *pevent,
 }
 
 /**
- * tep_unregister_print_function - unregister a helper function
+ * pevent_unregister_print_function - unregister a helper function
  * @pevent: the handle to the pevent
  * @func: the function to process the helper function
  * @name: the name of the helper function
@@ -6564,10 +6484,10 @@ int tep_register_print_function(struct tep_handle *pevent,
  *
  * Returns 0 if the handler was removed successully, -1 otherwise.
  */
-int tep_unregister_print_function(struct tep_handle *pevent,
-				  tep_func_handler func, char *name)
+int pevent_unregister_print_function(struct pevent *pevent,
+				     pevent_func_handler func, char *name)
 {
-	struct tep_function_handler *func_handle;
+	struct pevent_function_handler *func_handle;
 
 	func_handle = find_func_handler(pevent, name);
 	if (func_handle && func_handle->func == func) {
@@ -6577,15 +6497,15 @@ int tep_unregister_print_function(struct tep_handle *pevent,
 	return -1;
 }
 
-static struct event_format *search_event(struct tep_handle *pevent, int id,
-					 const char *sys_name,
-					 const char *event_name)
+static struct event_format *pevent_search_event(struct pevent *pevent, int id,
+						const char *sys_name,
+						const char *event_name)
 {
 	struct event_format *event;
 
 	if (id >= 0) {
 		/* search by id */
-		event = tep_find_event(pevent, id);
+		event = pevent_find_event(pevent, id);
 		if (!event)
 			return NULL;
 		if (event_name && (strcmp(event_name, event->name) != 0))
@@ -6593,7 +6513,7 @@ static struct event_format *search_event(struct tep_handle *pevent, int id,
 		if (sys_name && (strcmp(sys_name, event->system) != 0))
 			return NULL;
 	} else {
-		event = tep_find_event_by_name(pevent, sys_name, event_name);
+		event = pevent_find_event_by_name(pevent, sys_name, event_name);
 		if (!event)
 			return NULL;
 	}
@@ -6601,7 +6521,7 @@ static struct event_format *search_event(struct tep_handle *pevent, int id,
 }
 
 /**
- * tep_register_event_handler - register a way to parse an event
+ * pevent_register_event_handler - register a way to parse an event
  * @pevent: the handle to the pevent
  * @id: the id of the event to register
  * @sys_name: the system name the event belongs to
@@ -6617,14 +6537,14 @@ static struct event_format *search_event(struct tep_handle *pevent, int id,
  * If @id is >= 0, then it is used to find the event.
  * else @sys_name and @event_name are used.
  */
-int tep_register_event_handler(struct tep_handle *pevent, int id,
-			       const char *sys_name, const char *event_name,
-			       tep_event_handler_func func, void *context)
+int pevent_register_event_handler(struct pevent *pevent, int id,
+				  const char *sys_name, const char *event_name,
+				  pevent_event_handler_func func, void *context)
 {
 	struct event_format *event;
 	struct event_handler *handle;
 
-	event = search_event(pevent, id, sys_name, event_name);
+	event = pevent_search_event(pevent, id, sys_name, event_name);
 	if (event == NULL)
 		goto not_found;
 
@@ -6640,7 +6560,7 @@ int tep_register_event_handler(struct tep_handle *pevent, int id,
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
 		do_warning("Failed to allocate event handler");
-		return TEP_ERRNO__MEM_ALLOC_FAILED;
+		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 	}
 
 	handle->id = id;
@@ -6655,7 +6575,7 @@ int tep_register_event_handler(struct tep_handle *pevent, int id,
 		free((void *)handle->event_name);
 		free((void *)handle->sys_name);
 		free(handle);
-		return TEP_ERRNO__MEM_ALLOC_FAILED;
+		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 	}
 
 	handle->func = func;
@@ -6668,7 +6588,7 @@ int tep_register_event_handler(struct tep_handle *pevent, int id,
 
 static int handle_matches(struct event_handler *handler, int id,
 			  const char *sys_name, const char *event_name,
-			  tep_event_handler_func func, void *context)
+			  pevent_event_handler_func func, void *context)
 {
 	if (id >= 0 && id != handler->id)
 		return 0;
@@ -6686,7 +6606,7 @@ static int handle_matches(struct event_handler *handler, int id,
 }
 
 /**
- * tep_unregister_event_handler - unregister an existing event handler
+ * pevent_unregister_event_handler - unregister an existing event handler
  * @pevent: the handle to the pevent
  * @id: the id of the event to unregister
  * @sys_name: the system name the handler belongs to
@@ -6701,15 +6621,15 @@ static int handle_matches(struct event_handler *handler, int id,
  *
  * Returns 0 if handler was removed successfully, -1 if event was not found.
  */
-int tep_unregister_event_handler(struct tep_handle *pevent, int id,
-				 const char *sys_name, const char *event_name,
-				 tep_event_handler_func func, void *context)
+int pevent_unregister_event_handler(struct pevent *pevent, int id,
+				    const char *sys_name, const char *event_name,
+				    pevent_event_handler_func func, void *context)
 {
 	struct event_format *event;
 	struct event_handler *handle;
 	struct event_handler **next;
 
-	event = search_event(pevent, id, sys_name, event_name);
+	event = pevent_search_event(pevent, id, sys_name, event_name);
 	if (event == NULL)
 		goto not_found;
 
@@ -6740,11 +6660,11 @@ not_found:
 }
 
 /**
- * tep_alloc - create a pevent handle
+ * pevent_alloc - create a pevent handle
  */
-struct tep_handle *tep_alloc(void)
+struct pevent *pevent_alloc(void)
 {
-	struct tep_handle *pevent = calloc(1, sizeof(*pevent));
+	struct pevent *pevent = calloc(1, sizeof(*pevent));
 
 	if (pevent)
 		pevent->ref_count = 1;
@@ -6752,12 +6672,12 @@ struct tep_handle *tep_alloc(void)
 	return pevent;
 }
 
-void tep_ref(struct tep_handle *pevent)
+void pevent_ref(struct pevent *pevent)
 {
 	pevent->ref_count++;
 }
 
-void tep_free_format_field(struct format_field *field)
+void pevent_free_format_field(struct format_field *field)
 {
 	free(field->type);
 	if (field->alias != field->name)
@@ -6772,7 +6692,7 @@ static void free_format_fields(struct format_field *field)
 
 	while (field) {
 		next = field->next;
-		tep_free_format_field(field);
+		pevent_free_format_field(field);
 		field = next;
 	}
 }
@@ -6783,7 +6703,7 @@ static void free_formats(struct format *format)
 	free_format_fields(format->fields);
 }
 
-void tep_free_format(struct event_format *event)
+void pevent_free_format(struct event_format *event)
 {
 	free(event->name);
 	free(event->system);
@@ -6797,15 +6717,15 @@ void tep_free_format(struct event_format *event)
 }
 
 /**
- * tep_free - free a pevent handle
+ * pevent_free - free a pevent handle
  * @pevent: the pevent handle to free
  */
-void tep_free(struct tep_handle *pevent)
+void pevent_free(struct pevent *pevent)
 {
 	struct cmdline_list *cmdlist, *cmdnext;
 	struct func_list *funclist, *funcnext;
 	struct printk_list *printklist, *printknext;
-	struct tep_function_handler *func_handler;
+	struct pevent_function_handler *func_handler;
 	struct event_handler *handle;
 	int i;
 
@@ -6869,7 +6789,7 @@ void tep_free(struct tep_handle *pevent)
 	}
 
 	for (i = 0; i < pevent->nr_events; i++)
-		tep_free_format(pevent->events[i]);
+		pevent_free_format(pevent->events[i]);
 
 	while (pevent->handlers) {
 		handle = pevent->handlers;
@@ -6885,7 +6805,7 @@ void tep_free(struct tep_handle *pevent)
 	free(pevent);
 }
 
-void tep_unref(struct tep_handle *pevent)
+void pevent_unref(struct pevent *pevent)
 {
-	tep_free(pevent);
+	pevent_free(pevent);
 }

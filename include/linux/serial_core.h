@@ -20,7 +20,7 @@
 #ifndef LINUX_SERIAL_CORE_H
 #define LINUX_SERIAL_CORE_H
 
-#include <linux/bitops.h>
+
 #include <linux/compiler.h>
 #include <linux/interrupt.h>
 #include <linux/circ_buf.h>
@@ -66,6 +66,7 @@ struct uart_ops {
 	void		(*set_ldisc)(struct uart_port *, struct ktermios *);
 	void		(*pm)(struct uart_port *, unsigned int state,
 			      unsigned int oldstate);
+	void		(*wake_peer)(struct uart_port *);
 
 	/*
 	 * Return a string describing the type of the port
@@ -111,8 +112,8 @@ struct uart_icount {
 	__u32	buf_overrun;
 };
 
-typedef unsigned int __bitwise upf_t;
-typedef unsigned int __bitwise upstat_t;
+typedef unsigned int __bitwise__ upf_t;
+typedef unsigned int __bitwise__ upstat_t;
 
 struct uart_port {
 	spinlock_t		lock;			/* port lock */
@@ -123,17 +124,8 @@ struct uart_port {
 	void			(*set_termios)(struct uart_port *,
 				               struct ktermios *new,
 				               struct ktermios *old);
-	void			(*set_ldisc)(struct uart_port *,
-					     struct ktermios *);
 	unsigned int		(*get_mctrl)(struct uart_port *);
 	void			(*set_mctrl)(struct uart_port *, unsigned int);
-	unsigned int		(*get_divisor)(struct uart_port *,
-					       unsigned int baud,
-					       unsigned int *frac);
-	void			(*set_divisor)(struct uart_port *,
-					       unsigned int baud,
-					       unsigned int quot,
-					       unsigned int quot_frac);
 	int			(*startup)(struct uart_port *port);
 	void			(*shutdown)(struct uart_port *port);
 	void			(*throttle)(struct uart_port *port);
@@ -151,7 +143,7 @@ struct uart_port {
 	unsigned char		x_char;			/* xon/xoff char */
 	unsigned char		regshift;		/* reg offset shift */
 	unsigned char		iotype;			/* io access style */
-	unsigned char		quirks;			/* internal quirks */
+	unsigned char		unused1;
 
 #define UPIO_PORT		(SERIAL_IO_PORT)	/* 8b I/O port access */
 #define UPIO_HUB6		(SERIAL_IO_HUB6)	/* Hub6 ISA card */
@@ -161,9 +153,6 @@ struct uart_port {
 #define UPIO_TSI		(SERIAL_IO_TSI)		/* Tsi108/109 type IO */
 #define UPIO_MEM32BE		(SERIAL_IO_MEM32BE)	/* 32b big endian */
 #define UPIO_MEM16		(SERIAL_IO_MEM16)	/* 16b little endian */
-
-	/* quirks must be updated while holding port mutex */
-#define UPQ_NO_TXEN_TEST	BIT(0)
 
 	unsigned int		read_status_mask;	/* driver specific */
 	unsigned int		ignore_status_mask;	/* driver specific */
@@ -178,6 +167,7 @@ struct uart_port {
 
 	/* flags must be updated while holding port mutex */
 	upf_t			flags;
+	bool			rt_flush;
 
 	/*
 	 * These flags must be equivalent to the flags defined in
@@ -186,6 +176,7 @@ struct uart_port {
 	 * [for bit definitions in the UPF_CHANGE_MASK]
 	 *
 	 * Bits [0..UPF_LAST_USER] are userspace defined/visible/changeable
+	 * except bit 15 (UPF_NO_TXEN_TEST) which is masked off.
 	 * The remaining bits are serial-core specific and not modifiable by
 	 * userspace.
 	 */
@@ -202,9 +193,9 @@ struct uart_port {
 #define UPF_SPD_SHI		((__force upf_t) ASYNC_SPD_SHI        /* 12 */ )
 #define UPF_LOW_LATENCY		((__force upf_t) ASYNC_LOW_LATENCY    /* 13 */ )
 #define UPF_BUGGY_UART		((__force upf_t) ASYNC_BUGGY_UART     /* 14 */ )
+#define UPF_NO_TXEN_TEST	((__force upf_t) (1 << 15))
 #define UPF_MAGIC_MULTIPLIER	((__force upf_t) ASYNC_MAGIC_MULTIPLIER /* 16 */ )
 
-#define UPF_NO_THRE_TEST	((__force upf_t) (1 << 19))
 /* Port has hardware-assisted h/w flow control */
 #define UPF_AUTO_CTS		((__force upf_t) (1 << 20))
 #define UPF_AUTO_RTS		((__force upf_t) (1 << 21))
@@ -241,7 +232,6 @@ struct uart_port {
 #define UPSTAT_AUTORTS		((__force upstat_t) (1 << 2))
 #define UPSTAT_AUTOCTS		((__force upstat_t) (1 << 3))
 #define UPSTAT_AUTOXOFF		((__force upstat_t) (1 << 4))
-#define UPSTAT_SYNC_FIFO	((__force upstat_t) (1 << 5))
 
 	int			hw_stopped;		/* sw-assisted CTS flow state */
 	unsigned int		mctrl;			/* current modem ctrl settings */
@@ -256,8 +246,8 @@ struct uart_port {
 	struct device		*dev;			/* parent device */
 	unsigned char		hub6;			/* this should be in the 8250 driver */
 	unsigned char		suspended;
+	unsigned char		irq_wake;
 	unsigned char		unused[2];
-	const char		*name;			/* port name */
 	struct attribute_group	*attr_group;		/* port specific attributes */
 	const struct attribute_group **tty_groups;	/* all attributes (serial core use only) */
 	struct serial_rs485     rs485;
@@ -393,10 +383,10 @@ extern int of_setup_earlycon(const struct earlycon_id *match,
 			     const char *options);
 
 #ifdef CONFIG_SERIAL_EARLYCON
-extern bool earlycon_acpi_spcr_enable __initdata;
+extern bool earlycon_init_is_deferred __initdata;
 int setup_earlycon(char *buf);
 #else
-static const bool earlycon_acpi_spcr_enable EARLYCON_USED_OR_UNUSED;
+static const bool earlycon_init_is_deferred;
 static inline int setup_earlycon(char *buf) { return 0; }
 #endif
 
@@ -404,7 +394,7 @@ struct uart_port *uart_get_console(struct uart_port *ports, int nr,
 				   struct console *c);
 int uart_parse_earlycon(char *p, unsigned char *iotype, resource_size_t *addr,
 			char **options);
-void uart_parse_options(const char *options, int *baud, int *parity, int *bits,
+void uart_parse_options(char *options, int *baud, int *parity, int *bits,
 			int *flow);
 int uart_set_options(struct uart_port *port, struct console *co, int baud,
 		     int parity, int bits, int flow);
@@ -469,7 +459,7 @@ extern void uart_handle_cts_change(struct uart_port *uport,
 extern void uart_insert_char(struct uart_port *port, unsigned int status,
 		 unsigned int overrun, unsigned int ch, unsigned int flag);
 
-#if defined(SUPPORT_SYSRQ) && defined(CONFIG_MAGIC_SYSRQ_SERIAL)
+#ifdef SUPPORT_SYSRQ
 static inline int
 uart_handle_sysrq_char(struct uart_port *port, unsigned int ch)
 {
@@ -552,5 +542,4 @@ static inline int uart_handle_break(struct uart_port *port)
 					 (cflag) & CRTSCTS || \
 					 !((cflag) & CLOCAL))
 
-void uart_get_rs485_mode(struct device *dev, struct serial_rs485 *rs485conf);
 #endif /* LINUX_SERIAL_CORE_H */

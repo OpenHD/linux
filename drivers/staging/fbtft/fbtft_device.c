@@ -1,7 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  *
  * Copyright (C) 2013, Noralf Tronnes
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) "fbtft_device: " fmt
@@ -20,88 +29,87 @@ static struct spi_device *spi_device;
 static struct platform_device *p_device;
 
 static char *name;
-module_param(name, charp, 0000);
-MODULE_PARM_DESC(name,
-		 "Devicename (required). name=list => list all supported devices.");
+module_param(name, charp, 0);
+MODULE_PARM_DESC(name, "Devicename (required). name=list => list all supported devices.");
 
 static unsigned int rotate;
-module_param(rotate, uint, 0000);
+module_param(rotate, uint, 0);
 MODULE_PARM_DESC(rotate,
-		 "Angle to rotate display counter clockwise: 0, 90, 180, 270");
+"Angle to rotate display counter clockwise: 0, 90, 180, 270");
 
 static unsigned int busnum;
-module_param(busnum, uint, 0000);
+module_param(busnum, uint, 0);
 MODULE_PARM_DESC(busnum, "SPI bus number (default=0)");
 
 static unsigned int cs;
-module_param(cs, uint, 0000);
+module_param(cs, uint, 0);
 MODULE_PARM_DESC(cs, "SPI chip select (default=0)");
 
 static unsigned int speed;
-module_param(speed, uint, 0000);
+module_param(speed, uint, 0);
 MODULE_PARM_DESC(speed, "SPI speed (override device default)");
 
 static int mode = -1;
-module_param(mode, int, 0000);
+module_param(mode, int, 0);
 MODULE_PARM_DESC(mode, "SPI mode (override device default)");
 
 static char *gpios;
-module_param(gpios, charp, 0000);
+module_param(gpios, charp, 0);
 MODULE_PARM_DESC(gpios,
-		 "List of gpios. Comma separated with the form: reset:23,dc:24 (when overriding the default, all gpios must be specified)");
+"List of gpios. Comma separated with the form: reset:23,dc:24 (when overriding the default, all gpios must be specified)");
 
 static unsigned int fps;
-module_param(fps, uint, 0000);
+module_param(fps, uint, 0);
 MODULE_PARM_DESC(fps, "Frames per second (override driver default)");
 
 static char *gamma;
-module_param(gamma, charp, 0000);
+module_param(gamma, charp, 0);
 MODULE_PARM_DESC(gamma,
-		 "String representation of Gamma Curve(s). Driver specific.");
+"String representation of Gamma Curve(s). Driver specific.");
 
 static int txbuflen;
-module_param(txbuflen, int, 0000);
+module_param(txbuflen, int, 0);
 MODULE_PARM_DESC(txbuflen, "txbuflen (override driver default)");
 
 static int bgr = -1;
-module_param(bgr, int, 0000);
+module_param(bgr, int, 0);
 MODULE_PARM_DESC(bgr,
-		 "BGR bit (supported by some drivers).");
+"BGR bit (supported by some drivers).");
 
 static unsigned int startbyte;
-module_param(startbyte, uint, 0000);
+module_param(startbyte, uint, 0);
 MODULE_PARM_DESC(startbyte, "Sets the Start byte used by some SPI displays.");
 
 static bool custom;
-module_param(custom, bool, 0000);
+module_param(custom, bool, 0);
 MODULE_PARM_DESC(custom, "Add a custom display device. Use speed= argument to make it a SPI device, else platform_device");
 
 static unsigned int width;
-module_param(width, uint, 0000);
+module_param(width, uint, 0);
 MODULE_PARM_DESC(width, "Display width, used with the custom argument");
 
 static unsigned int height;
-module_param(height, uint, 0000);
+module_param(height, uint, 0);
 MODULE_PARM_DESC(height, "Display height, used with the custom argument");
 
 static unsigned int buswidth = 8;
-module_param(buswidth, uint, 0000);
+module_param(buswidth, uint, 0);
 MODULE_PARM_DESC(buswidth, "Display bus width, used with the custom argument");
 
-static s16 init[FBTFT_MAX_INIT_SEQUENCE];
+static int init[FBTFT_MAX_INIT_SEQUENCE];
 static int init_num;
-module_param_array(init, short, &init_num, 0000);
+module_param_array(init, int, &init_num, 0);
 MODULE_PARM_DESC(init, "Init sequence, used with the custom argument");
 
 static unsigned long debug;
-module_param(debug, ulong, 0000);
+module_param(debug, ulong, 0);
 MODULE_PARM_DESC(debug,
-		 "level: 0-7 (the remaining 29 bits is for advanced usage)");
+"level: 0-7 (the remaining 29 bits is for advanced usage)");
 
 static unsigned int verbose = 3;
-module_param(verbose, uint, 0000);
+module_param(verbose, uint, 0);
 MODULE_PARM_DESC(verbose,
-		 "0 silent, >0 show gpios, >1 show devices, >2 show devices before (default=3)");
+"0 silent, >0 show gpios, >1 show devices, >2 show devices before (default=3)");
 
 struct fbtft_device_display {
 	char *name;
@@ -113,7 +121,7 @@ static void fbtft_device_pdev_release(struct device *dev);
 
 static int write_gpio16_wr_slow(struct fbtft_par *par, void *buf, size_t len);
 static void adafruit18_green_tab_set_addr_win(struct fbtft_par *par,
-					      int xs, int ys, int xe, int ye);
+	int xs, int ys, int xe, int ye);
 
 #define ADAFRUIT18_GAMMA \
 		"02 1c 07 12 37 32 29 2d 29 25 2B 39 00 01 03 10\n" \
@@ -123,7 +131,7 @@ static void adafruit18_green_tab_set_addr_win(struct fbtft_par *par,
 		"D0 00 14 15 13 2C 42 43 4E 09 16 14 18 21\n" \
 		"D0 00 14 15 13 0B 43 55 53 0C 17 14 23 20"
 
-static const s16 cberry28_init_sequence[] = {
+static int cberry28_init_sequence[] = {
 	/* turn off sleep mode */
 	-1, MIPI_DCS_EXIT_SLEEP_MODE,
 	-2, 120,
@@ -172,7 +180,7 @@ static const s16 cberry28_init_sequence[] = {
 	-3,
 };
 
-static const s16 hy28b_init_sequence[] = {
+static int hy28b_init_sequence[] = {
 	-1, 0x00e7, 0x0010, -1, 0x0000, 0x0001,
 	-1, 0x0001, 0x0100, -1, 0x0002, 0x0700,
 	-1, 0x0003, 0x1030, -1, 0x0004, 0x0000,
@@ -203,7 +211,7 @@ static const s16 hy28b_init_sequence[] = {
 	"04 1F 4 7 7 0 7 7 6 0\n" \
 	"0F 00 1 7 4 0 0 0 6 7"
 
-static const s16 pitft_init_sequence[] = {
+static int pitft_init_sequence[] = {
 	-1, MIPI_DCS_SOFT_RESET,
 	-2, 5,
 	-1, MIPI_DCS_SET_DISPLAY_OFF,
@@ -234,7 +242,7 @@ static const s16 pitft_init_sequence[] = {
 	-3
 };
 
-static const s16 waveshare32b_init_sequence[] = {
+static int waveshare32b_init_sequence[] = {
 	-1, 0xCB, 0x39, 0x2C, 0x00, 0x34, 0x02,
 	-1, 0xCF, 0x00, 0xC1, 0x30,
 	-1, 0xE8, 0x85, 0x00, 0x78,
@@ -261,10 +269,6 @@ static const s16 waveshare32b_init_sequence[] = {
 	-1, MIPI_DCS_WRITE_MEMORY_START,
 	-3
 };
-
-#define PIOLED_GAMMA	"0 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 " \
-			"2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 " \
-			"3 3 3 4 4 4 4 4 4 4 4 4 4 4 4"
 
 /* Supported displays in alphabetical order */
 static struct fbtft_device_display displays[] = {
@@ -837,6 +841,7 @@ static struct fbtft_device_display displays[] = {
 			}
 		}
 	}, {
+
 		.name = "piscreen",
 		.spi = &(struct spi_board_info) {
 			.modalias = "fb_ili9486",
@@ -893,7 +898,14 @@ static struct fbtft_device_display displays[] = {
 					{ "dc", 25 },
 					{},
 				},
-				.gamma = PIOLED_GAMMA
+				.gamma =	"0 2 2 2 2 2 2 2 "
+						"2 2 2 2 2 2 2 2 "
+						"2 2 2 2 2 2 2 2 "
+						"2 2 2 2 2 2 2 3 "
+						"3 3 3 3 3 3 3 3 "
+						"3 3 3 3 3 3 3 3 "
+						"3 3 3 4 4 4 4 4 "
+						"4 4 4 4 4 4 4"
 			}
 		}
 	}, {
@@ -1220,13 +1232,13 @@ static struct fbtft_device_display displays[] = {
 			.name = "",
 			.id = 0,
 			.dev = {
-				.release = fbtft_device_pdev_release,
-				.platform_data = &(struct fbtft_platform_data) {
-					.gpios = (const struct fbtft_gpio []) {
-						{},
-					},
+			.release = fbtft_device_pdev_release,
+			.platform_data = &(struct fbtft_platform_data) {
+				.gpios = (const struct fbtft_gpio []) {
+					{},
 				},
 			},
+		},
 		},
 	}
 };
@@ -1240,7 +1252,7 @@ static int write_gpio16_wr_slow(struct fbtft_par *par, void *buf, size_t len)
 #endif
 
 	fbtft_par_dbg_hex(DEBUG_WRITE, par, par->info->device, u8, buf, len,
-			  "%s(len=%d): ", __func__, len);
+		"%s(len=%d): ", __func__, len);
 
 	while (len) {
 		data = *(u16 *)buf;
@@ -1256,7 +1268,7 @@ static int write_gpio16_wr_slow(struct fbtft_par *par, void *buf, size_t len)
 			for (i = 0; i < 16; i++) {
 				if ((data & 1) != (prev_data & 1))
 					gpio_set_value(par->gpio.db[i],
-						       data & 1);
+								data & 1);
 				data >>= 1;
 				prev_data >>= 1;
 			}
@@ -1282,7 +1294,7 @@ static int write_gpio16_wr_slow(struct fbtft_par *par, void *buf, size_t len)
 }
 
 static void adafruit18_green_tab_set_addr_win(struct fbtft_par *par,
-					      int xs, int ys, int xe, int ye)
+						int xs, int ys, int xe, int ye)
 {
 	write_reg(par, 0x2A, 0, xs + 2, 0, xe + 2);
 	write_reg(par, 0x2B, 0, ys + 1, 0, ye + 1);
@@ -1436,10 +1448,11 @@ static int __init fbtft_device_init(void)
 	if (fbtft_device_param_gpios[0].name[0])
 		gpio = fbtft_device_param_gpios;
 
-	if (verbose > 2) {
+	if (verbose > 2)
 		pr_spi_devices(); /* print list of registered SPI devices */
+
+	if (verbose > 2)
 		pr_p_devices(); /* print list of 'fb' platform devices */
-	}
 
 	pr_debug("name='%s', busnum=%d, cs=%d\n", name, busnum, cs);
 
@@ -1470,19 +1483,13 @@ static int __init fbtft_device_init(void)
 			displays[i].pdev->name = name;
 			displays[i].spi = NULL;
 		} else {
-			size_t len;
-
-			len = strlcpy(displays[i].spi->modalias, name,
-				      SPI_NAME_SIZE);
-			if (len >= SPI_NAME_SIZE)
-				pr_warn("modalias (name) truncated to: %s\n",
-					displays[i].spi->modalias);
+			strncpy(displays[i].spi->modalias, name, SPI_NAME_SIZE);
 			displays[i].pdev = NULL;
 		}
 	}
 
 	for (i = 0; i < ARRAY_SIZE(displays); i++) {
-		if (strncmp(name, displays[i].name, SPI_NAME_SIZE) == 0) {
+		if (strncmp(name, displays[i].name, 32) == 0) {
 			if (displays[i].spi) {
 				spi = displays[i].spi;
 				spi->chip_select = cs;
@@ -1579,6 +1586,7 @@ static void __exit fbtft_device_exit(void)
 
 	if (p_device)
 		platform_device_unregister(p_device);
+
 }
 
 arch_initcall(fbtft_device_init);

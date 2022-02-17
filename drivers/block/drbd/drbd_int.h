@@ -30,7 +30,7 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/list.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/bitops.h>
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
@@ -55,21 +55,27 @@
 # define __protected_by(x)       __attribute__((require_context(x,1,999,"rdwr")))
 # define __protected_read_by(x)  __attribute__((require_context(x,1,999,"read")))
 # define __protected_write_by(x) __attribute__((require_context(x,1,999,"write")))
+# define __must_hold(x)       __attribute__((context(x,1,1), require_context(x,1,999,"call")))
 #else
 # define __protected_by(x)
 # define __protected_read_by(x)
 # define __protected_write_by(x)
+# define __must_hold(x)
 #endif
 
-/* shared module parameters, defined in drbd_main.c */
+/* module parameter, defined in drbd_main.c */
+extern unsigned int minor_count;
+extern bool disable_sendpage;
+extern bool allow_oos;
+void tl_abort_disk_io(struct drbd_device *device);
+
 #ifdef CONFIG_DRBD_FAULT_INJECTION
-extern int drbd_enable_faults;
-extern int drbd_fault_rate;
+extern int enable_faults;
+extern int fault_rate;
+extern int fault_devs;
 #endif
 
-extern unsigned int drbd_minor_count;
-extern char drbd_usermode_helper[];
-extern int drbd_proc_details;
+extern char usermode_helper[];
 
 
 /* This is used to stop/restart our threads.
@@ -175,8 +181,8 @@ _drbd_insert_fault(struct drbd_device *device, unsigned int type);
 static inline int
 drbd_insert_fault(struct drbd_device *device, unsigned int type) {
 #ifdef CONFIG_DRBD_FAULT_INJECTION
-	return drbd_fault_rate &&
-		(drbd_enable_faults & (1<<type)) &&
+	return fault_rate &&
+		(enable_faults & (1<<type)) &&
 		_drbd_insert_fault(device, type);
 #else
 	return 0;
@@ -431,6 +437,9 @@ enum {
 
 	/* is this a TRIM aka REQ_DISCARD? */
 	__EE_IS_TRIM,
+	/* our lower level cannot handle trim,
+	 * and we want to fall back to zeroout instead */
+	__EE_IS_TRIM_USE_ZEROOUT,
 
 	/* In case a barrier failed,
 	 * we need to resubmit without the barrier flag. */
@@ -473,6 +482,7 @@ enum {
 #define EE_CALL_AL_COMPLETE_IO (1<<__EE_CALL_AL_COMPLETE_IO)
 #define EE_MAY_SET_IN_SYNC     (1<<__EE_MAY_SET_IN_SYNC)
 #define EE_IS_TRIM             (1<<__EE_IS_TRIM)
+#define EE_IS_TRIM_USE_ZEROOUT (1<<__EE_IS_TRIM_USE_ZEROOUT)
 #define EE_RESUBMITTED         (1<<__EE_RESUBMITTED)
 #define EE_WAS_ERROR           (1<<__EE_WAS_ERROR)
 #define EE_HAS_DIGEST          (1<<__EE_HAS_DIGEST)
@@ -739,8 +749,6 @@ struct drbd_connection {
 	unsigned current_tle_writes;	/* writes seen within this tl epoch */
 
 	unsigned long last_reconnect_jif;
-	/* empty member on older kernels without blk_start_plug() */
-	struct blk_plug receiver_plug;
 	struct drbd_thread receiver;
 	struct drbd_thread worker;
 	struct drbd_thread ack_receiver;
@@ -1127,8 +1135,7 @@ extern void conn_send_sr_reply(struct drbd_connection *connection, enum drbd_sta
 extern int drbd_send_rs_deallocated(struct drbd_peer_device *, struct drbd_peer_request *);
 extern void drbd_backing_dev_free(struct drbd_device *device, struct drbd_backing_dev *ldev);
 extern void drbd_device_cleanup(struct drbd_device *device);
-extern void drbd_print_uuids(struct drbd_device *device, const char *text);
-extern void drbd_queue_unplug(struct drbd_device *device);
+void drbd_print_uuids(struct drbd_device *device, const char *text);
 
 extern void conn_md_sync(struct drbd_connection *connection);
 extern void drbd_md_write(struct drbd_device *device, void *buffer);
@@ -1403,8 +1410,8 @@ extern struct kmem_cache *drbd_request_cache;
 extern struct kmem_cache *drbd_ee_cache;	/* peer requests */
 extern struct kmem_cache *drbd_bm_ext_cache;	/* bitmap extents */
 extern struct kmem_cache *drbd_al_ext_cache;	/* activity log extents */
-extern mempool_t drbd_request_mempool;
-extern mempool_t drbd_ee_mempool;
+extern mempool_t *drbd_request_mempool;
+extern mempool_t *drbd_ee_mempool;
 
 /* drbd's page pool, used to buffer data received from the peer,
  * or data requested by the peer.
@@ -1430,16 +1437,13 @@ extern wait_queue_head_t drbd_pp_wait;
  * 128 should be plenty, currently we probably can get away with as few as 1.
  */
 #define DRBD_MIN_POOL_PAGES	128
-extern mempool_t drbd_md_io_page_pool;
+extern mempool_t *drbd_md_io_page_pool;
 
 /* We also need to make sure we get a bio
  * when we need it for housekeeping purposes */
-extern struct bio_set drbd_md_io_bio_set;
+extern struct bio_set *drbd_md_io_bio_set;
 /* to allocate from that set */
 extern struct bio *bio_alloc_drbd(gfp_t gfp_mask);
-
-/* And a bio_set for cloning */
-extern struct bio_set drbd_io_bio_set;
 
 extern struct mutex resources_mutex;
 
@@ -1459,6 +1463,8 @@ extern struct drbd_connection *conn_get_by_addrs(void *my_addr, int my_addr_len,
 extern struct drbd_resource *drbd_find_resource(const char *name);
 extern void drbd_destroy_resource(struct kref *kref);
 extern void conn_free_crypto(struct drbd_connection *connection);
+
+extern int proc_details;
 
 /* drbd_req */
 extern void do_submit(struct work_struct *ws);
@@ -1549,12 +1555,14 @@ extern int w_restart_disk_io(struct drbd_work *, int);
 extern int w_send_out_of_sync(struct drbd_work *, int);
 extern int w_start_resync(struct drbd_work *, int);
 
-extern void resync_timer_fn(struct timer_list *t);
-extern void start_resync_timer_fn(struct timer_list *t);
+extern void resync_timer_fn(unsigned long data);
+extern void start_resync_timer_fn(unsigned long data);
 
 extern void drbd_endio_write_sec_final(struct drbd_peer_request *peer_req);
 
 /* drbd_receiver.c */
+extern int drbd_issue_discard_or_zero_out(struct drbd_device *device,
+		sector_t start, unsigned int nr_sectors, bool discard);
 extern int drbd_receiver(struct drbd_thread *thi);
 extern int drbd_ack_receiver(struct drbd_thread *thi);
 extern void drbd_send_ping_wf(struct work_struct *ws);
@@ -1623,9 +1631,9 @@ static inline void drbd_generic_make_request(struct drbd_device *device,
 					     int fault_type, struct bio *bio)
 {
 	__release(local);
-	if (!bio->bi_disk) {
-		drbd_err(device, "drbd_generic_make_request: bio->bi_disk == NULL\n");
-		bio->bi_status = BLK_STS_IOERR;
+	if (!bio->bi_bdev) {
+		drbd_err(device, "drbd_generic_make_request: bio->bi_bdev == NULL\n");
+		bio->bi_error = -ENODEV;
 		bio_endio(bio);
 		return;
 	}
@@ -1641,7 +1649,7 @@ void drbd_bump_write_ordering(struct drbd_resource *resource, struct drbd_backin
 
 /* drbd_proc.c */
 extern struct proc_dir_entry *drbd_proc;
-int drbd_seq_show(struct seq_file *seq, void *v);
+extern const struct file_operations drbd_proc_fops;
 
 /* drbd_actlog.c */
 extern bool drbd_al_begin_io_prepare(struct drbd_device *device, struct drbd_interval *i);

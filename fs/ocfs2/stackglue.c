@@ -625,7 +625,7 @@ static struct attribute *ocfs2_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group ocfs2_attr_group = {
+static struct attribute_group ocfs2_attr_group = {
 	.attrs = ocfs2_attrs,
 };
 

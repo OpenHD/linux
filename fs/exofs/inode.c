@@ -110,8 +110,8 @@ static int pcol_try_alloc(struct page_collect *pcol)
 	pages =  exofs_max_io_pages(&pcol->sbi->layout, pcol->expected_pages);
 
 	for (; pages; pages >>= 1) {
-		pcol->pages = kmalloc_array(pages, sizeof(struct page *),
-					    GFP_KERNEL);
+		pcol->pages = kmalloc(pages * sizeof(struct page *),
+				      GFP_KERNEL);
 		if (likely(pcol->pages)) {
 			pcol->alloc_pages = pages;
 			return 0;
@@ -377,9 +377,8 @@ err:
  * and will start a new collection. Eventually caller must submit the last
  * segment if present.
  */
-static int readpage_strip(void *data, struct page *page)
+static int __readpage_strip(struct page_collect *pcol, struct page *page)
 {
-	struct page_collect *pcol = data;
 	struct inode *inode = pcol->inode;
 	struct exofs_i_info *oi = exofs_i(inode);
 	loff_t i_size = i_size_read(inode);
@@ -470,6 +469,13 @@ fail:
 	return ret;
 }
 
+static int readpage_strip(struct file *data, struct page *page)
+{
+	struct page_collect *pcol = (struct page_collect *)data;
+
+	return __readpage_strip(pcol, page);
+}
+
 static int exofs_readpages(struct file *file, struct address_space *mapping,
 			   struct list_head *pages, unsigned nr_pages)
 {
@@ -499,7 +505,7 @@ static int _readpage(struct page *page, bool read_4_write)
 	_pcol_init(&pcol, 1, page->mapping->host);
 
 	pcol.read_4_write = read_4_write;
-	ret = readpage_strip(&pcol, page);
+	ret = __readpage_strip(&pcol, page);
 	if (ret) {
 		EXOFS_ERR("_readpage => %d\n", ret);
 		return ret;
@@ -870,31 +876,46 @@ int exofs_write_begin(struct file *file, struct address_space *mapping,
 
 	page = *pagep;
 	if (page == NULL) {
-		page = grab_cache_page_write_begin(mapping, pos >> PAGE_SHIFT,
-						   flags);
-		if (!page) {
-			EXOFS_DBGMSG("grab_cache_page_write_begin failed\n");
-			return -ENOMEM;
+		ret = simple_write_begin(file, mapping, pos, len, flags, pagep,
+					 fsdata);
+		if (ret) {
+			EXOFS_DBGMSG("simple_write_begin failed\n");
+			goto out;
 		}
-		*pagep = page;
+
+		page = *pagep;
 	}
 
 	 /* read modify write */
 	if (!PageUptodate(page) && (len != PAGE_SIZE)) {
 		loff_t i_size = i_size_read(mapping->host);
 		pgoff_t end_index = i_size >> PAGE_SHIFT;
+		size_t rlen;
 
-		if (page->index > end_index) {
+		if (page->index < end_index)
+			rlen = PAGE_SIZE;
+		else if (page->index == end_index)
+			rlen = i_size & ~PAGE_MASK;
+		else
+			rlen = 0;
+
+		if (!rlen) {
 			clear_highpage(page);
 			SetPageUptodate(page);
-		} else {
-			ret = _readpage(page, true);
-			if (ret) {
-				unlock_page(page);
-				EXOFS_DBGMSG("__readpage failed\n");
-			}
+			goto out;
+		}
+
+		ret = _readpage(page, true);
+		if (ret) {
+			/*SetPageError was done by _readpage. Is it ok?*/
+			unlock_page(page);
+			EXOFS_DBGMSG("__readpage failed\n");
 		}
 	}
+out:
+	if (unlikely(ret))
+		_write_failed(mapping->host, pos + len);
+
 	return ret;
 }
 
@@ -914,25 +935,18 @@ static int exofs_write_end(struct file *file, struct address_space *mapping,
 			struct page *page, void *fsdata)
 {
 	struct inode *inode = mapping->host;
-	loff_t last_pos = pos + copied;
+	/* According to comment in simple_write_end i_mutex is held */
+	loff_t i_size = inode->i_size;
+	int ret;
 
-	if (!PageUptodate(page)) {
-		if (copied < len) {
-			_write_failed(inode, pos + len);
-			copied = 0;
-			goto out;
-		}
-		SetPageUptodate(page);
-	}
-	if (last_pos > inode->i_size) {
-		i_size_write(inode, last_pos);
+	ret = simple_write_end(file, mapping,pos, len, copied, page, fsdata);
+	if (unlikely(ret))
+		_write_failed(inode, pos + len);
+
+	/* TODO: once simple_write_end marks inode dirty remove */
+	if (i_size != inode->i_size)
 		mark_inode_dirty(inode);
-	}
-	set_page_dirty(page);
-out:
-	unlock_page(page);
-	put_page(page);
-	return copied;
+	return ret;
 }
 
 static int exofs_releasepage(struct page *page, gfp_t gfp)

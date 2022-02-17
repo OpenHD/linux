@@ -14,12 +14,6 @@
 
 struct rmi_device;
 
-/*
- * The interrupt source count in the function descriptor can represent up to
- * 6 interrupt sources in the normal manner.
- */
-#define RMI_FN_MAX_IRQS	6
-
 /**
  * struct rmi_function - represents the implementation of an RMI4
  * function for a particular device (basically, a driver for that RMI4 function)
@@ -32,7 +26,6 @@ struct rmi_device;
  * @irq_pos: The position in the irq bitfield this function holds
  * @irq_mask: For convenience, can be used to mask IRQ bits off during ATTN
  * interrupt handling.
- * @irqs: assigned virq numbers (up to num_of_irqs)
  *
  * @node: entry in device's list of functions
  */
@@ -43,7 +36,6 @@ struct rmi_function {
 	struct list_head node;
 
 	unsigned int num_of_irqs;
-	int irq[RMI_FN_MAX_IRQS];
 	unsigned int irq_pos;
 	unsigned long irq_mask[];
 };
@@ -84,7 +76,7 @@ struct rmi_function_handler {
 	void (*remove)(struct rmi_function *fn);
 	int (*config)(struct rmi_function *fn);
 	int (*reset)(struct rmi_function *fn);
-	irqreturn_t (*attention)(int irq, void *ctx);
+	int (*attention)(struct rmi_function *fn, unsigned long *irq_bits);
 	int (*suspend)(struct rmi_function *fn);
 	int (*resume)(struct rmi_function *fn);
 };
@@ -111,18 +103,6 @@ rmi_get_platform_data(struct rmi_device *d)
 }
 
 bool rmi_is_physical_device(struct device *dev);
-
-/**
- * rmi_reset - reset a RMI4 device
- * @d: Pointer to an RMI device
- *
- * Calls for a reset of each function implemented by a specific device.
- * Returns 0 on success or a negative error code.
- */
-static inline int rmi_reset(struct rmi_device *d)
-{
-	return d->driver->reset_handler(d);
-}
 
 /**
  * rmi_read - read a single byte

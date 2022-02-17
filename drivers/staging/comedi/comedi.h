@@ -1,10 +1,19 @@
-/* SPDX-License-Identifier: LGPL-2.0+ */
 /*
  * comedi.h
  * header file for COMEDI user API
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1998-2001 David A. Schleef <ds@schleef.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #ifndef _COMEDI_H
@@ -236,22 +245,6 @@ enum comedi_subdevice_type {
 /* configuration instructions */
 
 /**
- * enum comedi_io_direction - COMEDI I/O directions
- * @COMEDI_INPUT:	Input.
- * @COMEDI_OUTPUT:	Output.
- * @COMEDI_OPENDRAIN:	Open-drain (or open-collector) output.
- *
- * These are used by the %INSN_CONFIG_DIO_QUERY configuration instruction to
- * report a direction.  They may also be used in other places where a direction
- * needs to be specified.
- */
-enum comedi_io_direction {
-	COMEDI_INPUT = 0,
-	COMEDI_OUTPUT = 1,
-	COMEDI_OPENDRAIN = 2
-};
-
-/**
  * enum configuration_ids - COMEDI configuration instruction codes
  * @INSN_CONFIG_DIO_INPUT:	Configure digital I/O as input.
  * @INSN_CONFIG_DIO_OUTPUT:	Configure digital I/O as output.
@@ -303,9 +296,9 @@ enum comedi_io_direction {
  * @INSN_CONFIG_PWM_GET_H_BRIDGE: Get PWM H bridge duty cycle and polarity.
  */
 enum configuration_ids {
-	INSN_CONFIG_DIO_INPUT = COMEDI_INPUT,
-	INSN_CONFIG_DIO_OUTPUT = COMEDI_OUTPUT,
-	INSN_CONFIG_DIO_OPENDRAIN = COMEDI_OPENDRAIN,
+	INSN_CONFIG_DIO_INPUT = 0,
+	INSN_CONFIG_DIO_OUTPUT = 1,
+	INSN_CONFIG_DIO_OPENDRAIN = 2,
 	INSN_CONFIG_ANALOG_TRIG = 16,
 /*	INSN_CONFIG_WAVEFORM = 17, */
 /*	INSN_CONFIG_TRIG = 18, */
@@ -401,6 +394,22 @@ enum comedi_digital_trig_op {
 	COMEDI_DIGITAL_TRIG_DISABLE = 0,
 	COMEDI_DIGITAL_TRIG_ENABLE_EDGES = 1,
 	COMEDI_DIGITAL_TRIG_ENABLE_LEVELS = 2
+};
+
+/**
+ * enum comedi_io_direction - COMEDI I/O directions
+ * @COMEDI_INPUT:	Input.
+ * @COMEDI_OUTPUT:	Output.
+ * @COMEDI_OPENDRAIN:	Open-drain (or open-collector) output.
+ *
+ * These are used by the %INSN_CONFIG_DIO_QUERY configuration instruction to
+ * report a direction.  They may also be used in other places where a direction
+ * needs to be specified.
+ */
+enum comedi_io_direction {
+	COMEDI_INPUT = 0,
+	COMEDI_OUTPUT = 1,
+	COMEDI_OPENDRAIN = 2
 };
 
 /**
@@ -1095,19 +1104,18 @@ enum ni_gpct_other_select {
 enum ni_gpct_arm_source {
 	NI_GPCT_ARM_IMMEDIATE = 0x0,
 	/*
-	 * Start both the counter and the adjacent paired counter simultaneously
+	 * Start both the counter and the adjacent pared
+	 * counter simultaneously
 	 */
 	NI_GPCT_ARM_PAIRED_IMMEDIATE = 0x1,
 	/*
-	 * If the NI_GPCT_HW_ARM bit is set, we will pass the least significant
-	 * bits (3 bits for 660x or 5 bits for m-series) through to the
-	 * hardware. To select a hardware trigger, pass the appropriate select
-	 * bit, e.g.,
-	 * NI_GPCT_HW_ARM | NI_GPCT_AI_START1_GATE_SELECT or
-	 * NI_GPCT_HW_ARM | NI_GPCT_PFI_GATE_SELECT(pfi_number)
+	 * NI doesn't document bits for selecting hardware arm triggers.
+	 * If the NI_GPCT_ARM_UNKNOWN bit is set, we will pass the least
+	 * significant bits (3 bits for 660x or 5 bits for m-series)
+	 * through to the hardware.  This will at least allow someone to
+	 * figure out what the bits do later.
 	 */
-	NI_GPCT_HW_ARM = 0x1000,
-	NI_GPCT_ARM_UNKNOWN = NI_GPCT_HW_ARM,	/* for backward compatibility */
+	NI_GPCT_ARM_UNKNOWN = 0x1000,
 };
 
 /* digital filtering options for ni 660x for use with INSN_CONFIG_FILTER. */

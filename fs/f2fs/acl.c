@@ -270,7 +270,7 @@ static struct posix_acl *f2fs_acl_clone(const struct posix_acl *acl,
 				sizeof(struct posix_acl_entry);
 		clone = kmemdup(acl, size, flags);
 		if (clone)
-			refcount_set(&clone->a_refcount, 1);
+			atomic_set(&clone->a_refcount, 1);
 	}
 	return clone;
 }

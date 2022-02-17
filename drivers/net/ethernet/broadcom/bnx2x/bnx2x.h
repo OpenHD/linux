@@ -166,12 +166,6 @@ do {						\
 #define REG_RD8(bp, offset)		readb(REG_ADDR(bp, offset))
 #define REG_RD16(bp, offset)		readw(REG_ADDR(bp, offset))
 
-#define REG_WR_RELAXED(bp, offset, val)	\
-	writel_relaxed((u32)val, REG_ADDR(bp, offset))
-
-#define REG_WR16_RELAXED(bp, offset, val) \
-	writew_relaxed((u16)val, REG_ADDR(bp, offset))
-
 #define REG_WR(bp, offset, val)		writel((u32)val, REG_ADDR(bp, offset))
 #define REG_WR8(bp, offset, val)	writeb((u8)val, REG_ADDR(bp, offset))
 #define REG_WR16(bp, offset, val)	writew((u16)val, REG_ADDR(bp, offset))
@@ -764,8 +758,10 @@ struct bnx2x_fastpath {
 #if (BNX2X_DB_SHIFT < BNX2X_DB_MIN_SHIFT)
 #error "Min DB doorbell stride is 8"
 #endif
-#define DOORBELL_RELAXED(bp, cid, val) \
-	writel_relaxed((u32)(val), (bp)->doorbells + ((bp)->db_size * (cid)))
+#define DOORBELL(bp, cid, val) \
+	do { \
+		writel((u32)(val), bp->doorbells + (bp->db_size * (cid))); \
+	} while (0)
 
 /* TX CSUM helpers */
 #define SKB_CS_OFF(skb)		(offsetof(struct tcphdr, check) - \
@@ -1401,9 +1397,9 @@ struct bnx2x {
 	int			tx_ring_size;
 
 /* L2 header size + 2*VLANs (8 bytes) + LLC SNAP (8 bytes) */
-#define ETH_OVERHEAD		(ETH_HLEN + 8 + 8)
-#define ETH_MIN_PACKET_SIZE		(ETH_ZLEN - ETH_HLEN)
-#define ETH_MAX_PACKET_SIZE		ETH_DATA_LEN
+#define ETH_OVREHEAD		(ETH_HLEN + 8 + 8)
+#define ETH_MIN_PACKET_SIZE		60
+#define ETH_MAX_PACKET_SIZE		1500
 #define ETH_MAX_JUMBO_PACKET_SIZE	9600
 /* TCP with Timestamp Option (32) + IPv6 (40) */
 #define ETH_MAX_TPA_HEADER_SIZE		72
@@ -2290,7 +2286,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 GENERAL_ATTEN_OFFSET(LATCHED_ATTN_RBCP) | \
 				 GENERAL_ATTEN_OFFSET(LATCHED_ATTN_RSVD_GRC))
 
-#define HW_INTERRUPT_ASSERT_SET_0 \
+#define HW_INTERRUT_ASSERT_SET_0 \
 				(AEU_INPUTS_ATTN_BITS_TSDM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TCM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TSEMI_HW_INTERRUPT | \
@@ -2303,7 +2299,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 AEU_INPUTS_ATTN_BITS_TSEMI_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_TCM_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_PBCLIENT_PARITY_ERROR)
-#define HW_INTERRUPT_ASSERT_SET_1 \
+#define HW_INTERRUT_ASSERT_SET_1 \
 				(AEU_INPUTS_ATTN_BITS_QM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TIMERS_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_XSDM_HW_INTERRUPT | \
@@ -2331,7 +2327,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 AEU_INPUTS_ATTN_BITS_UPB_PARITY_ERROR | \
 				 AEU_INPUTS_ATTN_BITS_CSDM_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_CCM_PARITY_ERROR)
-#define HW_INTERRUPT_ASSERT_SET_2 \
+#define HW_INTERRUT_ASSERT_SET_2 \
 				(AEU_INPUTS_ATTN_BITS_CSEMI_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_CDU_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_DMAE_HW_INTERRUPT | \

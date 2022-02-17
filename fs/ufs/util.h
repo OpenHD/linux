@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  linux/fs/ufs/util.h
  *
@@ -351,11 +350,16 @@ static inline void *ubh_get_data_ptr(struct ufs_sb_private_info *uspi,
 #define ubh_blkmap(ubh,begin,bit) \
 	((*ubh_get_addr(ubh, (begin) + ((bit) >> 3)) >> ((bit) & 7)) & (0xff >> (UFS_MAXFRAG - uspi->s_fpb)))
 
+/*
+ * Determine the number of available frags given a
+ * percentage to hold in reserve.
+ */
 static inline u64
-ufs_freefrags(struct ufs_sb_private_info *uspi)
+ufs_freespace(struct ufs_sb_private_info *uspi, int percentreserved)
 {
 	return ufs_blkstofrags(uspi->cs_total.cs_nbfree) +
-		uspi->cs_total.cs_nffree;
+		uspi->cs_total.cs_nffree -
+		(uspi->s_dsize * (percentreserved) / 100);
 }
 
 /*
@@ -589,18 +593,4 @@ static inline int ufs_is_data_ptr_zero(struct ufs_sb_private_info *uspi,
 		return *(__fs64 *)p == 0;
 	else
 		return *(__fs32 *)p == 0;
-}
-
-static inline __fs32 ufs_get_seconds(struct super_block *sbp)
-{
-	time64_t now = ktime_get_real_seconds();
-
-	/* Signed 32-bit interpretation wraps around in 2038, which
-	 * happens in ufs1 inode stamps but not ufs2 using 64-bits
-	 * stamps. For superblock and blockgroup, let's assume
-	 * unsigned 32-bit stamps, which are good until y2106.
-	 * Wrap around rather than clamp here to make the dirty
-	 * file system detection work in the superblock stamp.
-	 */
-	return cpu_to_fs32(sbp, lower_32_bits(now));
 }

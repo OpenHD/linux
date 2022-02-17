@@ -77,10 +77,13 @@ phys_addr_t get_immrbase(void)
 
 EXPORT_SYMBOL(get_immrbase);
 
+static u32 sysfreq = -1;
+
 u32 fsl_get_sys_freq(void)
 {
-	static u32 sysfreq = -1;
 	struct device_node *soc;
+	const u32 *prop;
+	int size;
 
 	if (sysfreq != -1)
 		return sysfreq;
@@ -89,28 +92,37 @@ u32 fsl_get_sys_freq(void)
 	if (!soc)
 		return -1;
 
-	of_property_read_u32(soc, "clock-frequency", &sysfreq);
-	if (sysfreq == -1 || !sysfreq)
-		of_property_read_u32(soc, "bus-frequency", &sysfreq);
+	prop = of_get_property(soc, "clock-frequency", &size);
+	if (!prop || size != sizeof(*prop) || *prop == 0)
+		prop = of_get_property(soc, "bus-frequency", &size);
+
+	if (prop && size == sizeof(*prop))
+		sysfreq = *prop;
 
 	of_node_put(soc);
 	return sysfreq;
 }
 EXPORT_SYMBOL(fsl_get_sys_freq);
 
-#if defined(CONFIG_CPM) || defined(CONFIG_QUICC_ENGINE)
+#if defined(CONFIG_CPM2) || defined(CONFIG_QUICC_ENGINE) || defined(CONFIG_8xx)
+
+static u32 brgfreq = -1;
 
 u32 get_brgfreq(void)
 {
-	static u32 brgfreq = -1;
 	struct device_node *node;
+	const unsigned int *prop;
+	int size;
 
 	if (brgfreq != -1)
 		return brgfreq;
 
 	node = of_find_compatible_node(NULL, NULL, "fsl,cpm-brg");
 	if (node) {
-		of_property_read_u32(node, "clock-frequency", &brgfreq);
+		prop = of_get_property(node, "clock-frequency", &size);
+		if (prop && size == 4)
+			brgfreq = *prop;
+
 		of_node_put(node);
 		return brgfreq;
 	}
@@ -123,11 +135,15 @@ u32 get_brgfreq(void)
 		node = of_find_node_by_type(NULL, "qe");
 
 	if (node) {
-		of_property_read_u32(node, "brg-frequency", &brgfreq);
-		if (brgfreq == -1 || !brgfreq)
-			if (!of_property_read_u32(node, "bus-frequency",
-						  &brgfreq))
-				brgfreq /= 2;
+		prop = of_get_property(node, "brg-frequency", &size);
+		if (prop && size == 4)
+			brgfreq = *prop;
+
+		if (brgfreq == -1 || brgfreq == 0) {
+			prop = of_get_property(node, "bus-frequency", &size);
+			if (prop && size == 4)
+				brgfreq = *prop / 2;
+		}
 		of_node_put(node);
 	}
 
@@ -136,9 +152,10 @@ u32 get_brgfreq(void)
 
 EXPORT_SYMBOL(get_brgfreq);
 
+static u32 fs_baudrate = -1;
+
 u32 get_baudrate(void)
 {
-	static u32 fs_baudrate = -1;
 	struct device_node *node;
 
 	if (fs_baudrate != -1)
@@ -146,7 +163,12 @@ u32 get_baudrate(void)
 
 	node = of_find_node_by_type(NULL, "serial");
 	if (node) {
-		of_property_read_u32(node, "current-speed", &fs_baudrate);
+		int size;
+		const unsigned int *prop = of_get_property(node,
+				"current-speed", &size);
+
+		if (prop)
+			fs_baudrate = *prop;
 		of_node_put(node);
 	}
 

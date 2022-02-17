@@ -12,7 +12,6 @@
 #include <linux/types.h>
 #include <linux/bitrev.h>
 #include <linux/io.h>
-#include <linux/sizes.h>
 #include <drm/drm_fourcc.h>
 #include "ipu-prv.h"
 
@@ -188,12 +187,6 @@ static int v4l2_pix_fmt_to_drm_fourcc(u32 pixelformat)
 	case V4L2_PIX_FMT_RGB32:
 		/* R G B A <=> [32:0] A:B:G:R */
 		return DRM_FORMAT_XBGR8888;
-	case V4L2_PIX_FMT_XBGR32:
-		/* B G R X <=> [32:0] X:R:G:B */
-		return DRM_FORMAT_XRGB8888;
-	case V4L2_PIX_FMT_XRGB32:
-		/* X R G B <=> [32:0] B:G:R:X */
-		return DRM_FORMAT_BGRX8888;
 	case V4L2_PIX_FMT_UYVY:
 		return DRM_FORMAT_UYVY;
 	case V4L2_PIX_FMT_YUYV:
@@ -230,12 +223,6 @@ void ipu_cpmem_set_resolution(struct ipuv3_channel *ch, int xres, int yres)
 	ipu_ch_param_write_field(ch, IPU_FIELD_FH, yres - 1);
 }
 EXPORT_SYMBOL_GPL(ipu_cpmem_set_resolution);
-
-void ipu_cpmem_skip_odd_chroma_rows(struct ipuv3_channel *ch)
-{
-	ipu_ch_param_write_field(ch, IPU_FIELD_RDRW, 1);
-}
-EXPORT_SYMBOL_GPL(ipu_cpmem_skip_odd_chroma_rows);
 
 void ipu_cpmem_set_stride(struct ipuv3_channel *ch, int stride)
 {
@@ -275,20 +262,9 @@ EXPORT_SYMBOL_GPL(ipu_cpmem_set_uv_offset);
 
 void ipu_cpmem_interlaced_scan(struct ipuv3_channel *ch, int stride)
 {
-	u32 ilo, sly;
-
-	if (stride < 0) {
-		stride = -stride;
-		ilo = 0x100000 - (stride / 8);
-	} else {
-		ilo = stride / 8;
-	}
-
-	sly = (stride * 2) - 1;
-
 	ipu_ch_param_write_field(ch, IPU_FIELD_SO, 1);
-	ipu_ch_param_write_field(ch, IPU_FIELD_ILO, ilo);
-	ipu_ch_param_write_field(ch, IPU_FIELD_SLY, sly);
+	ipu_ch_param_write_field(ch, IPU_FIELD_ILO, stride / 8);
+	ipu_ch_param_write_field(ch, IPU_FIELD_SLY, (stride * 2) - 1);
 };
 EXPORT_SYMBOL_GPL(ipu_cpmem_interlaced_scan);
 
@@ -441,6 +417,42 @@ void ipu_cpmem_set_yuv_planar_full(struct ipuv3_channel *ch,
 }
 EXPORT_SYMBOL_GPL(ipu_cpmem_set_yuv_planar_full);
 
+void ipu_cpmem_set_yuv_planar(struct ipuv3_channel *ch,
+			      u32 pixel_format, int stride, int height)
+{
+	int fourcc, u_offset, v_offset;
+	int uv_stride = 0;
+
+	fourcc = v4l2_pix_fmt_to_drm_fourcc(pixel_format);
+	switch (fourcc) {
+	case DRM_FORMAT_YUV420:
+		uv_stride = stride / 2;
+		u_offset = stride * height;
+		v_offset = u_offset + (uv_stride * height / 2);
+		break;
+	case DRM_FORMAT_YVU420:
+		uv_stride = stride / 2;
+		v_offset = stride * height;
+		u_offset = v_offset + (uv_stride * height / 2);
+		break;
+	case DRM_FORMAT_YUV422:
+		uv_stride = stride / 2;
+		u_offset = stride * height;
+		v_offset = u_offset + (uv_stride * height);
+		break;
+	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV16:
+		uv_stride = stride;
+		u_offset = stride * height;
+		v_offset = 0;
+		break;
+	default:
+		return;
+	}
+	ipu_cpmem_set_yuv_planar_full(ch, uv_stride, u_offset, v_offset);
+}
+EXPORT_SYMBOL_GPL(ipu_cpmem_set_yuv_planar);
+
 static const struct ipu_rgb def_xrgb_32 = {
 	.red	= { .offset = 16, .length = 8, },
 	.green	= { .offset =  8, .length = 8, },
@@ -547,56 +559,19 @@ static const struct ipu_rgb def_bgra_16 = {
 
 #define Y_OFFSET(pix, x, y)	((x) + pix->width * (y))
 #define U_OFFSET(pix, x, y)	((pix->width * pix->height) +		\
-				 (pix->width * ((y) / 2) / 2) + (x) / 2)
+				 (pix->width * (y) / 4) + (x) / 2)
 #define V_OFFSET(pix, x, y)	((pix->width * pix->height) +		\
 				 (pix->width * pix->height / 4) +	\
-				 (pix->width * ((y) / 2) / 2) + (x) / 2)
+				 (pix->width * (y) / 4) + (x) / 2)
 #define U2_OFFSET(pix, x, y)	((pix->width * pix->height) +		\
 				 (pix->width * (y) / 2) + (x) / 2)
 #define V2_OFFSET(pix, x, y)	((pix->width * pix->height) +		\
 				 (pix->width * pix->height / 2) +	\
 				 (pix->width * (y) / 2) + (x) / 2)
 #define UV_OFFSET(pix, x, y)	((pix->width * pix->height) +	\
-				 (pix->width * ((y) / 2)) + (x))
+				 (pix->width * (y) / 2) + (x))
 #define UV2_OFFSET(pix, x, y)	((pix->width * pix->height) +	\
 				 (pix->width * y) + (x))
-
-#define NUM_ALPHA_CHANNELS	7
-
-/* See Table 37-12. Alpha channels mapping. */
-static int ipu_channel_albm(int ch_num)
-{
-	switch (ch_num) {
-	case IPUV3_CHANNEL_G_MEM_IC_PRP_VF:	return 0;
-	case IPUV3_CHANNEL_G_MEM_IC_PP:		return 1;
-	case IPUV3_CHANNEL_MEM_FG_SYNC:		return 2;
-	case IPUV3_CHANNEL_MEM_FG_ASYNC:	return 3;
-	case IPUV3_CHANNEL_MEM_BG_SYNC:		return 4;
-	case IPUV3_CHANNEL_MEM_BG_ASYNC:	return 5;
-	case IPUV3_CHANNEL_MEM_VDI_PLANE1_COMB: return 6;
-	default:
-		return -EINVAL;
-	}
-}
-
-static void ipu_cpmem_set_separate_alpha(struct ipuv3_channel *ch)
-{
-	struct ipu_soc *ipu = ch->ipu;
-	int albm;
-	u32 val;
-
-	albm = ipu_channel_albm(ch->num);
-	if (albm < 0)
-		return;
-
-	ipu_ch_param_write_field(ch, IPU_FIELD_ALU, 1);
-	ipu_ch_param_write_field(ch, IPU_FIELD_ALBM, albm);
-	ipu_ch_param_write_field(ch, IPU_FIELD_CRE, 1);
-
-	val = ipu_idmac_read(ipu, IDMAC_SEP_ALPHA);
-	val |= BIT(ch->num);
-	ipu_idmac_write(ipu, val, IDMAC_SEP_ALPHA);
-}
 
 int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 {
@@ -612,13 +587,6 @@ int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 	case DRM_FORMAT_YVU422:
 		/* pix format */
 		ipu_ch_param_write_field(ch, IPU_FIELD_PFS, 1);
-		/* burst size */
-		ipu_ch_param_write_field(ch, IPU_FIELD_NPB, 31);
-		break;
-	case DRM_FORMAT_YUV444:
-	case DRM_FORMAT_YVU444:
-		/* pix format */
-		ipu_ch_param_write_field(ch, IPU_FIELD_PFS, 0);
 		/* burst size */
 		ipu_ch_param_write_field(ch, IPU_FIELD_NPB, 31);
 		break;
@@ -660,28 +628,22 @@ int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 		break;
 	case DRM_FORMAT_RGBA8888:
 	case DRM_FORMAT_RGBX8888:
-	case DRM_FORMAT_RGBX8888_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_rgbx_32);
 		break;
 	case DRM_FORMAT_BGRA8888:
 	case DRM_FORMAT_BGRX8888:
-	case DRM_FORMAT_BGRX8888_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_bgrx_32);
 		break;
 	case DRM_FORMAT_BGR888:
-	case DRM_FORMAT_BGR888_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_bgr_24);
 		break;
 	case DRM_FORMAT_RGB888:
-	case DRM_FORMAT_RGB888_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_rgb_24);
 		break;
 	case DRM_FORMAT_RGB565:
-	case DRM_FORMAT_RGB565_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_rgb_16);
 		break;
 	case DRM_FORMAT_BGR565:
-	case DRM_FORMAT_BGR565_A8:
 		ipu_cpmem_set_format_rgb(ch, &def_bgr_16);
 		break;
 	case DRM_FORMAT_ARGB1555:
@@ -703,20 +665,6 @@ int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 		return -EINVAL;
 	}
 
-	switch (drm_fourcc) {
-	case DRM_FORMAT_RGB565_A8:
-	case DRM_FORMAT_BGR565_A8:
-	case DRM_FORMAT_RGB888_A8:
-	case DRM_FORMAT_BGR888_A8:
-	case DRM_FORMAT_RGBX8888_A8:
-	case DRM_FORMAT_BGRX8888_A8:
-		ipu_ch_param_write_field(ch, IPU_FIELD_WID3, 7);
-		ipu_cpmem_set_separate_alpha(ch);
-		break;
-	default:
-		break;
-	}
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ipu_cpmem_set_fmt);
@@ -725,7 +673,6 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 {
 	struct v4l2_pix_format *pix = &image->pix;
 	int offset, u_offset, v_offset;
-	int ret = 0;
 
 	pr_debug("%s: resolution: %dx%d stride: %d\n",
 		 __func__, pix->width, pix->height,
@@ -793,8 +740,6 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 		break;
 	case V4L2_PIX_FMT_RGB32:
 	case V4L2_PIX_FMT_BGR32:
-	case V4L2_PIX_FMT_XRGB32:
-	case V4L2_PIX_FMT_XBGR32:
 		offset = image->rect.left * 4 +
 			image->rect.top * pix->bytesperline;
 		break;
@@ -803,32 +748,14 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 		offset = image->rect.left * 3 +
 			image->rect.top * pix->bytesperline;
 		break;
-	case V4L2_PIX_FMT_SBGGR8:
-	case V4L2_PIX_FMT_SGBRG8:
-	case V4L2_PIX_FMT_SGRBG8:
-	case V4L2_PIX_FMT_SRGGB8:
-	case V4L2_PIX_FMT_GREY:
-		offset = image->rect.left + image->rect.top * pix->bytesperline;
-		break;
-	case V4L2_PIX_FMT_SBGGR16:
-	case V4L2_PIX_FMT_SGBRG16:
-	case V4L2_PIX_FMT_SGRBG16:
-	case V4L2_PIX_FMT_SRGGB16:
-	case V4L2_PIX_FMT_Y16:
-		offset = image->rect.left * 2 +
-			 image->rect.top * pix->bytesperline;
-		break;
 	default:
-		/* This should not happen */
-		WARN_ON(1);
-		offset = 0;
-		ret = -EINVAL;
+		return -EINVAL;
 	}
 
 	ipu_cpmem_set_buffer(ch, 0, image->phys0 + offset);
 	ipu_cpmem_set_buffer(ch, 1, image->phys1 + offset);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(ipu_cpmem_set_image);
 

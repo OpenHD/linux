@@ -26,7 +26,6 @@ Arguments
     File descriptor returned by :ref:`open() <func-open>`.
 
 ``argp``
-    Pointer to struct :c:type:`v4l2_sliced_vbi_cap`.
 
 
 Description
@@ -123,9 +122,9 @@ the sliced VBI API is unsupported or ``type`` is invalid.
 
 .. raw:: latex
 
-    \scriptsize
+    \begin{adjustbox}{width=\columnwidth}
 
-.. tabularcolumns:: |p{3.5cm}|p{1.0cm}|p{2.0cm}|p{2.0cm}|p{8.0cm}|
+.. tabularcolumns:: |p{5.0cm}|p{1.4cm}|p{3.0cm}|p{2.5cm}|p{9.0cm}|
 
 .. _vbi-services:
 
@@ -181,7 +180,7 @@ the sliced VBI API is unsupported or ``type`` is invalid.
 
 .. raw:: latex
 
-    \normalsize
+    \end{adjustbox}\newline\newline
 
 
 Return Value

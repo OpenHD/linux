@@ -47,11 +47,11 @@ static bool branch_insn_requires_update(struct alt_instr *alt, unsigned long pc)
 	unsigned long replptr;
 
 	if (kernel_text_address(pc))
-		return true;
+		return 1;
 
 	replptr = (unsigned long)ALT_REPL_PTR(alt);
 	if (pc >= replptr && pc <= (replptr + alt->alt_len))
-		return false;
+		return 0;
 
 	/*
 	 * Branching into *another* alternate sequence is doomed, and
@@ -62,7 +62,7 @@ static bool branch_insn_requires_update(struct alt_instr *alt, unsigned long pc)
 
 #define align_down(x, a)	((unsigned long)(x) & ~(((unsigned long)(a)) - 1))
 
-static u32 get_alt_insn(struct alt_instr *alt, __le32 *insnptr, __le32 *altinsnptr)
+static u32 get_alt_insn(struct alt_instr *alt, u32 *insnptr, u32 *altinsnptr)
 {
 	u32 insn;
 
@@ -107,6 +107,27 @@ static u32 get_alt_insn(struct alt_instr *alt, __le32 *insnptr, __le32 *altinsnp
 	return insn;
 }
 
+/*
+ * We provide our own, private D-cache cleaning function so that we don't
+ * accidentally call into the cache.S code, which is patched by us at
+ * runtime.
+ */
+static void clean_dcache_range_nopatch(u64 start, u64 end)
+{
+	u64 cur, d_size;
+
+	d_size = 4 << ((arm64_ftr_reg_ctrel0.sys_val >> 0x10) & 0xF);
+	cur = start & ~(d_size - 1);
+	do {
+		/*
+		 * We must clean+invalidate to the PoC in order to avoid
+		 * Cortex-A53 errata 826319, 827319, 824069 and 819472
+		 * (this corresponds to ARM64_WORKAROUND_CLEAN_CACHE)
+		 */
+		asm volatile("dc civac, %0" : : "r" (cur) : "memory");
+	} while (cur += d_size, cur < end);
+}
+
 static void patch_alternative(struct alt_instr *alt,
 			      __le32 *origptr, __le32 *updptr, int nr_inst)
 {
@@ -121,35 +142,11 @@ static void patch_alternative(struct alt_instr *alt,
 		updptr[i] = cpu_to_le32(insn);
 	}
 }
-
-/*
- * We provide our own, private D-cache cleaning function so that we don't
- * accidentally call into the cache.S code, which is patched by us at
- * runtime.
- */
-static void clean_dcache_range_nopatch(u64 start, u64 end)
-{
-	u64 cur, d_size, ctr_el0;
-
-	ctr_el0 = read_sanitised_ftr_reg(SYS_CTR_EL0);
-	d_size = 4 << cpuid_feature_extract_unsigned_field(ctr_el0,
-							   CTR_DMINLINE_SHIFT);
-	cur = start & ~(d_size - 1);
-	do {
-		/*
-		 * We must clean+invalidate to the PoC in order to avoid
-		 * Cortex-A53 errata 826319, 827319, 824069 and 819472
-		 * (this corresponds to ARM64_WORKAROUND_CLEAN_CACHE)
-		 */
-		asm volatile("dc civac, %0" : : "r" (cur) : "memory");
-	} while (cur += d_size, cur < end);
-}
-
 static void __apply_alternatives(void *alt_region, bool is_module)
 {
 	struct alt_instr *alt;
 	struct alt_region *region = alt_region;
-	__le32 *origptr, *updptr;
+	__le32 *origptr;
 	alternative_cb_t alt_cb;
 
 	for (alt = region->begin; alt < region->end; alt++) {
@@ -166,9 +163,7 @@ static void __apply_alternatives(void *alt_region, bool is_module)
 			BUG_ON(alt->alt_len != alt->orig_len);
 
 		pr_info_once("patching kernel code\n");
-
 		origptr = ALT_ORIG_PTR(alt);
-		updptr = is_module ? origptr : lm_alias(origptr);
 		nr_inst = alt->orig_len / AARCH64_INSN_SIZE;
 
 		if (alt->cpufeature < ARM64_CB_PATCH)
@@ -176,7 +171,7 @@ static void __apply_alternatives(void *alt_region, bool is_module)
 		else
 			alt_cb  = ALT_REPL_PTR(alt);
 
-		alt_cb(alt, origptr, updptr, nr_inst);
+		alt_cb(alt, origptr, origptr, nr_inst);
 
 		if (!is_module) {
 			clean_dcache_range_nopatch((u64)origptr,

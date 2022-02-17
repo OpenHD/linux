@@ -578,8 +578,7 @@ static inline int sgiseeq_reset(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t
-sgiseeq_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int sgiseeq_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct sgiseeq_private *sp = netdev_priv(dev);
 	struct hpc3_ethregs *hregs = sp->hregs;
@@ -715,6 +714,7 @@ static const struct net_device_ops sgiseeq_netdev_ops = {
 	.ndo_tx_timeout		= timeout,
 	.ndo_set_rx_mode	= sgiseeq_set_multicast,
 	.ndo_set_mac_address	= sgiseeq_set_mac_address,
+	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -735,12 +735,11 @@ static int sgiseeq_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, dev);
-	SET_NETDEV_DEV(dev, &pdev->dev);
 	sp = netdev_priv(dev);
 
 	/* Make private data page aligned */
-	sr = dma_alloc_attrs(&pdev->dev, sizeof(*sp->srings), &sp->srings_dma,
-			     GFP_KERNEL, DMA_ATTR_NON_CONSISTENT);
+	sr = dma_alloc_noncoherent(&pdev->dev, sizeof(*sp->srings),
+				&sp->srings_dma, GFP_KERNEL);
 	if (!sr) {
 		printk(KERN_ERR "Sgiseeq: Page alloc failed, aborting.\n");
 		err = -ENOMEM;
@@ -810,14 +809,14 @@ err_out:
 	return err;
 }
 
-static int sgiseeq_remove(struct platform_device *pdev)
+static int __exit sgiseeq_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct sgiseeq_private *sp = netdev_priv(dev);
 
 	unregister_netdev(dev);
-	dma_free_attrs(&pdev->dev, sizeof(*sp->srings), sp->srings,
-		       sp->srings_dma, DMA_ATTR_NON_CONSISTENT);
+	dma_free_noncoherent(&pdev->dev, sizeof(*sp->srings), sp->srings,
+			     sp->srings_dma);
 	free_netdev(dev);
 
 	return 0;
@@ -825,7 +824,7 @@ static int sgiseeq_remove(struct platform_device *pdev)
 
 static struct platform_driver sgiseeq_driver = {
 	.probe	= sgiseeq_probe,
-	.remove	= sgiseeq_remove,
+	.remove	= __exit_p(sgiseeq_remove),
 	.driver = {
 		.name	= "sgiseeq",
 	}

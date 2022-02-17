@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __GENERIC_IO_H
 #define __GENERIC_IO_H
 

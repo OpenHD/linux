@@ -12,6 +12,7 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/module.h>
 
 #include <asm/mipsregs.h>
 #include <asm/mach-ralink/ralink_regs.h>
@@ -64,7 +65,6 @@ void __init ralink_clk_init(void)
 	ralink_clk_add("300100.timer", cpu_rate / 2);
 	ralink_clk_add("300120.watchdog", cpu_rate / 2);
 	ralink_clk_add("300500.uart", cpu_rate / 2);
-	ralink_clk_add("300900.i2c", cpu_rate / 2);
 	ralink_clk_add("300c00.uartlite", cpu_rate / 2);
 	ralink_clk_add("400000.ethernet", cpu_rate / 2);
 	ralink_clk_add("480000.wmac", wmac_rate);

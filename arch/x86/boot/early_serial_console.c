@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Serial port routines for use during early boot reporting. This code is
  * included from both the compressed kernel and the regular kernel.

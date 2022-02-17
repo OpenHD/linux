@@ -168,13 +168,13 @@ static int lp5523_post_init_device(struct lp55xx_chip *chip)
 static void lp5523_load_engine(struct lp55xx_chip *chip)
 {
 	enum lp55xx_engine_index idx = chip->engine_idx;
-	static const u8 mask[] = {
+	u8 mask[] = {
 		[LP55XX_ENGINE_1] = LP5523_MODE_ENG1_M,
 		[LP55XX_ENGINE_2] = LP5523_MODE_ENG2_M,
 		[LP55XX_ENGINE_3] = LP5523_MODE_ENG3_M,
 	};
 
-	static const u8 val[] = {
+	u8 val[] = {
 		[LP55XX_ENGINE_1] = LP5523_LOAD_ENG1,
 		[LP55XX_ENGINE_2] = LP5523_LOAD_ENG2,
 		[LP55XX_ENGINE_3] = LP5523_LOAD_ENG3,
@@ -188,7 +188,7 @@ static void lp5523_load_engine(struct lp55xx_chip *chip)
 static void lp5523_load_engine_and_select_page(struct lp55xx_chip *chip)
 {
 	enum lp55xx_engine_index idx = chip->engine_idx;
-	static const u8 page_sel[] = {
+	u8 page_sel[] = {
 		[LP55XX_ENGINE_1] = LP5523_PAGE_ENG1,
 		[LP55XX_ENGINE_2] = LP5523_PAGE_ENG2,
 		[LP55XX_ENGINE_3] = LP5523_PAGE_ENG3,
@@ -208,7 +208,7 @@ static void lp5523_stop_all_engines(struct lp55xx_chip *chip)
 static void lp5523_stop_engine(struct lp55xx_chip *chip)
 {
 	enum lp55xx_engine_index idx = chip->engine_idx;
-	static const u8 mask[] = {
+	u8 mask[] = {
 		[LP55XX_ENGINE_1] = LP5523_MODE_ENG1_M,
 		[LP55XX_ENGINE_2] = LP5523_MODE_ENG2_M,
 		[LP55XX_ENGINE_3] = LP5523_MODE_ENG3_M,
@@ -325,7 +325,7 @@ static int lp5523_init_program_engine(struct lp55xx_chip *chip)
 
 	if (status != LP5523_ENG_STATUS_MASK) {
 		dev_err(&chip->cl->dev,
-			"could not configure LED engine, status = 0x%.2x\n",
+			"cound not configure LED engine, status = 0x%.2x\n",
 			status);
 		ret = -1;
 	}
@@ -389,7 +389,7 @@ static void lp5523_firmware_loaded(struct lp55xx_chip *chip)
 	}
 
 	/*
-	 * Program memory sequence
+	 * Program momery sequence
 	 *  1) set engine mode to "LOAD"
 	 *  2) write firmware data into program memory
 	 */
@@ -507,7 +507,7 @@ static int lp5523_load_mux(struct lp55xx_chip *chip, u16 mux, int nr)
 {
 	struct lp55xx_engine *engine = &chip->engines[nr - 1];
 	int ret;
-	static const u8 mux_page[] = {
+	u8 mux_page[] = {
 		[LP55XX_ENGINE_1] = LP5523_PAGE_MUX1,
 		[LP55XX_ENGINE_2] = LP5523_PAGE_MUX2,
 		[LP55XX_ENGINE_3] = LP5523_PAGE_MUX3,
@@ -900,8 +900,8 @@ static int lp5523_probe(struct i2c_client *client,
 	if (!chip)
 		return -ENOMEM;
 
-	led = devm_kcalloc(&client->dev,
-			pdata->num_channels, sizeof(*led), GFP_KERNEL);
+	led = devm_kzalloc(&client->dev,
+			sizeof(*led) * pdata->num_channels, GFP_KERNEL);
 	if (!led)
 		return -ENOMEM;
 

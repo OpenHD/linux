@@ -35,7 +35,7 @@ struct exynos_bus {
 	unsigned int edev_count;
 	struct mutex lock;
 
-	unsigned long curr_freq;
+	struct dev_pm_opp *curr_opp;
 
 	struct regulator *regulator;
 	struct clk *clk;
@@ -99,21 +99,23 @@ static int exynos_bus_target(struct device *dev, unsigned long *freq, u32 flags)
 {
 	struct exynos_bus *bus = dev_get_drvdata(dev);
 	struct dev_pm_opp *new_opp;
-	unsigned long old_freq, new_freq, new_volt, tol;
+	unsigned long old_freq, new_freq, old_volt, new_volt, tol;
 	int ret = 0;
 
 	/* Get new opp-bus instance according to new bus clock */
+	rcu_read_lock();
 	new_opp = devfreq_recommended_opp(dev, freq, flags);
 	if (IS_ERR(new_opp)) {
 		dev_err(dev, "failed to get recommended opp instance\n");
+		rcu_read_unlock();
 		return PTR_ERR(new_opp);
 	}
 
 	new_freq = dev_pm_opp_get_freq(new_opp);
 	new_volt = dev_pm_opp_get_voltage(new_opp);
-	dev_pm_opp_put(new_opp);
-
-	old_freq = bus->curr_freq;
+	old_freq = dev_pm_opp_get_freq(bus->curr_opp);
+	old_volt = dev_pm_opp_get_voltage(bus->curr_opp);
+	rcu_read_unlock();
 
 	if (old_freq == new_freq)
 		return 0;
@@ -144,10 +146,10 @@ static int exynos_bus_target(struct device *dev, unsigned long *freq, u32 flags)
 			goto out;
 		}
 	}
-	bus->curr_freq = new_freq;
+	bus->curr_opp = new_opp;
 
-	dev_dbg(dev, "Set the frequency of bus (%luHz -> %luHz, %luHz)\n",
-			old_freq, new_freq, clk_get_rate(bus->clk));
+	dev_dbg(dev, "Set the frequency of bus (%lukHz -> %lukHz)\n",
+			old_freq/1000, new_freq/1000);
 out:
 	mutex_unlock(&bus->lock);
 
@@ -161,7 +163,9 @@ static int exynos_bus_get_dev_status(struct device *dev,
 	struct devfreq_event_data edata;
 	int ret;
 
-	stat->current_frequency = bus->curr_freq;
+	rcu_read_lock();
+	stat->current_frequency = dev_pm_opp_get_freq(bus->curr_opp);
+	rcu_read_unlock();
 
 	ret = exynos_bus_get_event(bus, &edata);
 	if (ret < 0) {
@@ -212,16 +216,17 @@ static int exynos_bus_passive_target(struct device *dev, unsigned long *freq,
 	int ret = 0;
 
 	/* Get new opp-bus instance according to new bus clock */
+	rcu_read_lock();
 	new_opp = devfreq_recommended_opp(dev, freq, flags);
 	if (IS_ERR(new_opp)) {
 		dev_err(dev, "failed to get recommended opp instance\n");
+		rcu_read_unlock();
 		return PTR_ERR(new_opp);
 	}
 
 	new_freq = dev_pm_opp_get_freq(new_opp);
-	dev_pm_opp_put(new_opp);
-
-	old_freq = bus->curr_freq;
+	old_freq = dev_pm_opp_get_freq(bus->curr_opp);
+	rcu_read_unlock();
 
 	if (old_freq == new_freq)
 		return 0;
@@ -236,10 +241,10 @@ static int exynos_bus_passive_target(struct device *dev, unsigned long *freq,
 	}
 
 	*freq = new_freq;
-	bus->curr_freq = new_freq;
+	bus->curr_opp = new_opp;
 
-	dev_dbg(dev, "Set the frequency of bus (%luHz -> %luHz, %luHz)\n",
-			old_freq, new_freq, clk_get_rate(bus->clk));
+	dev_dbg(dev, "Set the frequency of bus (%lukHz -> %lukHz)\n",
+			old_freq/1000, new_freq/1000);
 out:
 	mutex_unlock(&bus->lock);
 
@@ -329,7 +334,6 @@ static int exynos_bus_parse_of(struct device_node *np,
 			      struct exynos_bus *bus)
 {
 	struct device *dev = bus->dev;
-	struct dev_pm_opp *opp;
 	unsigned long rate;
 	int ret;
 
@@ -347,22 +351,23 @@ static int exynos_bus_parse_of(struct device_node *np,
 	}
 
 	/* Get the freq and voltage from OPP table to scale the bus freq */
+	rcu_read_lock();
 	ret = dev_pm_opp_of_add_table(dev);
 	if (ret < 0) {
 		dev_err(dev, "failed to get OPP table\n");
+		rcu_read_unlock();
 		goto err_clk;
 	}
 
 	rate = clk_get_rate(bus->clk);
-
-	opp = devfreq_recommended_opp(dev, &rate, 0);
-	if (IS_ERR(opp)) {
+	bus->curr_opp = devfreq_recommended_opp(dev, &rate, 0);
+	if (IS_ERR(bus->curr_opp)) {
 		dev_err(dev, "failed to find dev_pm_opp\n");
-		ret = PTR_ERR(opp);
+		rcu_read_unlock();
+		ret = PTR_ERR(bus->curr_opp);
 		goto err_opp;
 	}
-	bus->curr_freq = dev_pm_opp_get_freq(opp);
-	dev_pm_opp_put(opp);
+	rcu_read_unlock();
 
 	return 0;
 
@@ -436,8 +441,7 @@ static int exynos_bus_probe(struct platform_device *pdev)
 	ondemand_data->downdifferential = 5;
 
 	/* Add devfreq device to monitor and handle the exynos bus */
-	bus->devfreq = devm_devfreq_add_device(dev, profile,
-						DEVFREQ_GOV_SIMPLE_ONDEMAND,
+	bus->devfreq = devm_devfreq_add_device(dev, profile, "simple_ondemand",
 						ondemand_data);
 	if (IS_ERR(bus->devfreq)) {
 		dev_err(dev, "failed to add devfreq device\n");
@@ -489,7 +493,7 @@ passive:
 	passive_data->parent = parent_devfreq;
 
 	/* Add devfreq device for exynos bus with passive governor */
-	bus->devfreq = devm_devfreq_add_device(dev, profile, DEVFREQ_GOV_PASSIVE,
+	bus->devfreq = devm_devfreq_add_device(dev, profile, "passive",
 						passive_data);
 	if (IS_ERR(bus->devfreq)) {
 		dev_err(dev,

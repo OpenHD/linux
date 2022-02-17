@@ -14,9 +14,6 @@
 #ifndef __DA7219_H
 #define __DA7219_H
 
-#include <linux/clk.h>
-#include <linux/clkdev.h>
-#include <linux/clk-provider.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <sound/da7219.h>
@@ -780,12 +777,6 @@
 #define DA7219_SYS_STAT_CHECK_RETRIES	6
 #define DA7219_SYS_STAT_CHECK_DELAY	50
 
-/* Power up/down Delays */
-#define DA7219_SETTLING_DELAY		40
-#define DA7219_MIN_GAIN_DELAY		30
-#define DA7219_MIC_PGA_BASE_DELAY	100
-#define DA7219_MIC_PGA_OFFSET_DELAY	40
-
 enum da7219_clk_src {
 	DA7219_CLKSRC_MCLK = 0,
 	DA7219_CLKSRC_MCLK_SQR,
@@ -815,14 +806,7 @@ struct da7219_priv {
 	bool wakeup_source;
 	struct regulator_bulk_data supplies[DA7219_NUM_SUPPLIES];
 	struct regmap *regmap;
-	struct mutex ctrl_lock;
-	struct mutex pll_lock;
-
-#ifdef CONFIG_COMMON_CLK
-	struct clk_hw dai_clks_hw;
-#endif
-	struct clk_lookup *dai_clks_lookup;
-	struct clk *dai_clks;
+	struct mutex lock;
 
 	struct clk *mclk;
 	unsigned int mclk_rate;
@@ -830,11 +814,6 @@ struct da7219_priv {
 
 	bool master;
 	bool alc_en;
-	bool micbias_on_event;
-	unsigned int mic_pga_delay;
-	u8 gain_ramp_ctrl;
 };
-
-int da7219_set_pll(struct snd_soc_component *component, int source, unsigned int fout);
 
 #endif /* __DA7219_H */

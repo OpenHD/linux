@@ -40,7 +40,7 @@
 #include <linux/thermal.h>
 #include <linux/acpi.h>
 #include <linux/workqueue.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #define PREFIX "ACPI: "
 
@@ -1209,7 +1209,7 @@ static int thermal_psv(const struct dmi_system_id *d) {
 	return 0;
 }
 
-static const struct dmi_system_id thermal_dmi_table[] __initconst = {
+static struct dmi_system_id thermal_dmi_table[] __initdata = {
 	/*
 	 * Award BIOS on this AOpen makes thermal control almost worthless.
 	 * http://bugzilla.kernel.org/show_bug.cgi?id=8842

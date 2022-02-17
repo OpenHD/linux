@@ -20,7 +20,10 @@
 
 #include <asm/alternative.h>
 #include <asm/kernel-pgtable.h>
+#include <asm/mmu.h>
 #include <asm/sysreg.h>
+
+#ifndef __ASSEMBLY__
 
 /*
  * User space memory access functions
@@ -28,12 +31,39 @@
 #include <linux/bitops.h>
 #include <linux/kasan-checks.h>
 #include <linux/string.h>
+#include <linux/thread_info.h>
 
 #include <asm/cpufeature.h>
+#include <asm/processor.h>
 #include <asm/ptrace.h>
+#include <asm/errno.h>
 #include <asm/memory.h>
 #include <asm/compiler.h>
-#include <asm/extable.h>
+
+#define VERIFY_READ 0
+#define VERIFY_WRITE 1
+
+/*
+ * The exception table consists of pairs of relative offsets: the first
+ * is the relative offset to an instruction that is allowed to fault,
+ * and the second is the relative offset at which the program should
+ * continue. No registers are modified, so it is entirely up to the
+ * continuation code to figure out what to do.
+ *
+ * All the routines below use bits of fixup code that are out of line
+ * with the main instruction path.  This means when everything is well,
+ * we don't even have to jump over them.  Further, they do not intrude
+ * on our cache or tlb entries.
+ */
+
+struct exception_table_entry
+{
+	int insn, fixup;
+};
+
+#define ARCH_HAS_RELATIVE_EXTABLE
+
+extern int fixup_exception(struct pt_regs *regs);
 
 #define get_ds()	(KERNEL_DS)
 #define get_fs()	(current_thread_info()->addr_limit)
@@ -48,9 +78,6 @@ static inline void set_fs(mm_segment_t fs)
 	 */
 	dsb(nsh);
 	isb();
-
-	/* On user-mode return, check fs is correct */
-	set_thread_flag(TIF_FSCHECK);
 
 	/*
 	 * Enable/disable UAO so that copy_to_user() etc can access
@@ -72,15 +99,15 @@ static inline void set_fs(mm_segment_t fs)
  * This is equivalent to the following test:
  * (u65)addr + (u65)size <= (u65)current->addr_limit + 1
  */
-static inline unsigned long __range_ok(const void __user *addr, unsigned long size)
+static inline unsigned long __range_ok(unsigned long addr, unsigned long size)
 {
-	unsigned long ret, limit = current_thread_info()->addr_limit;
+	unsigned long limit = current_thread_info()->addr_limit;
 
 	__chk_user_ptr(addr);
 	asm volatile(
 	// A + B <= C + 1 for all A,B,C, in four easy steps:
 	// 1: X = A + B; X' = X % 2^64
-	"	adds	%0, %3, %2\n"
+	"	adds	%0, %0, %2\n"
 	// 2: Set C = 0 if X > 2^64, to guarantee X' > C in step 4
 	"	csel	%1, xzr, %1, hi\n"
 	// 3: Set X' = ~0 if X >= 2^64. For X == 2^64, this decrements X'
@@ -92,9 +119,9 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
 	//    testing X' - C == 0, subject to the previous adjustments.
 	"	sbcs	xzr, %0, %1\n"
 	"	cset	%0, ls\n"
-	: "=&r" (ret), "+r" (limit) : "Ir" (size), "0" (addr) : "cc");
+	: "+r" (addr), "+r" (limit) : "Ir" (size) : "cc");
 
-	return ret;
+	return addr;
 }
 
 /*
@@ -104,7 +131,7 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
  */
 #define untagged_addr(addr)		sign_extend64(addr, 55)
 
-#define access_ok(type, addr, size)	__range_ok(addr, size)
+#define access_ok(type, addr, size)	__range_ok((unsigned long)(addr), size)
 #define user_addr_max			get_fs
 
 #define _ASM_EXTABLE(from, to)						\
@@ -124,8 +151,8 @@ static inline void __uaccess_ttbr0_disable(void)
 	local_irq_save(flags);
 	ttbr = read_sysreg(ttbr1_el1);
 	ttbr &= ~TTBR_ASID_MASK;
-	/* reserved_ttbr0 placed before swapper_pg_dir */
-	write_sysreg(ttbr - RESERVED_TTBR0_SIZE, ttbr0_el1);
+	/* reserved_ttbr0 placed at the end of swapper_pg_dir */
+	write_sysreg(ttbr + SWAPPER_DIR_SIZE, ttbr0_el1);
 	isb();
 	/* Set reserved ASID */
 	write_sysreg(ttbr, ttbr1_el1);
@@ -184,18 +211,6 @@ static inline bool uaccess_ttbr0_enable(void)
 	return false;
 }
 #endif
-
-static inline void __uaccess_disable_hw_pan(void)
-{
-	asm(ALTERNATIVE("nop", SET_PSTATE_PAN(0), ARM64_HAS_PAN,
-			CONFIG_ARM64_PAN));
-}
-
-static inline void __uaccess_enable_hw_pan(void)
-{
-	asm(ALTERNATIVE("nop", SET_PSTATE_PAN(1), ARM64_HAS_PAN,
-			CONFIG_ARM64_PAN));
-}
 
 #define __uaccess_disable(alt)						\
 do {									\
@@ -331,6 +346,8 @@ do {									\
 	__gu_err;							\
 })
 
+#define __get_user_unaligned __get_user
+
 #define get_user	__get_user
 
 #define __put_user_asm(instr, alt_instr, reg, x, addr, err, feature)	\
@@ -400,29 +417,63 @@ do {									\
 	__pu_err;							\
 })
 
+#define __put_user_unaligned __put_user
+
 #define put_user	__put_user
 
 extern unsigned long __must_check __arch_copy_from_user(void *to, const void __user *from, unsigned long n);
-#define raw_copy_from_user(to, from, n)					\
-({									\
-	__arch_copy_from_user((to), __uaccess_mask_ptr(from), (n));	\
-})
-
 extern unsigned long __must_check __arch_copy_to_user(void __user *to, const void *from, unsigned long n);
-#define raw_copy_to_user(to, from, n)					\
-({									\
-	__arch_copy_to_user(__uaccess_mask_ptr(to), (from), (n));	\
-})
-
 extern unsigned long __must_check __arch_copy_in_user(void __user *to, const void __user *from, unsigned long n);
-#define raw_copy_in_user(to, from, n)					\
-({									\
-	__arch_copy_in_user(__uaccess_mask_ptr(to),			\
-			    __uaccess_mask_ptr(from), (n));		\
-})
 
-#define INLINE_COPY_TO_USER
-#define INLINE_COPY_FROM_USER
+static inline unsigned long __must_check __copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	kasan_check_write(to, n);
+	check_object_size(to, n, false);
+	return __arch_copy_from_user(to, __uaccess_mask_ptr(from), n);
+}
+
+static inline unsigned long __must_check __copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+	kasan_check_read(from, n);
+	check_object_size(from, n, true);
+	return __arch_copy_to_user(__uaccess_mask_ptr(to), from, n);
+}
+
+static inline unsigned long __must_check copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	unsigned long res = n;
+	kasan_check_write(to, n);
+
+	if (access_ok(VERIFY_READ, from, n)) {
+		check_object_size(to, n, false);
+		res = __arch_copy_from_user(to, from, n);
+	}
+	if (unlikely(res))
+		memset(to + (n - res), 0, res);
+	return res;
+}
+
+static inline unsigned long __must_check copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+	kasan_check_read(from, n);
+
+	if (access_ok(VERIFY_WRITE, to, n)) {
+		check_object_size(from, n, true);
+		n = __arch_copy_to_user(to, from, n);
+	}
+	return n;
+}
+
+static inline unsigned long __must_check __copy_in_user(void __user *to, const void __user *from, unsigned long n)
+{
+	if (access_ok(VERIFY_READ, from, n) && access_ok(VERIFY_WRITE, to, n))
+		n = __arch_copy_in_user(__uaccess_mask_ptr(to), __uaccess_mask_ptr(from), n);
+	return n;
+}
+#define copy_in_user __copy_in_user
+
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 
 extern unsigned long __must_check __arch_clear_user(void __user *to, unsigned long n);
 static inline unsigned long __must_check __clear_user(void __user *to, unsigned long n)
@@ -435,18 +486,80 @@ static inline unsigned long __must_check __clear_user(void __user *to, unsigned 
 
 extern long strncpy_from_user(char *dest, const char __user *src, long count);
 
+extern __must_check long strlen_user(const char __user *str);
 extern __must_check long strnlen_user(const char __user *str, long n);
 
-#ifdef CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE
-struct page;
-void memcpy_page_flushcache(char *to, struct page *page, size_t offset, size_t len);
-extern unsigned long __must_check __copy_user_flushcache(void *to, const void __user *from, unsigned long n);
+#else	/* __ASSEMBLY__ */
 
-static inline int __copy_from_user_flushcache(void *dst, const void __user *src, unsigned size)
-{
-	kasan_check_write(dst, size);
-	return __copy_user_flushcache(dst, __uaccess_mask_ptr(src), size);
-}
+#include <asm/assembler.h>
+
+/*
+ * User access enabling/disabling macros.
+ */
+#ifdef CONFIG_ARM64_SW_TTBR0_PAN
+	.macro	__uaccess_ttbr0_disable, tmp1
+	mrs	\tmp1, ttbr1_el1		// swapper_pg_dir
+	bic     \tmp1, \tmp1, #TTBR_ASID_MASK
+	add	\tmp1, \tmp1, #SWAPPER_DIR_SIZE	// reserved_ttbr0 at the end of swapper_pg_dir
+	msr	ttbr0_el1, \tmp1		// set reserved TTBR0_EL1
+	isb
+	sub     \tmp1, \tmp1, #SWAPPER_DIR_SIZE
+	msr     ttbr1_el1, \tmp1                // set reserved ASID
+	isb
+	.endm
+
+	.macro	__uaccess_ttbr0_enable, tmp1, tmp2
+	get_thread_info \tmp1
+	ldr	\tmp1, [\tmp1, #TSK_TI_TTBR0]	// load saved TTBR0_EL1
+	mrs     \tmp2, ttbr1_el1
+	extr    \tmp2, \tmp2, \tmp1, #48
+	ror     \tmp2, \tmp2, #16
+	msr     ttbr1_el1, \tmp2                // set the active ASID
+	isb
+	msr	ttbr0_el1, \tmp1		// set the non-PAN TTBR0_EL1
+	isb
+	.endm
+
+	.macro	uaccess_ttbr0_disable, tmp1, tmp2
+alternative_if_not ARM64_HAS_PAN
+	save_and_disable_irq \tmp2		// avoid preemption
+	__uaccess_ttbr0_disable \tmp1
+	restore_irq \tmp2
+alternative_else_nop_endif
+	.endm
+
+	.macro	uaccess_ttbr0_enable, tmp1, tmp2, tmp3
+alternative_if_not ARM64_HAS_PAN
+	save_and_disable_irq \tmp3		// avoid preemption
+	__uaccess_ttbr0_enable \tmp1, \tmp2
+	restore_irq \tmp3
+alternative_else_nop_endif
+	.endm
+#else
+	.macro	uaccess_ttbr0_disable, tmp1, tmp2
+	.endm
+
+	.macro	uaccess_ttbr0_enable, tmp1, tmp2, tmp3
+	.endm
 #endif
+
+/*
+ * These macros are no-ops when UAO is present.
+ */
+	.macro	uaccess_disable_not_uao, tmp1, tmp2
+	uaccess_ttbr0_disable \tmp1, \tmp2
+alternative_if ARM64_ALT_PAN_NOT_UAO
+	SET_PSTATE_PAN(1)
+alternative_else_nop_endif
+	.endm
+
+	.macro	uaccess_enable_not_uao, tmp1, tmp2, tmp3
+	uaccess_ttbr0_enable \tmp1, \tmp2, \tmp3
+alternative_if ARM64_ALT_PAN_NOT_UAO
+	SET_PSTATE_PAN(0)
+alternative_else_nop_endif
+	.endm
+
+#endif	/* __ASSEMBLY__ */
 
 #endif /* __ASM_UACCESS_H */

@@ -68,7 +68,6 @@ extern struct omap_hwmod_ocp_if am33xx_l4_ls__uart6;
 extern struct omap_hwmod_ocp_if am33xx_l3_main__ocmc;
 extern struct omap_hwmod_ocp_if am33xx_l3_main__sha0;
 extern struct omap_hwmod_ocp_if am33xx_l3_main__aes0;
-extern struct omap_hwmod_ocp_if am33xx_l4_per__rng;
 
 extern struct omap_hwmod am33xx_l3_main_hwmod;
 extern struct omap_hwmod am33xx_l3_s_hwmod;
@@ -81,7 +80,6 @@ extern struct omap_hwmod am33xx_gfx_hwmod;
 extern struct omap_hwmod am33xx_prcm_hwmod;
 extern struct omap_hwmod am33xx_aes0_hwmod;
 extern struct omap_hwmod am33xx_sha0_hwmod;
-extern struct omap_hwmod am33xx_rng_hwmod;
 extern struct omap_hwmod am33xx_ocmcram_hwmod;
 extern struct omap_hwmod am33xx_smartreflex0_hwmod;
 extern struct omap_hwmod am33xx_smartreflex1_hwmod;
@@ -138,6 +136,9 @@ extern struct omap_hwmod_class am33xx_timer_hwmod_class;
 extern struct omap_hwmod_class am33xx_epwmss_hwmod_class;
 extern struct omap_hwmod_class am33xx_ehrpwm_hwmod_class;
 extern struct omap_hwmod_class am33xx_spi_hwmod_class;
+
+extern struct omap_gpio_dev_attr gpio_dev_attr;
+extern struct omap2_mcspi_dev_attr mcspi_attrib;
 
 void omap_hwmod_am33xx_reg(void);
 void omap_hwmod_am43xx_reg(void);

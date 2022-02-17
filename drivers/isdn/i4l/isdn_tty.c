@@ -15,7 +15,6 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/mutex.h>
-#include <linux/sched/signal.h>
 #include "isdn_common.h"
 #include "isdn_tty.h"
 #ifdef CONFIG_ISDN_AUDIO
@@ -474,7 +473,7 @@ isdn_tty_senddown(modem_info *info)
 		return;
 	}
 	skb_reserve(skb, skb_res);
-	skb_put_data(skb, info->port.xmit_buf, buflen);
+	memcpy(skb_put(skb, buflen), info->port.xmit_buf, buflen);
 	info->xmit_count = 0;
 #ifdef CONFIG_ISDN_AUDIO
 	if (info->vonline & 2) {
@@ -541,9 +540,9 @@ isdn_tty_senddown(modem_info *info)
  * into the tty's buffer.
  */
 static void
-isdn_tty_modem_do_ncarrier(struct timer_list *t)
+isdn_tty_modem_do_ncarrier(unsigned long data)
 {
-	modem_info *info = from_timer(info, t, nc_timer);
+	modem_info *info = (modem_info *) data;
 	isdn_tty_modem_result(RESULT_NO_CARRIER, info);
 }
 
@@ -787,7 +786,7 @@ isdn_tty_suspend(char *id, modem_info *info, atemu *m)
 		cmd.parm.cmsg.para[3] = 4; /* 16 bit 0x0004 Suspend */
 		cmd.parm.cmsg.para[4] = 0;
 		cmd.parm.cmsg.para[5] = l;
-		memcpy(&cmd.parm.cmsg.para[6], id, l);
+		strscpy(&cmd.parm.cmsg.para[6], id, l);
 		cmd.command = CAPI_PUT_MESSAGE;
 		cmd.driver = info->isdn_driver;
 		cmd.arg = info->isdn_channel;
@@ -877,7 +876,7 @@ isdn_tty_resume(char *id, modem_info *info, atemu *m)
 		cmd.parm.cmsg.para[3] = 5; /* 16 bit 0x0005 Resume */
 		cmd.parm.cmsg.para[4] = 0;
 		cmd.parm.cmsg.para[5] = l;
-		memcpy(&cmd.parm.cmsg.para[6], id, l);
+		strncpy(&cmd.parm.cmsg.para[6], id, l);
 		cmd.command = CAPI_PUT_MESSAGE;
 		info->dialing = 1;
 //		strcpy(dev->num[i], n);
@@ -1816,7 +1815,9 @@ isdn_tty_modem_init(void)
 		info->isdn_channel = -1;
 		info->drv_index = -1;
 		info->xmit_size = ISDN_SERIAL_XMIT_SIZE;
-		timer_setup(&info->nc_timer, isdn_tty_modem_do_ncarrier, 0);
+		init_timer(&info->nc_timer);
+		info->nc_timer.function = isdn_tty_modem_do_ncarrier;
+		info->nc_timer.data = (unsigned long) info;
 		skb_queue_head_init(&info->xmit_queue);
 #ifdef CONFIG_ISDN_AUDIO
 		skb_queue_head_init(&info->dtmf_queue);

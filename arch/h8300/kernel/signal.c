@@ -25,7 +25,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <linux/mm.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
@@ -42,7 +41,7 @@
 #include <linux/tracehook.h>
 
 #include <asm/setup.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/traps.h>
 #include <asm/ucontext.h>

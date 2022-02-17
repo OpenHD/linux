@@ -346,7 +346,7 @@ static int ocfs2_readpage(struct file *file, struct page *page)
 	unlock = 0;
 
 out_alloc:
-	up_read(&oi->ip_alloc_sem);
+	up_read(&OCFS2_I(inode)->ip_alloc_sem);
 out_inode_unlock:
 	ocfs2_inode_unlock(inode, 0);
 out:
@@ -476,15 +476,6 @@ static sector_t ocfs2_bmap(struct address_space *mapping, sector_t block)
 
 	trace_ocfs2_bmap((unsigned long long)OCFS2_I(inode)->ip_blkno,
 			 (unsigned long long)block);
-
-	/*
-	 * The swap code (ab-)uses ->bmap to get a block mapping and then
-	 * bypasseѕ the file system for actual I/O.  We really can't allow
-	 * that on refcounted inodes, so we have to skip out here.  And yes,
-	 * 0 is the magic code for a bmap error..
-	 */
-	if (ocfs2_is_refcount_inode(inode))
-		return 0;
 
 	/* We don't need to lock journal system files, since they aren't
 	 * accessed concurrently from multiple nodes.
@@ -652,7 +643,7 @@ int ocfs2_map_page_blocks(struct page *page, u64 *p_blkno,
 
 		if (!buffer_mapped(bh)) {
 			map_bh(bh, inode->i_sb, *p_blkno);
-			clean_bdev_bh_alias(bh);
+			unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr);
 		}
 
 		if (PageUptodate(page)) {
@@ -797,7 +788,6 @@ struct ocfs2_write_ctxt {
 	struct ocfs2_cached_dealloc_ctxt w_dealloc;
 
 	struct list_head		w_unwritten_list;
-	unsigned int			w_unwritten_count;
 };
 
 void ocfs2_unlock_and_free_pages(struct page **pages, int num_pages)
@@ -1387,7 +1377,6 @@ retry:
 	desc->c_clear_unwritten = 0;
 	list_add_tail(&new->ue_ip_node, &oi->ip_unwritten_list);
 	list_add_tail(&new->ue_node, &wc->w_unwritten_list);
-	wc->w_unwritten_count++;
 	new = NULL;
 unlock:
 	spin_unlock(&oi->ip_lock);
@@ -1974,7 +1963,8 @@ static void ocfs2_write_end_inline(struct inode *inode, loff_t pos,
 }
 
 int ocfs2_write_end_nolock(struct address_space *mapping,
-			   loff_t pos, unsigned len, unsigned copied, void *fsdata)
+			   loff_t pos, unsigned len, unsigned copied,
+			   struct page *page, void *fsdata)
 {
 	int i, ret;
 	unsigned from, to, start = pos & (PAGE_SIZE - 1);
@@ -2088,7 +2078,7 @@ static int ocfs2_write_end(struct file *file, struct address_space *mapping,
 	int ret;
 	struct inode *inode = mapping->host;
 
-	ret = ocfs2_write_end_nolock(mapping, pos, len, copied, fsdata);
+	ret = ocfs2_write_end_nolock(mapping, pos, len, copied, page, fsdata);
 
 	up_write(&OCFS2_I(inode)->ip_alloc_sem);
 	ocfs2_inode_unlock(inode, 1);
@@ -2231,7 +2221,7 @@ static int ocfs2_dio_wr_get_block(struct inode *inode, sector_t iblock,
 	down_write(&oi->ip_alloc_sem);
 
 	if (first_get_block) {
-		if (ocfs2_sparse_alloc(osb))
+		if (ocfs2_sparse_alloc(OCFS2_SB(inode->i_sb)))
 			ret = ocfs2_zero_tail(inode, di_bh, pos);
 		else
 			ret = ocfs2_expand_nonsparse_inode(inode, di_bh, pos,
@@ -2279,10 +2269,10 @@ static int ocfs2_dio_wr_get_block(struct inode *inode, sector_t iblock,
 		ue->ue_phys = desc->c_phys;
 
 		list_splice_tail_init(&wc->w_unwritten_list, &dwc->dw_zero_list);
-		dwc->dw_zero_count += wc->w_unwritten_count;
+		dwc->dw_zero_count++;
 	}
 
-	ret = ocfs2_write_end_nolock(inode->i_mapping, pos, len, len, wc);
+	ret = ocfs2_write_end_nolock(inode->i_mapping, pos, len, len, NULL, wc);
 	BUG_ON(ret != len);
 	ret = 0;
 unlock:
@@ -2295,10 +2285,10 @@ out:
 	return ret;
 }
 
-static int ocfs2_dio_end_io_write(struct inode *inode,
-				  struct ocfs2_dio_write_ctxt *dwc,
-				  loff_t offset,
-				  ssize_t bytes)
+static void ocfs2_dio_end_io_write(struct inode *inode,
+				   struct ocfs2_dio_write_ctxt *dwc,
+				   loff_t offset,
+				   ssize_t bytes)
 {
 	struct ocfs2_cached_dealloc_ctxt dealloc;
 	struct ocfs2_extent_tree et;
@@ -2349,15 +2339,9 @@ static int ocfs2_dio_end_io_write(struct inode *inode,
 			mlog_errno(ret);
 	}
 
-	di = (struct ocfs2_dinode *)di_bh->b_data;
+	di = (struct ocfs2_dinode *)di_bh;
 
 	ocfs2_init_dinode_extent_tree(&et, INODE_CACHE(inode), di_bh);
-
-	/* Attach dealloc with extent tree in case that we may reuse extents
-	 * which are already unlinked from current extent tree due to extent
-	 * rotation and merging.
-	 */
-	et.et_dealloc = &dealloc;
 
 	ret = ocfs2_lock_allocators(inode, &et, 0, dwc->dw_zero_count*2,
 				    &data_ac, &meta_ac);
@@ -2412,8 +2396,6 @@ out:
 	if (locked)
 		inode_unlock(inode);
 	ocfs2_dio_free_write_ctx(inode, dwc);
-
-	return ret;
 }
 
 /*
@@ -2428,27 +2410,21 @@ static int ocfs2_dio_end_io(struct kiocb *iocb,
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
 	int level;
-	int ret = 0;
+
+	if (bytes <= 0)
+		return 0;
 
 	/* this io's submitter should not have unlocked this before we could */
 	BUG_ON(!ocfs2_iocb_is_rw_locked(iocb));
 
-	if (bytes <= 0)
-		mlog_ratelimited(ML_ERROR, "Direct IO failed, bytes = %lld",
-				 (long long)bytes);
-	if (private) {
-		if (bytes > 0)
-			ret = ocfs2_dio_end_io_write(inode, private, offset,
-						     bytes);
-		else
-			ocfs2_dio_free_write_ctx(inode, private);
-	}
+	if (private)
+		ocfs2_dio_end_io_write(inode, private, offset, bytes);
 
 	ocfs2_iocb_clear_rw_locked(iocb);
 
 	level = ocfs2_iocb_rw_locked_level(iocb);
 	ocfs2_rw_unlock(inode, level);
-	return ret;
+	return 0;
 }
 
 static ssize_t ocfs2_direct_IO(struct kiocb *iocb, struct iov_iter *iter)

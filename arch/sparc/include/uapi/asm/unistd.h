@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * System calls under the Sparc.
  *
@@ -426,10 +425,8 @@
 #define __NR_copy_file_range	357
 #define __NR_preadv2		358
 #define __NR_pwritev2		359
-#define __NR_statx		360
-#define __NR_io_pgetevents	361
 
-#define NR_syscalls		362
+#define NR_syscalls		360
 
 /* Bitmask values returned from kern_features system call.  */
 #define KERN_FEATURE_MIXED_MODE_STACK	0x00000001
@@ -444,10 +441,5 @@
 #define __IGNORE_setresgid
 #define __IGNORE_getresgid
 #endif
-
-/* Sparc doesn't have protection keys. */
-#define __IGNORE_pkey_mprotect
-#define __IGNORE_pkey_alloc
-#define __IGNORE_pkey_free
 
 #endif /* _UAPI_SPARC_UNISTD_H */

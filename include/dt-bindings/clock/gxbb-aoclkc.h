@@ -62,6 +62,5 @@
 #define CLKID_AO_UART1		3
 #define CLKID_AO_UART2		4
 #define CLKID_AO_IR_BLASTER	5
-#define CLKID_AO_CEC_32K	6
 
 #endif

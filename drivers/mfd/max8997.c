@@ -148,8 +148,10 @@ static struct max8997_platform_data *max8997_i2c_parse_dt_pdata(
 	struct max8997_platform_data *pd;
 
 	pd = devm_kzalloc(dev, sizeof(*pd), GFP_KERNEL);
-	if (!pd)
+	if (!pd) {
+		dev_err(dev, "could not allocate memory for pdata\n");
 		return ERR_PTR(-ENOMEM);
+	}
 
 	pd->ono = irq_of_parse_and_map(dev->of_node, 1);
 

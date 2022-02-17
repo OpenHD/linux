@@ -14,6 +14,10 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "cx231xx.h"
@@ -112,7 +116,7 @@ static void cx231xx_audio_isocirq(struct urb *urb)
 	case -ESHUTDOWN:
 		return;
 	default:		/* error */
-		dev_dbg(dev->dev, "urb completion error %d.\n",
+		dev_dbg(dev->dev, "urb completition error %d.\n",
 			urb->status);
 		break;
 	}
@@ -126,7 +130,6 @@ static void cx231xx_audio_isocirq(struct urb *urb)
 		stride = runtime->frame_bits >> 3;
 
 		for (i = 0; i < urb->number_of_packets; i++) {
-			unsigned long flags;
 			int length = urb->iso_frame_desc[i].actual_length /
 				     stride;
 			cp = (unsigned char *)urb->transfer_buffer +
@@ -149,7 +152,7 @@ static void cx231xx_audio_isocirq(struct urb *urb)
 				       length * stride);
 			}
 
-			snd_pcm_stream_lock_irqsave(substream, flags);
+			snd_pcm_stream_lock(substream);
 
 			dev->adev.hwptr_done_capture += length;
 			if (dev->adev.hwptr_done_capture >=
@@ -164,7 +167,7 @@ static void cx231xx_audio_isocirq(struct urb *urb)
 						runtime->period_size;
 				period_elapsed = 1;
 			}
-			snd_pcm_stream_unlock_irqrestore(substream, flags);
+			snd_pcm_stream_unlock(substream);
 		}
 		if (period_elapsed)
 			snd_pcm_period_elapsed(substream);
@@ -203,7 +206,7 @@ static void cx231xx_audio_bulkirq(struct urb *urb)
 	case -ESHUTDOWN:
 		return;
 	default:		/* error */
-		dev_dbg(dev->dev, "urb completion error %d.\n",
+		dev_dbg(dev->dev, "urb completition error %d.\n",
 			urb->status);
 		break;
 	}
@@ -217,7 +220,6 @@ static void cx231xx_audio_bulkirq(struct urb *urb)
 		stride = runtime->frame_bits >> 3;
 
 		if (1) {
-			unsigned long flags;
 			int length = urb->actual_length /
 				     stride;
 			cp = (unsigned char *)urb->transfer_buffer;
@@ -236,7 +238,7 @@ static void cx231xx_audio_bulkirq(struct urb *urb)
 				       length * stride);
 			}
 
-			snd_pcm_stream_lock_irqsave(substream, flags);
+			snd_pcm_stream_lock(substream);
 
 			dev->adev.hwptr_done_capture += length;
 			if (dev->adev.hwptr_done_capture >=
@@ -251,7 +253,7 @@ static void cx231xx_audio_bulkirq(struct urb *urb)
 						runtime->period_size;
 				period_elapsed = 1;
 			}
-			snd_pcm_stream_unlock_irqrestore(substream, flags);
+			snd_pcm_stream_unlock(substream);
 		}
 		if (period_elapsed)
 			snd_pcm_period_elapsed(substream);
@@ -405,10 +407,10 @@ static int snd_pcm_alloc_vmalloc_buffer(struct snd_pcm_substream *subs,
 	return 0;
 }
 
-static const struct snd_pcm_hardware snd_cx231xx_hw_capture = {
-	.info = SNDRV_PCM_INFO_BLOCK_TRANSFER	|
-	    SNDRV_PCM_INFO_MMAP			|
-	    SNDRV_PCM_INFO_INTERLEAVED		|
+static struct snd_pcm_hardware snd_cx231xx_hw_capture = {
+	.info = SNDRV_PCM_INFO_BLOCK_TRANSFER 	|
+	    SNDRV_PCM_INFO_MMAP 		|
+	    SNDRV_PCM_INFO_INTERLEAVED 		|
 	    SNDRV_PCM_INFO_MMAP_VALID,
 
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
@@ -712,7 +714,7 @@ static int cx231xx_audio_init(struct cx231xx *dev)
 	dev_info(dev->dev,
 		"audio EndPoint Addr 0x%x, Alternate settings: %i\n",
 		adev->end_point_addr, adev->num_alt);
-	adev->alt_max_pkt_size = kmalloc_array(32, adev->num_alt, GFP_KERNEL);
+	adev->alt_max_pkt_size = kmalloc(32 * adev->num_alt, GFP_KERNEL);
 	if (!adev->alt_max_pkt_size) {
 		err = -ENOMEM;
 		goto err_free_card;

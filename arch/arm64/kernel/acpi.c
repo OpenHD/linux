@@ -18,8 +18,6 @@
 #include <linux/acpi.h>
 #include <linux/bootmem.h>
 #include <linux/cpumask.h>
-#include <linux/efi.h>
-#include <linux/efi-bgrt.h>
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
@@ -30,8 +28,12 @@
 
 #include <asm/cputype.h>
 #include <asm/cpu_ops.h>
-#include <asm/pgtable.h>
 #include <asm/smp_plat.h>
+
+#ifdef CONFIG_ACPI_APEI
+# include <linux/efi.h>
+# include <asm/pgtable.h>
+#endif
 
 int acpi_noirq = 1;		/* skip ACPI IRQ initialization */
 int acpi_disabled = 1;
@@ -92,7 +94,7 @@ static int __init dt_scan_depth1_nodes(unsigned long node,
  * __acpi_map_table() will be called before page_init(), so early_ioremap()
  * or early_memremap() should be called here to for ACPI table mapping.
  */
-void __init __iomem *__acpi_map_table(unsigned long phys, unsigned long size)
+char *__init __acpi_map_table(unsigned long phys, unsigned long size)
 {
 	if (!size)
 		return NULL;
@@ -100,7 +102,7 @@ void __init __iomem *__acpi_map_table(unsigned long phys, unsigned long size)
 	return early_memremap(phys, size);
 }
 
-void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
+void __init __acpi_unmap_table(char *map, unsigned long size)
 {
 	if (!map || !size)
 		return;
@@ -114,7 +116,7 @@ bool __init acpi_psci_present(void)
 }
 
 /* Whether HVC must be used instead of SMC as the PSCI conduit */
-bool acpi_psci_use_hvc(void)
+bool __init acpi_psci_use_hvc(void)
 {
 	return acpi_gbl_FADT.arm_boot_flags & ACPI_FADT_PSCI_USE_HVC;
 }
@@ -130,13 +132,14 @@ static int __init acpi_fadt_sanity_check(void)
 	struct acpi_table_header *table;
 	struct acpi_table_fadt *fadt;
 	acpi_status status;
+	acpi_size tbl_size;
 	int ret = 0;
 
 	/*
 	 * FADT is required on arm64; retrieve it to check its presence
 	 * and carry out revision and ACPI HW reduced compliancy tests
 	 */
-	status = acpi_get_table(ACPI_SIG_FADT, 0, &table);
+	status = acpi_get_table_with_size(ACPI_SIG_FADT, 0, &table, &tbl_size);
 	if (ACPI_FAILURE(status)) {
 		const char *msg = acpi_format_exception(status);
 
@@ -171,10 +174,10 @@ static int __init acpi_fadt_sanity_check(void)
 
 out:
 	/*
-	 * acpi_get_table() creates FADT table mapping that
+	 * acpi_get_table_with_size() creates FADT table mapping that
 	 * should be released after parsing and before resuming boot
 	 */
-	acpi_put_table(table);
+	early_acpi_os_unmap_memory(table, tbl_size);
 	return ret;
 }
 
@@ -231,16 +234,15 @@ void __init acpi_boot_table_init(void)
 
 done:
 	if (acpi_disabled) {
-		if (earlycon_acpi_spcr_enable)
+		if (earlycon_init_is_deferred)
 			early_init_dt_scan_chosen_stdout();
 	} else {
-		acpi_parse_spcr(earlycon_acpi_spcr_enable, true);
-		if (IS_ENABLED(CONFIG_ACPI_BGRT))
-			acpi_table_parse(ACPI_SIG_BGRT, acpi_parse_bgrt);
+		parse_spcr(earlycon_init_is_deferred);
 	}
 }
 
-pgprot_t __acpi_get_mem_attribute(phys_addr_t addr)
+#ifdef CONFIG_ACPI_APEI
+pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)
 {
 	/*
 	 * According to "Table 8 Map: EFI memory types to AArch64 memory
@@ -261,3 +263,4 @@ pgprot_t __acpi_get_mem_attribute(phys_addr_t addr)
 		return __pgprot(PROT_NORMAL_NC);
 	return __pgprot(PROT_DEVICE_nGnRnE);
 }
+#endif

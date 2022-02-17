@@ -9,7 +9,6 @@
  * as published by the Free Software Foundation.
  */
 
-#include <errno.h>
 #include "../../util/kvm-stat.h"
 #include <asm/sie.h>
 
@@ -102,7 +101,7 @@ const char * const kvm_skip_events[] = {
 
 int cpu_isa_init(struct perf_kvm_stat *kvm, const char *cpuid)
 {
-	if (strstr(cpuid, "IBM")) {
+	if (strstr(cpuid, "IBM/S390")) {
 		kvm->exit_reasons = sie_exit_reasons;
 		kvm->exit_reasons_isa = "SIE";
 	} else

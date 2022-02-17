@@ -137,13 +137,7 @@ static struct team_port *lb_htpm_select_tx_port(struct team *team,
 						struct sk_buff *skb,
 						unsigned char hash)
 {
-	struct team_port *port;
-
-	port = rcu_dereference_bh(LB_HTPM_PORT_BY_HASH(lb_priv, hash));
-	if (likely(port))
-		return port;
-	/* If no valid port in the table, fall back to simple hash */
-	return lb_hash_select_tx_port(team, lb_priv, skb, hash);
+	return rcu_dereference_bh(LB_HTPM_PORT_BY_HASH(lb_priv, hash));
 }
 
 struct lb_select_tx_port {
@@ -716,4 +710,4 @@ module_exit(lb_cleanup_module);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jiri Pirko <jpirko@redhat.com>");
 MODULE_DESCRIPTION("Load-balancing mode for team");
-MODULE_ALIAS_TEAM_MODE("loadbalance");
+MODULE_ALIAS("team-mode-loadbalance");

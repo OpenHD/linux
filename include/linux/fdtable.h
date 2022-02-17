@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * descriptor table internals; you almost certainly want file.h instead.
  */

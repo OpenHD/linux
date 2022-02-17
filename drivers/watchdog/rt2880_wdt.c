@@ -2,7 +2,7 @@
  * Ralink RT288x/RT3xxx/MT76xx built-in hardware watchdog timer
  *
  * Copyright (C) 2011 Gabor Juhos <juhosg@openwrt.org>
- * Copyright (C) 2013 John Crispin <john@phrozen.org>
+ * Copyright (C) 2013 John Crispin <blogic@openwrt.org>
  *
  * This driver was based on: drivers/watchdog/softdog.c
  *
@@ -18,7 +18,6 @@
 #include <linux/watchdog.h>
 #include <linux/moduleparam.h>
 #include <linux/platform_device.h>
-#include <linux/mod_devicetable.h>
 
 #include <asm/mach-ralink/ralink_regs.h>
 
@@ -120,12 +119,12 @@ static int rt288x_wdt_bootcause(void)
 	return 0;
 }
 
-static const struct watchdog_info rt288x_wdt_info = {
+static struct watchdog_info rt288x_wdt_info = {
 	.identity = "Ralink Watchdog",
 	.options = WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING | WDIOF_MAGICCLOSE,
 };
 
-static const struct watchdog_ops rt288x_wdt_ops = {
+static struct watchdog_ops rt288x_wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = rt288x_wdt_start,
 	.stop = rt288x_wdt_stop,
@@ -153,7 +152,7 @@ static int rt288x_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(rt288x_wdt_clk))
 		return PTR_ERR(rt288x_wdt_clk);
 
-	rt288x_wdt_reset = devm_reset_control_get_exclusive(&pdev->dev, NULL);
+	rt288x_wdt_reset = devm_reset_control_get(&pdev->dev, NULL);
 	if (!IS_ERR(rt288x_wdt_reset))
 		reset_control_deassert(rt288x_wdt_reset);
 

@@ -323,11 +323,8 @@ struct omap_mcbsp {
 
 	unsigned int fmt;
 	unsigned int in_freq;
-	unsigned int latency[2];
 	int clk_div;
 	int wlen;
-
-	struct pm_qos_request pm_qos_req;
 };
 
 void omap_mcbsp_config(struct omap_mcbsp *mcbsp,

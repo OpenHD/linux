@@ -441,7 +441,7 @@ static int raydium_i2c_write_object(struct i2c_client *client,
 	return 0;
 }
 
-static bool raydium_i2c_boot_trigger(struct i2c_client *client)
+static int raydium_i2c_boot_trigger(struct i2c_client *client)
 {
 	static const u8 cmd[7][6] = {
 		{ 0x08, 0x0C, 0x09, 0x00, 0x50, 0xD7 },
@@ -466,10 +466,10 @@ static bool raydium_i2c_boot_trigger(struct i2c_client *client)
 		}
 	}
 
-	return false;
+	return 0;
 }
 
-static bool raydium_i2c_fw_trigger(struct i2c_client *client)
+static int raydium_i2c_fw_trigger(struct i2c_client *client)
 {
 	static const u8 cmd[5][11] = {
 		{ 0, 0x09, 0x71, 0x0C, 0x09, 0x00, 0x50, 0xD7, 0, 0, 0 },
@@ -492,7 +492,7 @@ static bool raydium_i2c_fw_trigger(struct i2c_client *client)
 		}
 	}
 
-	return false;
+	return 0;
 }
 
 static int raydium_i2c_check_path(struct i2c_client *client)
@@ -669,7 +669,7 @@ static int raydium_i2c_do_update_firmware(struct raydium_data *ts,
 
 		if (ts->boot_mode == RAYDIUM_TS_MAIN) {
 			dev_err(&client->dev,
-				"failed to jump to boot loader: %d\n",
+				"failied to jump to boot loader: %d\n",
 				error);
 			return -EIO;
 		}
@@ -752,20 +752,13 @@ static int raydium_i2c_fw_update(struct raydium_data *ts)
 {
 	struct i2c_client *client = ts->client;
 	const struct firmware *fw = NULL;
-	char *fw_file;
+	const char *fw_file = "raydium.fw";
 	int error;
-
-	fw_file = kasprintf(GFP_KERNEL, "raydium_%#04x.fw",
-			    le32_to_cpu(ts->info.hw_ver));
-	if (!fw_file)
-		return -ENOMEM;
-
-	dev_dbg(&client->dev, "firmware name: %s\n", fw_file);
 
 	error = request_firmware(&fw, fw_file, &client->dev);
 	if (error) {
 		dev_err(&client->dev, "Unable to open firmware %s\n", fw_file);
-		goto out_free_fw_file;
+		return error;
 	}
 
 	disable_irq(client->irq);
@@ -793,9 +786,6 @@ out_enable_irq:
 	msleep(100);
 
 	release_firmware(fw);
-
-out_free_fw_file:
-	kfree(fw_file);
 
 	return error;
 }
@@ -949,9 +939,16 @@ static struct attribute *raydium_i2c_attributes[] = {
 	NULL
 };
 
-static const struct attribute_group raydium_i2c_attribute_group = {
+static struct attribute_group raydium_i2c_attribute_group = {
 	.attrs = raydium_i2c_attributes,
 };
+
+static void raydium_i2c_remove_sysfs_group(void *_data)
+{
+	struct raydium_data *ts = _data;
+
+	sysfs_remove_group(&ts->client->dev.kobj, &raydium_i2c_attribute_group);
+}
 
 static int raydium_i2c_power_on(struct raydium_data *ts)
 {
@@ -1090,6 +1087,8 @@ static int raydium_i2c_probe(struct i2c_client *client,
 	ts->input->name = "Raydium Touchscreen";
 	ts->input->id.bustype = BUS_I2C;
 
+	input_set_drvdata(ts->input, ts);
+
 	input_set_abs_params(ts->input, ABS_MT_POSITION_X,
 			     0, le16_to_cpu(ts->info.x_max), 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_POSITION_Y,
@@ -1123,11 +1122,20 @@ static int raydium_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = devm_device_add_group(&client->dev,
+	error = sysfs_create_group(&client->dev.kobj,
 				   &raydium_i2c_attribute_group);
 	if (error) {
 		dev_err(&client->dev, "failed to create sysfs attributes: %d\n",
 			error);
+		return error;
+	}
+
+	error = devm_add_action(&client->dev,
+				raydium_i2c_remove_sysfs_group, ts);
+	if (error) {
+		raydium_i2c_remove_sysfs_group(ts);
+		dev_err(&client->dev,
+			"Failed to add sysfs cleanup action: %d\n", error);
 		return error;
 	}
 

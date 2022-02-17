@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * R/W semaphores for ia64
  *
@@ -38,29 +37,13 @@
 /*
  * lock for reading
  */
-static inline int
-___down_read (struct rw_semaphore *sem)
-{
-	long result = ia64_fetchadd8_acq((unsigned long *)&sem->count.counter, 1);
-
-	return (result < 0);
-}
-
 static inline void
 __down_read (struct rw_semaphore *sem)
 {
-	if (___down_read(sem))
+	long result = ia64_fetchadd8_acq((unsigned long *)&sem->count.counter, 1);
+
+	if (result < 0)
 		rwsem_down_read_failed(sem);
-}
-
-static inline int
-__down_read_killable (struct rw_semaphore *sem)
-{
-	if (___down_read(sem))
-		if (IS_ERR(rwsem_down_read_failed_killable(sem)))
-			return -EINTR;
-
-	return 0;
 }
 
 /*
@@ -89,10 +72,9 @@ __down_write (struct rw_semaphore *sem)
 static inline int
 __down_write_killable (struct rw_semaphore *sem)
 {
-	if (___down_write(sem)) {
+	if (___down_write(sem))
 		if (IS_ERR(rwsem_down_write_failed_killable(sem)))
 			return -EINTR;
-	}
 
 	return 0;
 }

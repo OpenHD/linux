@@ -1201,8 +1201,7 @@ static int msb_read_boot_blocks(struct msb_data *msb)
 	dbg_verbose("Start of a scan for the boot blocks");
 
 	if (!msb->boot_page) {
-		page = kmalloc_array(2, sizeof(struct ms_boot_page),
-				     GFP_KERNEL);
+		page = kmalloc(sizeof(struct ms_boot_page)*2, GFP_KERNEL);
 		if (!page)
 			return -ENOMEM;
 
@@ -1342,8 +1341,7 @@ static int msb_ftl_initialize(struct msb_data *msb)
 	msb->used_blocks_bitmap = kzalloc(msb->block_count / 8, GFP_KERNEL);
 	msb->erased_blocks_bitmap = kzalloc(msb->block_count / 8, GFP_KERNEL);
 	msb->lba_to_pba_table =
-		kmalloc_array(msb->logical_block_count, sizeof(u16),
-			      GFP_KERNEL);
+		kmalloc(msb->logical_block_count * sizeof(u16), GFP_KERNEL);
 
 	if (!msb->used_blocks_bitmap || !msb->lba_to_pba_table ||
 						!msb->erased_blocks_bitmap) {
@@ -1494,9 +1492,9 @@ static int msb_ftl_scan(struct msb_data *msb)
 	return 0;
 }
 
-static void msb_cache_flush_timer(struct timer_list *t)
+static void msb_cache_flush_timer(unsigned long data)
 {
-	struct msb_data *msb = from_timer(msb, t, cache_flush_timer);
+	struct msb_data *msb = (struct msb_data *)data;
 	msb->need_flush_cache = true;
 	queue_work(msb->io_queue, &msb->io_work);
 }
@@ -1516,7 +1514,8 @@ static void msb_cache_discard(struct msb_data *msb)
 
 static int msb_cache_init(struct msb_data *msb)
 {
-	timer_setup(&msb->cache_flush_timer, msb_cache_flush_timer, 0);
+	setup_timer(&msb->cache_flush_timer, msb_cache_flush_timer,
+		(unsigned long)msb);
 
 	if (!msb->cache)
 		msb->cache = kzalloc(msb->block_size, GFP_KERNEL);
@@ -1922,13 +1921,12 @@ static void msb_io_work(struct work_struct *work)
 		spin_lock_irqsave(&msb->q_lock, flags);
 
 		if (len)
-			if (!__blk_end_request(msb->req, BLK_STS_OK, len))
+			if (!__blk_end_request(msb->req, 0, len))
 				msb->req = NULL;
 
 		if (error && msb->req) {
-			blk_status_t ret = errno_to_blk_status(error);
 			dbg_verbose("IO: ending one sector of the request with error");
-			if (!__blk_end_request(msb->req, ret, msb->page_size))
+			if (!__blk_end_request(msb->req, error, msb->page_size))
 				msb->req = NULL;
 		}
 
@@ -2002,6 +2000,16 @@ static int msb_bd_getgeo(struct block_device *bdev,
 	return 0;
 }
 
+static int msb_prepare_req(struct request_queue *q, struct request *req)
+{
+	if (req->cmd_type != REQ_TYPE_FS) {
+		blk_dump_rq_flags(req, "MS unsupported request");
+		return BLKPREP_KILL;
+	}
+	req->cmd_flags |= REQ_DONTPREP;
+	return BLKPREP_OK;
+}
+
 static void msb_submit_req(struct request_queue *q)
 {
 	struct memstick_dev *card = q->queuedata;
@@ -2016,7 +2024,7 @@ static void msb_submit_req(struct request_queue *q)
 		WARN_ON(!msb->io_queue_stopped);
 
 		while ((req = blk_fetch_request(q)) != NULL)
-			__blk_end_request_all(req, BLK_STS_IOERR);
+			__blk_end_request_all(req, -ENODEV);
 		return;
 	}
 
@@ -2096,8 +2104,13 @@ static const struct block_device_operations msb_bdops = {
 static int msb_init_disk(struct memstick_dev *card)
 {
 	struct msb_data *msb = memstick_get_drvdata(card);
+	struct memstick_host *host = card->host;
 	int rc;
+	u64 limit = BLK_BOUNCE_HIGH;
 	unsigned long capacity;
+
+	if (host->dev.dma_mask && *(host->dev.dma_mask))
+		limit = *(host->dev.dma_mask);
 
 	mutex_lock(&msb_disk_lock);
 	msb->disk_id = idr_alloc(&msb_disk_idr, card, 0, 256, GFP_KERNEL);
@@ -2119,7 +2132,9 @@ static int msb_init_disk(struct memstick_dev *card)
 	}
 
 	msb->queue->queuedata = card;
+	blk_queue_prep_rq(msb->queue, msb_prepare_req);
 
+	blk_queue_bounce_limit(msb->queue, limit);
 	blk_queue_max_hw_sectors(msb->queue, MS_BLOCK_MAX_PAGES);
 	blk_queue_max_segments(msb->queue, MS_BLOCK_MAX_SEGS);
 	blk_queue_max_segment_size(msb->queue,

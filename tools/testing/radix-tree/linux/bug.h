@@ -1,1 +1,1 @@
-#include "asm/bug.h"
+#define WARN_ON_ONCE(x)		assert(x)

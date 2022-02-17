@@ -21,9 +21,11 @@ config USB_EHCI_BIG_ENDIAN_DESC
 
 config USB_UHCI_BIG_ENDIAN_MMIO
 	bool
+	default y if SPARC_LEON
 
 config USB_UHCI_BIG_ENDIAN_DESC
 	bool
+	default y if SPARC_LEON
 
 menuconfig USB_SUPPORT
 	bool "USB support"
@@ -41,6 +43,7 @@ config USB_COMMON
 config USB_ARCH_HAS_HCD
 	def_bool y
 
+# ARM SA1111 chips have a non-PCI based "OHCI-compatible" USB host interface.
 config USB
 	tristate "Support for Host-side USB"
 	depends on USB_ARCH_HAS_HCD
@@ -78,18 +81,6 @@ config USB
 	  To compile this driver as a module, choose M here: the
 	  module will be called usbcore.
 
-config USB_PCI
-	bool "PCI based USB host interface"
-	depends on PCI
-	default y
-	---help---
-	  Many embedded system SOCs (e.g. freescale T2080) have both
-	  PCI and USB modules with the USB module directly controlled by
-	  registers and having no relationship to the PCI module.
-
-	  If you have such a device you may say N here and PCI related code
-	  will not be built in the USB driver.
-
 if USB
 
 source "drivers/usb/core/Kconfig"
@@ -111,8 +102,6 @@ source "drivers/usb/image/Kconfig"
 source "drivers/usb/usbip/Kconfig"
 
 endif
-
-source "drivers/usb/mtu3/Kconfig"
 
 source "drivers/usb/musb/Kconfig"
 
@@ -170,8 +159,6 @@ source "drivers/usb/phy/Kconfig"
 source "drivers/usb/gadget/Kconfig"
 
 source "drivers/usb/typec/Kconfig"
-
-source "drivers/usb/roles/Kconfig"
 
 config USB_LED_TRIG
 	bool "USB LED Triggers"

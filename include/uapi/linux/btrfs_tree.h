@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _BTRFS_CTREE_H_
 #define _BTRFS_CTREE_H_
 
@@ -457,7 +456,6 @@ struct btrfs_free_space_header {
 #define BTRFS_SUPER_FLAG_SEEDING	(1ULL << 32)
 #define BTRFS_SUPER_FLAG_METADUMP	(1ULL << 33)
 #define BTRFS_SUPER_FLAG_METADUMP_V2	(1ULL << 34)
-#define BTRFS_SUPER_FLAG_CHANGING_FSID	(1ULL << 35)
 
 
 /*

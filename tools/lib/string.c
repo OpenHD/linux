@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/tools/lib/string.c
  *
@@ -40,45 +39,27 @@ void *memdup(const void *src, size_t len)
  * @s: input string
  * @res: result
  *
- * This routine returns 0 iff the first character is one of 'Yy1Nn0', or
- * [oO][NnFf] for "on" and "off". Otherwise it will return -EINVAL.  Value
- * pointed to by res is updated upon finding a match.
+ * This routine returns 0 iff the first character is one of 'Yy1Nn0'.
+ * Otherwise it will return -EINVAL.  Value pointed to by res is
+ * updated upon finding a match.
  */
 int strtobool(const char *s, bool *res)
 {
-	if (!s)
-		return -EINVAL;
-
 	switch (s[0]) {
 	case 'y':
 	case 'Y':
 	case '1':
 		*res = true;
-		return 0;
+		break;
 	case 'n':
 	case 'N':
 	case '0':
 		*res = false;
-		return 0;
-	case 'o':
-	case 'O':
-		switch (s[1]) {
-		case 'n':
-		case 'N':
-			*res = true;
-			return 0;
-		case 'f':
-		case 'F':
-			*res = false;
-			return 0;
-		default:
-			break;
-		}
-	default:
 		break;
+	default:
+		return -EINVAL;
 	}
-
-	return -EINVAL;
+	return 0;
 }
 
 /**

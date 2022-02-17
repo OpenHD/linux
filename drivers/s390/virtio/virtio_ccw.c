@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * ccw based virtio transport
  *
  * Copyright IBM Corp. 2012, 2014
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License (version 2 only)
+ * as published by the Free Software Foundation.
  *
  *    Author(s): Cornelia Huck <cornelia.huck@de.ibm.com>
  */
@@ -21,7 +24,7 @@
 #include <linux/wait.h>
 #include <linux/list.h>
 #include <linux/bitops.h>
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <linux/io.h>
 #include <linux/kvm_para.h>
 #include <linux/notifier.h>
@@ -85,7 +88,7 @@ struct vq_info_block {
 } __packed;
 
 struct virtio_feature_desc {
-	__le32 features;
+	__u32 features;
 	__u8 index;
 } __packed;
 
@@ -132,7 +135,6 @@ struct airq_info {
 	struct airq_iv *aiv;
 };
 static struct airq_info *airq_areas[MAX_AIRQ_AREAS];
-static DEFINE_MUTEX(airq_areas_lock);
 
 #define CCW_CMD_SET_VQ 0x13
 #define CCW_CMD_VDEV_RESET 0x33
@@ -144,7 +146,6 @@ static DEFINE_MUTEX(airq_areas_lock);
 #define CCW_CMD_WRITE_CONF 0x21
 #define CCW_CMD_WRITE_STATUS 0x31
 #define CCW_CMD_READ_VQ_CONF 0x32
-#define CCW_CMD_READ_STATUS 0x72
 #define CCW_CMD_SET_IND_ADAPTER 0x73
 #define CCW_CMD_SET_VIRTIO_REV 0x83
 
@@ -160,7 +161,6 @@ static DEFINE_MUTEX(airq_areas_lock);
 #define VIRTIO_CCW_DOING_SET_CONF_IND 0x04000000
 #define VIRTIO_CCW_DOING_SET_IND_ADAPTER 0x08000000
 #define VIRTIO_CCW_DOING_SET_VIRTIO_REV 0x10000000
-#define VIRTIO_CCW_DOING_READ_STATUS 0x20000000
 #define VIRTIO_CCW_INTPARM_MASK 0xffff0000
 
 static struct virtio_ccw_device *to_vc_device(struct virtio_device *vdev)
@@ -236,6 +236,16 @@ static struct airq_info *new_airq_info(void)
 	return info;
 }
 
+static void destroy_airq_info(struct airq_info *info)
+{
+	if (!info)
+		return;
+
+	unregister_adapter_interrupt(&info->airq);
+	airq_iv_release(info->aiv);
+	kfree(info);
+}
+
 static unsigned long get_airq_indicator(struct virtqueue *vqs[], int nvqs,
 					u64 *first, void **airq_info)
 {
@@ -245,11 +255,9 @@ static unsigned long get_airq_indicator(struct virtqueue *vqs[], int nvqs,
 	unsigned long bit, flags;
 
 	for (i = 0; i < MAX_AIRQ_AREAS && !indicator_addr; i++) {
-		mutex_lock(&airq_areas_lock);
 		if (!airq_areas[i])
 			airq_areas[i] = new_airq_info();
 		info = airq_areas[i];
-		mutex_unlock(&airq_areas_lock);
 		if (!info)
 			return 0;
 		write_lock_irqsave(&info->lock, flags);
@@ -460,7 +468,7 @@ static void virtio_ccw_del_vq(struct virtqueue *vq, struct ccw1 *ccw)
 	 * This may happen on device detach.
 	 */
 	if (ret && (ret != -ENODEV))
-		dev_warn(&vq->vdev->dev, "Error %d while deleting queue %d\n",
+		dev_warn(&vq->vdev->dev, "Error %d while deleting queue %d",
 			 ret, index);
 
 	vring_del_virtqueue(vq);
@@ -490,7 +498,7 @@ static void virtio_ccw_del_vqs(struct virtio_device *vdev)
 
 static struct virtqueue *virtio_ccw_setup_vq(struct virtio_device *vdev,
 					     int i, vq_callback_t *callback,
-					     const char *name, bool ctx,
+					     const char *name,
 					     struct ccw1 *ccw)
 {
 	struct virtio_ccw_device *vcdev = to_vc_device(vdev);
@@ -528,7 +536,7 @@ static struct virtqueue *virtio_ccw_setup_vq(struct virtio_device *vdev,
 	}
 
 	vq = vring_new_virtqueue(i, info->num, KVM_VIRTIO_CCW_RING_ALIGN, vdev,
-				 true, ctx, info->queue, virtio_ccw_kvm_notify,
+				 true, info->queue, virtio_ccw_kvm_notify,
 				 callback, name);
 	if (!vq) {
 		/* For now, we fail if we can't get the requested size. */
@@ -634,9 +642,7 @@ out:
 static int virtio_ccw_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 			       struct virtqueue *vqs[],
 			       vq_callback_t *callbacks[],
-			       const char * const names[],
-			       const bool *ctx,
-			       struct irq_affinity *desc)
+			       const char * const names[])
 {
 	struct virtio_ccw_device *vcdev = to_vc_device(vdev);
 	unsigned long *indicatorp = NULL;
@@ -649,7 +655,7 @@ static int virtio_ccw_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 
 	for (i = 0; i < nvqs; ++i) {
 		vqs[i] = virtio_ccw_setup_vq(vdev, i, callbacks[i], names[i],
-					     ctx ? ctx[i] : false, ccw);
+					     ccw);
 		if (IS_ERR(vqs[i])) {
 			ret = PTR_ERR(vqs[i]);
 			vqs[i] = NULL;
@@ -669,7 +675,7 @@ static int virtio_ccw_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 		ret = virtio_ccw_register_adapter_ind(vcdev, vqs, nvqs, ccw);
 		if (ret)
 			/* no error, just fall back to legacy interrupts */
-			vcdev->is_thinint = false;
+			vcdev->is_thinint = 0;
 	}
 	if (!vcdev->is_thinint) {
 		/* Register queue indicators with host. */
@@ -908,28 +914,6 @@ out_free:
 static u8 virtio_ccw_get_status(struct virtio_device *vdev)
 {
 	struct virtio_ccw_device *vcdev = to_vc_device(vdev);
-	u8 old_status = *vcdev->status;
-	struct ccw1 *ccw;
-
-	if (vcdev->revision < 1)
-		return *vcdev->status;
-
-	ccw = kzalloc(sizeof(*ccw), GFP_DMA | GFP_KERNEL);
-	if (!ccw)
-		return old_status;
-
-	ccw->cmd_code = CCW_CMD_READ_STATUS;
-	ccw->flags = 0;
-	ccw->count = sizeof(*vcdev->status);
-	ccw->cda = (__u32)(unsigned long)vcdev->status;
-	ccw_io_helper(vcdev, ccw, VIRTIO_CCW_DOING_READ_STATUS);
-/*
- * If the channel program failed (should only happen if the device
- * was hotunplugged, and then we clean up via the machine check
- * handler anyway), vcdev->status was not overwritten and we just
- * return the old status, which is fine.
-*/
-	kfree(ccw);
 
 	return *vcdev->status;
 }
@@ -958,7 +942,7 @@ static void virtio_ccw_set_status(struct virtio_device *vdev, u8 status)
 	kfree(ccw);
 }
 
-static const struct virtio_config_ops virtio_ccw_config_ops = {
+static struct virtio_config_ops virtio_ccw_config_ops = {
 	.get_features = virtio_ccw_get_features,
 	.finalize_features = virtio_ccw_finalize_features,
 	.get = virtio_ccw_get_config,
@@ -1025,7 +1009,6 @@ static void virtio_ccw_check_activity(struct virtio_ccw_device *vcdev,
 		case VIRTIO_CCW_DOING_READ_CONFIG:
 		case VIRTIO_CCW_DOING_WRITE_CONFIG:
 		case VIRTIO_CCW_DOING_WRITE_STATUS:
-		case VIRTIO_CCW_DOING_READ_STATUS:
 		case VIRTIO_CCW_DOING_SET_VQ:
 		case VIRTIO_CCW_DOING_SET_IND:
 		case VIRTIO_CCW_DOING_SET_CONF_IND:
@@ -1313,9 +1296,6 @@ static int virtio_ccw_cio_notify(struct ccw_device *cdev, int event)
 		vcdev->device_lost = true;
 		rc = NOTIFY_DONE;
 		break;
-	case CIO_OPER:
-		rc = NOTIFY_OK;
-		break;
 	default:
 		rc = NOTIFY_DONE;
 		break;
@@ -1327,27 +1307,7 @@ static struct ccw_device_id virtio_ids[] = {
 	{ CCW_DEVICE(0x3832, 0) },
 	{},
 };
-
-#ifdef CONFIG_PM_SLEEP
-static int virtio_ccw_freeze(struct ccw_device *cdev)
-{
-	struct virtio_ccw_device *vcdev = dev_get_drvdata(&cdev->dev);
-
-	return virtio_device_freeze(&vcdev->vdev);
-}
-
-static int virtio_ccw_restore(struct ccw_device *cdev)
-{
-	struct virtio_ccw_device *vcdev = dev_get_drvdata(&cdev->dev);
-	int ret;
-
-	ret = virtio_ccw_set_transport_rev(vcdev);
-	if (ret)
-		return ret;
-
-	return virtio_device_restore(&vcdev->vdev);
-}
-#endif
+MODULE_DEVICE_TABLE(ccw, virtio_ids);
 
 static struct ccw_driver virtio_ccw_driver = {
 	.driver = {
@@ -1361,11 +1321,6 @@ static struct ccw_driver virtio_ccw_driver = {
 	.set_online = virtio_ccw_online,
 	.notify = virtio_ccw_cio_notify,
 	.int_class = IRQIO_VIR,
-#ifdef CONFIG_PM_SLEEP
-	.freeze = virtio_ccw_freeze,
-	.thaw = virtio_ccw_restore,
-	.restore = virtio_ccw_restore,
-#endif
 };
 
 static int __init pure_hex(char **cp, unsigned int *val, int min_digit,
@@ -1464,4 +1419,14 @@ static int __init virtio_ccw_init(void)
 	no_auto_parse();
 	return ccw_driver_register(&virtio_ccw_driver);
 }
-device_initcall(virtio_ccw_init);
+module_init(virtio_ccw_init);
+
+static void __exit virtio_ccw_exit(void)
+{
+	int i;
+
+	ccw_driver_unregister(&virtio_ccw_driver);
+	for (i = 0; i < MAX_AIRQ_AREAS; i++)
+		destroy_airq_info(airq_areas[i]);
+}
+module_exit(virtio_ccw_exit);

@@ -31,7 +31,6 @@
 #include "atom.h"
 #include "atom-bits.h"
 #include "atombios_encoders.h"
-#include "atombios_crtc.h"
 #include "amdgpu_atombios.h"
 #include "amdgpu_pll.h"
 #include "amdgpu_connectors.h"

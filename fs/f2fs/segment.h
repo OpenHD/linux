@@ -40,18 +40,18 @@
 	 ((seg) == CURSEG_I(sbi, CURSEG_COLD_NODE)->segno))
 
 #define IS_CURSEC(sbi, secno)						\
-	(((secno) == CURSEG_I(sbi, CURSEG_HOT_DATA)->segno /		\
-	  (sbi)->segs_per_sec) ||	\
-	 ((secno) == CURSEG_I(sbi, CURSEG_WARM_DATA)->segno /		\
-	  (sbi)->segs_per_sec) ||	\
-	 ((secno) == CURSEG_I(sbi, CURSEG_COLD_DATA)->segno /		\
-	  (sbi)->segs_per_sec) ||	\
-	 ((secno) == CURSEG_I(sbi, CURSEG_HOT_NODE)->segno /		\
-	  (sbi)->segs_per_sec) ||	\
-	 ((secno) == CURSEG_I(sbi, CURSEG_WARM_NODE)->segno /		\
-	  (sbi)->segs_per_sec) ||	\
-	 ((secno) == CURSEG_I(sbi, CURSEG_COLD_NODE)->segno /		\
-	  (sbi)->segs_per_sec))	\
+	((secno == CURSEG_I(sbi, CURSEG_HOT_DATA)->segno /		\
+	  sbi->segs_per_sec) ||	\
+	 (secno == CURSEG_I(sbi, CURSEG_WARM_DATA)->segno /		\
+	  sbi->segs_per_sec) ||	\
+	 (secno == CURSEG_I(sbi, CURSEG_COLD_DATA)->segno /		\
+	  sbi->segs_per_sec) ||	\
+	 (secno == CURSEG_I(sbi, CURSEG_HOT_NODE)->segno /		\
+	  sbi->segs_per_sec) ||	\
+	 (secno == CURSEG_I(sbi, CURSEG_WARM_NODE)->segno /		\
+	  sbi->segs_per_sec) ||	\
+	 (secno == CURSEG_I(sbi, CURSEG_COLD_NODE)->segno /		\
+	  sbi->segs_per_sec))	\
 
 #define MAIN_BLKADDR(sbi)						\
 	(SM_I(sbi) ? SM_I(sbi)->main_blkaddr : 				\
@@ -66,7 +66,7 @@
 #define TOTAL_SEGS(sbi)							\
 	(SM_I(sbi) ? SM_I(sbi)->segment_count : 				\
 		le32_to_cpu(F2FS_RAW_SUPER(sbi)->segment_count))
-#define TOTAL_BLKS(sbi)	(TOTAL_SEGS(sbi) << (sbi)->log_blocks_per_seg)
+#define TOTAL_BLKS(sbi)	(TOTAL_SEGS(sbi) << sbi->log_blocks_per_seg)
 
 #define MAX_BLKADDR(sbi)	(SEG0_BLKADDR(sbi) + TOTAL_BLKS(sbi))
 #define SEGMENT_SIZE(sbi)	(1ULL << ((sbi)->log_blocksize +	\
@@ -214,8 +214,6 @@ struct segment_allocation {
 		(page_private(page) == (unsigned long)ATOMIC_WRITTEN_PAGE)
 #define IS_DUMMY_WRITTEN_PAGE(page)			\
 		(page_private(page) == (unsigned long)DUMMY_WRITTEN_PAGE)
-
-#define MAX_SKIP_GC_COUNT			16
 
 struct inmem_pages {
 	struct list_head list;
@@ -377,7 +375,6 @@ static inline void seg_info_to_sit_page(struct f2fs_sb_info *sbi,
 	int i;
 
 	raw_sit = (struct f2fs_sit_block *)page_address(page);
-	memset(raw_sit, 0, PAGE_SIZE);
 	for (i = 0; i < end - start; i++) {
 		rs = &raw_sit->entries[i];
 		se = get_seg_entry(sbi, start + i);
@@ -684,7 +681,7 @@ static inline int check_block_count(struct f2fs_sb_info *sbi,
 				"Mismatch valid blocks %d vs. %d",
 					GET_SIT_VBLOCKS(raw_sit), valid_blocks);
 		set_sbi_flag(sbi, SBI_NEED_FSCK);
-		return -EFSCORRUPTED;
+		return -EINVAL;
 	}
 
 	/* check segment usage, and check boundary of a given segment number */
@@ -694,7 +691,7 @@ static inline int check_block_count(struct f2fs_sb_info *sbi,
 				"Wrong valid blocks %d or segno %u",
 					GET_SIT_VBLOCKS(raw_sit), segno);
 		set_sbi_flag(sbi, SBI_NEED_FSCK);
-		return -EFSCORRUPTED;
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -744,23 +741,12 @@ static inline void set_to_next_sit(struct sit_info *sit_i, unsigned int start)
 #endif
 }
 
-static inline unsigned long long get_mtime(struct f2fs_sb_info *sbi,
-						bool base_time)
+static inline unsigned long long get_mtime(struct f2fs_sb_info *sbi)
 {
 	struct sit_info *sit_i = SIT_I(sbi);
-	time64_t diff, now = ktime_get_real_seconds();
+	time64_t now = ktime_get_real_seconds();
 
-	if (now >= sit_i->mounted_time)
-		return sit_i->elapsed_time + now - sit_i->mounted_time;
-
-	/* system time is set to the past */
-	if (!base_time) {
-		diff = sit_i->mounted_time - now;
-		if (sit_i->elapsed_time >= diff)
-			return sit_i->elapsed_time - diff;
-		return 0;
-	}
-	return sit_i->elapsed_time;
+	return sit_i->elapsed_time + now - sit_i->mounted_time;
 }
 
 static inline void set_summary(struct f2fs_summary *sum, nid_t nid,
@@ -782,6 +768,15 @@ static inline block_t sum_blk_addr(struct f2fs_sb_info *sbi, int base, int type)
 	return __start_cp_addr(sbi) +
 		le32_to_cpu(F2FS_CKPT(sbi)->cp_pack_total_block_count)
 				- (base + 1) + type;
+}
+
+static inline bool no_fggc_candidate(struct f2fs_sb_info *sbi,
+						unsigned int secno)
+{
+	if (get_valid_blocks(sbi, GET_SEG_FROM_SEC(sbi, secno), true) >
+						sbi->fggc_threshold)
+		return true;
+	return false;
 }
 
 static inline bool sec_usage_check(struct f2fs_sb_info *sbi, unsigned int secno)

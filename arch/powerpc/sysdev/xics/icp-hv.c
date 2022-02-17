@@ -138,7 +138,7 @@ static void icp_hv_set_cpu_priority(unsigned char cppr)
 
 #ifdef CONFIG_SMP
 
-static void icp_hv_cause_ipi(int cpu)
+static void icp_hv_cause_ipi(int cpu, unsigned long data)
 {
 	icp_hv_set_qirr(cpu, IPI_PRIORITY);
 }
@@ -179,6 +179,7 @@ int icp_hv_init(void)
 
 	icp_ops = &icp_hv_ops;
 
+	of_node_put(np);
 	return 0;
 }
 

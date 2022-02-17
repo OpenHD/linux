@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
-#include <errno.h>
-#include <inttypes.h>
 #include <linux/list.h>
 #include <linux/compiler.h>
 #include <linux/string.h>
@@ -157,8 +154,9 @@ void ordered_events__delete(struct ordered_events *oe, struct ordered_event *eve
 }
 
 int ordered_events__queue(struct ordered_events *oe, union perf_event *event,
-			  u64 timestamp, u64 file_offset)
+			  struct perf_sample *sample, u64 file_offset)
 {
+	u64 timestamp = sample->time;
 	struct ordered_event *oevent;
 
 	if (!timestamp || timestamp == ~0ULL)

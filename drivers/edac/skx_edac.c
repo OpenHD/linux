@@ -14,8 +14,6 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/acpi.h>
-#include <linux/dmi.h>
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
 #include <linux/slab.h>
@@ -26,15 +24,13 @@
 #include <linux/bitmap.h>
 #include <linux/math64.h>
 #include <linux/mod_devicetable.h>
-#include <acpi/nfit.h>
 #include <asm/cpu_device_id.h>
-#include <asm/intel-family.h>
 #include <asm/processor.h>
 #include <asm/mce.h>
 
-#include "edac_module.h"
+#include "edac_core.h"
 
-#define EDAC_MOD_STR    "skx_edac"
+#define SKX_REVISION    " Ver: 1.0 "
 
 /*
  * Debug macros
@@ -70,7 +66,6 @@ static u64 skx_tolm, skx_tohm;
 struct skx_dev {
 	struct list_head	list;
 	u8			bus[4];
-	int			seg;
 	struct pci_dev	*sad_all;
 	struct pci_dev	*util_all;
 	u32	mcroute;
@@ -116,12 +111,12 @@ struct decoded_addr {
 	int	bank_group;
 };
 
-static struct skx_dev *get_skx_dev(struct pci_bus *bus, u8 idx)
+static struct skx_dev *get_skx_dev(u8 bus, u8 idx)
 {
 	struct skx_dev *d;
 
 	list_for_each_entry(d, &skx_edac_list, list) {
-		if (d->seg == pci_domain_nr(bus) && d->bus[idx] == bus->number)
+		if (d->bus[idx] == bus)
 			return d;
 	}
 
@@ -178,7 +173,6 @@ static int get_all_bus_mappings(void)
 			pci_dev_put(pdev);
 			return -ENOMEM;
 		}
-		d->seg = pci_domain_nr(pdev->bus);
 		pci_read_config_dword(pdev, 0xCC, &reg);
 		d->bus[0] =  GET_BITFIELD(reg, 0, 7);
 		d->bus[1] =  GET_BITFIELD(reg, 8, 15);
@@ -214,7 +208,7 @@ static int get_all_munits(const struct munit *m)
 			if (i == NUM_IMC)
 				goto fail;
 		}
-		d = get_skx_dev(pdev->bus, m->busidx);
+		d = get_skx_dev(pdev->bus->number, m->busidx);
 		if (!d)
 			goto fail;
 
@@ -268,8 +262,8 @@ fail:
 	return -ENODEV;
 }
 
-static const struct x86_cpu_id skx_cpuids[] = {
-	{ X86_VENDOR_INTEL, 6, INTEL_FAM6_SKYLAKE_X, 0, 0 },
+const struct x86_cpu_id skx_cpuids[] = {
+	{ X86_VENDOR_INTEL, 6, 0x55, 0, 0 },	/* Skylake */
 	{ }
 };
 MODULE_DEVICE_TABLE(x86cpu, skx_cpuids);
@@ -305,9 +299,8 @@ static int get_dimm_attr(u32 reg, int lobit, int hibit, int add, int minval,
 }
 
 #define IS_DIMM_PRESENT(mtr)		GET_BITFIELD((mtr), 15, 15)
-#define IS_NVDIMM_PRESENT(mcddrtcfg, i)	GET_BITFIELD((mcddrtcfg), (i), (i))
 
-#define numrank(reg) get_dimm_attr((reg), 12, 13, 0, 0, 2, "ranks")
+#define numrank(reg) get_dimm_attr((reg), 12, 13, 0, 1, 2, "ranks")
 #define numrow(reg) get_dimm_attr((reg), 2, 4, 12, 1, 6, "rows")
 #define numcol(reg) get_dimm_attr((reg), 0, 1, 10, 0, 2, "cols")
 
@@ -354,6 +347,8 @@ static int get_dimm_info(u32 mtr, u32 amap, struct dimm_info *dimm,
 	int  banks = 16, ranks, rows, cols, npages;
 	u64 size;
 
+	if (!IS_DIMM_PRESENT(mtr))
+		return 0;
 	ranks = numrank(mtr);
 	rows = numrow(mtr);
 	cols = numcol(mtr);
@@ -364,9 +359,9 @@ static int get_dimm_info(u32 mtr, u32 amap, struct dimm_info *dimm,
 	size = ((1ull << (rows + cols + ranks)) * banks) >> (20 - 3);
 	npages = MiB_TO_PAGES(size);
 
-	edac_dbg(0, "mc#%d: channel %d, dimm %d, %lld MiB (%d pages) bank: %d, rank: %d, row: %#x, col: %#x\n",
+	edac_dbg(0, "mc#%d: channel %d, dimm %d, %lld Mb (%d pages) bank: %d, rank: %d, row: %#x, col: %#x\n",
 		 imc->mc, chan, dimmno, size, npages,
-		 banks, 1 << ranks, rows, cols);
+		 banks, ranks, rows, cols);
 
 	imc->chan[chan].dimms[dimmno].close_pg = GET_BITFIELD(mtr, 0, 0);
 	imc->chan[chan].dimms[dimmno].bank_xor_enable = GET_BITFIELD(mtr, 9, 9);
@@ -385,54 +380,6 @@ static int get_dimm_info(u32 mtr, u32 amap, struct dimm_info *dimm,
 	return 1;
 }
 
-static int get_nvdimm_info(struct dimm_info *dimm, struct skx_imc *imc,
-			   int chan, int dimmno)
-{
-	int smbios_handle;
-	u32 dev_handle;
-	u16 flags;
-	u64 size = 0;
-
-	dev_handle = ACPI_NFIT_BUILD_DEVICE_HANDLE(dimmno, chan, imc->lmc,
-						   imc->src_id, 0);
-
-	smbios_handle = nfit_get_smbios_id(dev_handle, &flags);
-	if (smbios_handle == -EOPNOTSUPP) {
-		pr_warn_once(EDAC_MOD_STR ": Can't find size of NVDIMM. Try enabling CONFIG_ACPI_NFIT\n");
-		goto unknown_size;
-	}
-
-	if (smbios_handle < 0) {
-		skx_printk(KERN_ERR, "Can't find handle for NVDIMM ADR=%x\n", dev_handle);
-		goto unknown_size;
-	}
-
-	if (flags & ACPI_NFIT_MEM_MAP_FAILED) {
-		skx_printk(KERN_ERR, "NVDIMM ADR=%x is not mapped\n", dev_handle);
-		goto unknown_size;
-	}
-
-	size = dmi_memdev_size(smbios_handle);
-	if (size == ~0ull)
-		skx_printk(KERN_ERR, "Can't find size for NVDIMM ADR=%x/SMBIOS=%x\n",
-			   dev_handle, smbios_handle);
-
-unknown_size:
-	dimm->nr_pages = size >> PAGE_SHIFT;
-	dimm->grain = 32;
-	dimm->dtype = DEV_UNKNOWN;
-	dimm->mtype = MEM_NVDIMM;
-	dimm->edac_mode = EDAC_SECDED; /* likely better than this */
-
-	edac_dbg(0, "mc#%d: channel %d, dimm %d, %llu MiB (%u pages)\n",
-		 imc->mc, chan, dimmno, size >> 20, dimm->nr_pages);
-
-	snprintf(dimm->label, sizeof(dimm->label), "CPU_SrcID#%u_MC#%u_Chan#%u_DIMM#%u",
-		 imc->src_id, imc->lmc, chan, dimmno);
-
-	return (size == 0 || size == ~0ull) ? 0 : 1;
-}
-
 #define SKX_GET_MTMTR(dev, reg) \
 	pci_read_config_dword((dev), 0x87c, &reg)
 
@@ -449,24 +396,20 @@ static int skx_get_dimm_config(struct mem_ctl_info *mci)
 {
 	struct skx_pvt *pvt = mci->pvt_info;
 	struct skx_imc *imc = pvt->imc;
-	u32 mtr, amap, mcddrtcfg;
 	struct dimm_info *dimm;
 	int i, j;
+	u32 mtr, amap;
 	int ndimms;
 
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		ndimms = 0;
 		pci_read_config_dword(imc->chan[i].cdev, 0x8C, &amap);
-		pci_read_config_dword(imc->chan[i].cdev, 0x400, &mcddrtcfg);
 		for (j = 0; j < NUM_DIMMS; j++) {
 			dimm = EDAC_DIMM_PTR(mci->layers, mci->dimms,
 					     mci->n_layers, i, j, 0);
 			pci_read_config_dword(imc->chan[i].cdev,
 					0x80 + 4*j, &mtr);
-			if (IS_DIMM_PRESENT(mtr))
-				ndimms += get_dimm_info(mtr, amap, dimm, imc, i, j);
-			else if (IS_NVDIMM_PRESENT(mcddrtcfg, j))
-				ndimms += get_nvdimm_info(dimm, imc, i, j);
+			ndimms += get_dimm_info(mtr, amap, dimm, imc, i, j);
 		}
 		if (ndimms && !skx_check_ecc(imc->chan[0].cdev)) {
 			skx_printk(KERN_ERR, "ECC is disabled on imc %d\n", imc->mc);
@@ -524,16 +467,12 @@ static int skx_register_mci(struct skx_imc *imc)
 
 	mci->ctl_name = kasprintf(GFP_KERNEL, "Skylake Socket#%d IMC#%d",
 				  imc->node_id, imc->lmc);
-	if (!mci->ctl_name) {
-		rc = -ENOMEM;
-		goto fail0;
-	}
-
-	mci->mtype_cap = MEM_FLAG_DDR4 | MEM_FLAG_NVDIMM;
+	mci->mtype_cap = MEM_FLAG_DDR4;
 	mci->edac_ctl_cap = EDAC_FLAG_NONE;
 	mci->edac_cap = EDAC_FLAG_NONE;
-	mci->mod_name = EDAC_MOD_STR;
+	mci->mod_name = "skx_edac.c";
 	mci->dev_name = pci_name(imc->chan[0].cdev);
+	mci->mod_ver = SKX_REVISION;
 	mci->ctl_page_to_phys = NULL;
 
 	rc = skx_get_dimm_config(mci);
@@ -554,7 +493,6 @@ static int skx_register_mci(struct skx_imc *imc)
 
 fail:
 	kfree(mci->ctl_name);
-fail0:
 	edac_mc_free(mci);
 	imc->mci = NULL;
 	return rc;
@@ -1033,7 +971,7 @@ static int skx_mce_check_error(struct notifier_block *nb, unsigned long val,
 	struct mem_ctl_info *mci;
 	char *type;
 
-	if (edac_get_report_status() == EDAC_REPORTING_DISABLED)
+	if (get_edac_report_status() == EDAC_REPORTING_DISABLED)
 		return NOTIFY_DONE;
 
 	/* ignore unless this is memory related with an address */
@@ -1069,8 +1007,7 @@ static int skx_mce_check_error(struct notifier_block *nb, unsigned long val,
 }
 
 static struct notifier_block skx_mce_dec = {
-	.notifier_call	= skx_mce_check_error,
-	.priority	= MCE_PRIO_EDAC,
+	.notifier_call = skx_mce_check_error,
 };
 
 static void skx_remove(void)
@@ -1100,20 +1037,15 @@ static void skx_remove(void)
  *	search for all the devices we need
  *	check which DIMMs are present.
  */
-static int __init skx_init(void)
+int __init skx_init(void)
 {
 	const struct x86_cpu_id *id;
 	const struct munit *m;
-	const char *owner;
 	int rc = 0, i;
 	u8 mc = 0, src_id, node_id;
 	struct skx_dev *d;
 
 	edac_dbg(2, "\n");
-
-	owner = edac_get_owner();
-	if (owner && strncmp(owner, EDAC_MOD_STR, sizeof(EDAC_MOD_STR)))
-		return -EBUSY;
 
 	id = x86_match_cpu(skx_cpuids);
 	if (!id)

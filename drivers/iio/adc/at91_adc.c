@@ -30,7 +30,6 @@
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
-#include <linux/pinctrl/consumer.h>
 
 /* Registers */
 #define AT91_ADC_CR		0x00		/* Control Register */
@@ -598,6 +597,7 @@ static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 }
 
 static const struct iio_trigger_ops at91_adc_trigger_ops = {
+	.owner = THIS_MODULE,
 	.set_trigger_state = &at91_adc_configure_trigger,
 };
 
@@ -628,8 +628,8 @@ static int at91_adc_trigger_init(struct iio_dev *idev)
 	struct at91_adc_state *st = iio_priv(idev);
 	int i, ret;
 
-	st->trig = devm_kcalloc(&idev->dev,
-				st->trigger_number, sizeof(*st->trig),
+	st->trig = devm_kzalloc(&idev->dev,
+				st->trigger_number * sizeof(*st->trig),
 				GFP_KERNEL);
 
 	if (st->trig == NULL) {
@@ -808,7 +808,7 @@ static u32 calc_startup_ticks_9x5(u32 startup_time, u32 adc_clk_khz)
 	 * For sama5d3x and at91sam9x5, the formula changes to:
 	 * Startup Time = <lookup_table_value> / ADC Clock
 	 */
-	static const int startup_lookup[] = {
+	const int startup_lookup[] = {
 		0,   8,   16,  24,
 		64,  80,  96,  112,
 		512, 576, 640, 704,
@@ -918,8 +918,7 @@ static int at91_adc_probe_dt(struct at91_adc_state *st,
 	st->registers = &st->caps->registers;
 	st->num_channels = st->caps->num_channels;
 	st->trigger_number = of_get_child_count(node);
-	st->trigger_list = devm_kcalloc(&idev->dev,
-					st->trigger_number,
+	st->trigger_list = devm_kzalloc(&idev->dev, st->trigger_number *
 					sizeof(struct at91_adc_trigger),
 					GFP_KERNEL);
 	if (!st->trigger_list) {
@@ -986,6 +985,7 @@ static int at91_adc_probe_pdata(struct at91_adc_state *st,
 }
 
 static const struct iio_info at91_adc_info = {
+	.driver_module = THIS_MODULE,
 	.read_raw = &at91_adc_read_raw,
 };
 
@@ -1188,9 +1188,9 @@ static int at91_adc_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	st->reg_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(st->reg_base))
+	if (IS_ERR(st->reg_base)) {
 		return PTR_ERR(st->reg_base);
-
+	}
 
 	/*
 	 * Disable all IRQs before setting up the handler
@@ -1357,32 +1357,6 @@ static int at91_adc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int at91_adc_suspend(struct device *dev)
-{
-	struct iio_dev *idev = platform_get_drvdata(to_platform_device(dev));
-	struct at91_adc_state *st = iio_priv(idev);
-
-	pinctrl_pm_select_sleep_state(dev);
-	clk_disable_unprepare(st->clk);
-
-	return 0;
-}
-
-static int at91_adc_resume(struct device *dev)
-{
-	struct iio_dev *idev = platform_get_drvdata(to_platform_device(dev));
-	struct at91_adc_state *st = iio_priv(idev);
-
-	clk_prepare_enable(st->clk);
-	pinctrl_pm_select_default_state(dev);
-
-	return 0;
-}
-#endif
-
-static SIMPLE_DEV_PM_OPS(at91_adc_pm_ops, at91_adc_suspend, at91_adc_resume);
-
 static struct at91_adc_caps at91sam9260_caps = {
 	.calc_startup_ticks = calc_startup_ticks_9260,
 	.num_channels = 4,
@@ -1477,7 +1451,6 @@ static struct platform_driver at91_adc_driver = {
 	.driver = {
 		   .name = DRIVER_NAME,
 		   .of_match_table = of_match_ptr(at91_adc_dt_ids),
-		   .pm = &at91_adc_pm_ops,
 	},
 };
 

@@ -29,16 +29,15 @@ Description
 -----------
 
 This ioctl call is used to start the actual filtering operation defined
-via the ioctl calls :ref:`DMX_SET_FILTER` or :ref:`DMX_SET_PES_FILTER`.
+via the ioctl calls DMX_SET_FILTER or DMX_SET_PES_FILTER.
 
 
 Return Value
 ------------
 
-On success 0 is returned.
-
-On error -1 is returned, and the ``errno`` variable is set
-appropriately.
+On success 0 is returned, on error -1 and the ``errno`` variable is set
+appropriately. The generic error codes are described at the
+:ref:`Generic Error Codes <gen-errors>` chapter.
 
 .. tabularcolumns:: |p{2.5cm}|p{15.0cm}|
 
@@ -52,7 +51,7 @@ appropriately.
        -  ``EINVAL``
 
        -  Invalid argument, i.e. no filtering parameters provided via the
-	  :ref:`DMX_SET_FILTER` or :ref:`DMX_SET_PES_FILTER` ioctls.
+	  DMX_SET_FILTER or DMX_SET_PES_FILTER functions.
 
     -  .. row 2
 
@@ -62,7 +61,3 @@ appropriately.
 	  There are active filters filtering data from another input source.
 	  Make sure that these filters are stopped before starting this
 	  filter.
-
-
-The generic error codes are described at the
-:ref:`Generic Error Codes <gen-errors>` chapter.

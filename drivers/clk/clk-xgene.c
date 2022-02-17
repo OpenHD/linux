@@ -146,8 +146,10 @@ static struct clk *xgene_register_clk_pll(struct device *dev,
 
 	/* allocate the APM clock structure */
 	apmclk = kzalloc(sizeof(*apmclk), GFP_KERNEL);
-	if (!apmclk)
+	if (!apmclk) {
+		pr_err("%s: could not allocate APM clk\n", __func__);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	init.name = name;
 	init.ops = &xgene_clk_pll_ops;
@@ -189,8 +191,8 @@ static void xgene_pllclk_init(struct device_node *np, enum xgene_pll_type pll_ty
 	int version = xgene_pllclk_version(np);
 
 	reg = of_iomap(np, 0);
-	if (!reg) {
-		pr_err("Unable to map CSR register for %pOF\n", np);
+	if (reg == NULL) {
+		pr_err("Unable to map CSR register for %s\n", np->full_name);
 		return;
 	}
 	of_property_read_string(np, "clock-output-names", &clk_name);
@@ -407,12 +409,12 @@ static void xgene_pmdclk_init(struct device_node *np)
 	/* Parse the DTS register for resource */
 	rc = of_address_to_resource(np, 0, &res);
 	if (rc != 0) {
-		pr_err("no DTS register for %pOF\n", np);
+		pr_err("no DTS register for %s\n", np->full_name);
 		return;
 	}
 	csr_reg = of_iomap(np, 0);
 	if (!csr_reg) {
-		pr_err("Unable to map resource for %pOF\n", np);
+		pr_err("Unable to map resource for %s\n", np->full_name);
 		return;
 	}
 	of_property_read_string(np, "clock-output-names", &clk_name);
@@ -465,7 +467,7 @@ static int xgene_clk_enable(struct clk_hw *hw)
 	if (pclk->lock)
 		spin_lock_irqsave(pclk->lock, flags);
 
-	if (pclk->param.csr_reg) {
+	if (pclk->param.csr_reg != NULL) {
 		pr_debug("%s clock enabled\n", clk_hw_get_name(hw));
 		/* First enable the clock */
 		data = xgene_clk_read(pclk->param.csr_reg +
@@ -505,7 +507,7 @@ static void xgene_clk_disable(struct clk_hw *hw)
 	if (pclk->lock)
 		spin_lock_irqsave(pclk->lock, flags);
 
-	if (pclk->param.csr_reg) {
+	if (pclk->param.csr_reg != NULL) {
 		pr_debug("%s clock disabled\n", clk_hw_get_name(hw));
 		/* First put the CSR in reset */
 		data = xgene_clk_read(pclk->param.csr_reg +
@@ -531,7 +533,7 @@ static int xgene_clk_is_enabled(struct clk_hw *hw)
 	struct xgene_clk *pclk = to_xgene_clk(hw);
 	u32 data = 0;
 
-	if (pclk->param.csr_reg) {
+	if (pclk->param.csr_reg != NULL) {
 		pr_debug("%s clock checking\n", clk_hw_get_name(hw));
 		data = xgene_clk_read(pclk->param.csr_reg +
 					pclk->param.reg_clk_offset);
@@ -540,7 +542,7 @@ static int xgene_clk_is_enabled(struct clk_hw *hw)
 							"disabled");
 	}
 
-	if (!pclk->param.csr_reg)
+	if (pclk->param.csr_reg == NULL)
 		return 1;
 	return data & pclk->param.reg_clk_mask ? 1 : 0;
 }
@@ -648,8 +650,10 @@ static struct clk *xgene_register_clk(struct device *dev,
 
 	/* allocate the APM clock structure */
 	apmclk = kzalloc(sizeof(*apmclk), GFP_KERNEL);
-	if (!apmclk)
+	if (!apmclk) {
+		pr_err("%s: could not allocate APM clk\n", __func__);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	init.name = name;
 	init.ops = &xgene_clk_ops;
@@ -699,14 +703,16 @@ static void __init xgene_devclk_init(struct device_node *np)
 		rc = of_address_to_resource(np, i, &res);
 		if (rc != 0) {
 			if (i == 0) {
-				pr_err("no DTS register for %pOF\n", np);
+				pr_err("no DTS register for %s\n",
+					np->full_name);
 				return;
 			}
 			break;
 		}
 		map_res = of_iomap(np, i);
-		if (!map_res) {
-			pr_err("Unable to map resource %d for %pOF\n", i, np);
+		if (map_res == NULL) {
+			pr_err("Unable to map resource %d for %s\n",
+				i, np->full_name);
 			goto err;
 		}
 		if (strcmp(res.name, "div-reg") == 0)
@@ -741,7 +747,8 @@ static void __init xgene_devclk_init(struct device_node *np)
 	pr_debug("Add %s clock\n", clk_name);
 	rc = of_clk_add_provider(np, of_clk_src_simple_get, clk);
 	if (rc != 0)
-		pr_err("%s: could register provider clk %pOF\n", __func__, np);
+		pr_err("%s: could register provider clk %s\n", __func__,
+			np->full_name);
 
 	return;
 

@@ -11,7 +11,6 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -20,8 +19,6 @@
 #include <linux/cgroup.h>
 #include <linux/rcupdate.h>
 #include <linux/atomic.h>
-#include <linux/sched/task.h>
-
 #include <net/rtnetlink.h>
 #include <net/pkt_cls.h>
 #include <net/sock.h>
@@ -239,6 +236,8 @@ static void net_prio_attach(struct cgroup_taskset *tset)
 {
 	struct task_struct *p;
 	struct cgroup_subsys_state *css;
+
+	cgroup_sk_alloc_disable();
 
 	cgroup_taskset_for_each(p, css, tset) {
 		void *v = (void *)(unsigned long)css->cgroup->id;

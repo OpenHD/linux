@@ -5,6 +5,7 @@ config ARCH_SUNXI
 	select ARCH_HAS_RESET_CONTROLLER
 	select GENERIC_IRQ_CHIP
 	select PINCTRL
+	select PINCTRL_SUN50I_A64
 	select RESET_CONTROLLER
 	help
 	  This enables support for Allwinner sunxi based SoCs like the A64.
@@ -18,9 +19,8 @@ config ARCH_ALPINE
 
 config ARCH_BCM2835
 	bool "Broadcom BCM2835 family"
-	select TIMER_OF
+	select CLKSRC_OF
 	select GPIOLIB
-	select MFD_CORE
 	select PINCTRL
 	select PINCTRL_BCM2835
 	select ARM_AMBA
@@ -41,6 +41,7 @@ config ARCH_BCM_IPROC
 config ARCH_BERLIN
 	bool "Marvell Berlin SoC Family"
 	select DW_APB_ICTL
+	select DW_APB_TIMER_OF
 	select GPIOLIB
 	select PINCTRL
 	help
@@ -56,8 +57,6 @@ config ARCH_BRCMSTB
 config ARCH_EXYNOS
 	bool "ARMv8 based Samsung Exynos SoC family"
 	select COMMON_CLK_SAMSUNG
-	select EXYNOS_PM_DOMAINS if PM_GENERIC_DOMAINS
-	select EXYNOS_PMU
 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
 	select HAVE_S3C_RTC if RTC_CLASS
 	select PINCTRL
@@ -65,13 +64,6 @@ config ARCH_EXYNOS
 	select SOC_SAMSUNG
 	help
 	  This enables support for ARMv8 based Samsung Exynos SoC family.
-
-config ARCH_K3
-	bool "Texas Instruments Inc. K3 multicore SoC architecture"
-	select PM_GENERIC_DOMAINS if PM
-	help
-	  This enables support for Texas Instruments' K3 multicore SoC
-	  architecture.
 
 config ARCH_LAYERSCAPE
 	bool "ARMv8 based Freescale Layerscape SoC family"
@@ -93,13 +85,12 @@ config ARCH_HISI
 	  This enables support for Hisilicon ARMv8 SoC family
 
 config ARCH_MEDIATEK
-	bool "MediaTek SoC Family"
+	bool "Mediatek MT65xx & MT81xx ARMv8 SoC"
 	select ARM_GIC
 	select PINCTRL
 	select MTK_TIMER
 	help
-	  This enables support for MediaTek MT27xx, MT65xx, MT76xx
-	  & MT81xx ARMv8 SoCs
+	  Support for Mediatek MT65xx & MT81xx ARMv8 SoCs
 
 config ARCH_MESON
 	bool "Amlogic Platforms"
@@ -107,8 +98,6 @@ config ARCH_MESON
 	select PINCTRL_MESON
 	select COMMON_CLK_AMLOGIC
 	select COMMON_CLK_GXBB
-	select COMMON_CLK_AXG
-	select MESON_IRQ_GPIO
 	help
 	  This enables support for the Amlogic S905 SoCs.
 
@@ -117,17 +106,8 @@ config ARCH_MVEBU
 	select ARMADA_AP806_SYSCON
 	select ARMADA_CP110_SYSCON
 	select ARMADA_37XX_CLK
-	select GPIOLIB
-	select GPIOLIB_IRQCHIP
-	select MVEBU_GICP
-	select MVEBU_ICU
 	select MVEBU_ODMI
 	select MVEBU_PIC
-	select OF_GPIO
-	select PINCTRL
-	select PINCTRL_ARMADA_37XX
-	select PINCTRL_ARMADA_AP806
-	select PINCTRL_ARMADA_CP110
 	help
 	  This enables support for Marvell EBU familly, including:
 	   - Armada 3700 SoC Family
@@ -136,16 +116,9 @@ config ARCH_MVEBU
 
 config ARCH_QCOM
 	bool "Qualcomm Platforms"
-	select GPIOLIB
 	select PINCTRL
 	help
 	  This enables support for the ARMv8 based Qualcomm chipsets.
-
-config ARCH_REALTEK
-	bool "Realtek Platforms"
-	help
-	  This enables support for the ARMv8 based Realtek chipsets,
-	  like the RTD1295.
 
 config ARCH_ROCKCHIP
 	bool "Rockchip Platforms"
@@ -167,9 +140,6 @@ config ARCH_SEATTLE
 config ARCH_SHMOBILE
 	bool
 
-config ARCH_SYNQUACER
-	bool "Socionext SynQuacer SoC Family"
-
 config ARCH_RENESAS
 	bool "Renesas SoC Platforms"
 	select ARCH_SHMOBILE
@@ -177,7 +147,6 @@ config ARCH_RENESAS
 	select PM
 	select PM_GENERIC_DOMAINS
 	select RENESAS_IRQC
-	select SOC_BUS
 	help
 	  This enables support for the ARMv8 based Renesas SoCs.
 
@@ -193,36 +162,6 @@ config ARCH_R8A7796
 	help
 	  This enables support for the Renesas R-Car M3-W SoC.
 
-config ARCH_R8A77965
-	bool "Renesas R-Car M3-N SoC Platform"
-	depends on ARCH_RENESAS
-	help
-	  This enables support for the Renesas R-Car M3-N SoC.
-
-config ARCH_R8A77970
-	bool "Renesas R-Car V3M SoC Platform"
-	depends on ARCH_RENESAS
-	help
-	  This enables support for the Renesas R-Car V3M SoC.
-
-config ARCH_R8A77980
-	bool "Renesas R-Car V3H SoC Platform"
-	depends on ARCH_RENESAS
-	help
-	  This enables support for the Renesas R-Car V3H SoC.
-
-config ARCH_R8A77990
-	bool "Renesas R-Car E3 SoC Platform"
-	depends on ARCH_RENESAS
-	help
-	  This enables support for the Renesas R-Car E3 SoC.
-
-config ARCH_R8A77995
-	bool "Renesas R-Car D3 SoC Platform"
-	depends on ARCH_RENESAS
-	help
-	  This enables support for the Renesas R-Car D3 SoC.
-
 config ARCH_STRATIX10
 	bool "Altera's Stratix 10 SoCFPGA Family"
 	help
@@ -233,10 +172,11 @@ config ARCH_TEGRA
 	select ARCH_HAS_RESET_CONTROLLER
 	select CLKDEV_LOOKUP
 	select CLKSRC_MMIO
-	select TIMER_OF
+	select CLKSRC_OF
 	select GENERIC_CLOCKEVENTS
 	select GPIOLIB
 	select PINCTRL
+	select GENERIC_PINCONF
 	select PM
 	select PM_GENERIC_DOMAINS
 	select RESET_CONTROLLER
@@ -253,18 +193,10 @@ config ARCH_THUNDER
 	help
 	  This enables support for Cavium's Thunder Family of SoCs.
 
-config ARCH_THUNDER2
-	bool "Cavium ThunderX2 Server Processors"
-	select GPIOLIB
-	help
-	  This enables support for Cavium's ThunderX2 CN99XX family of
-	  server processors.
-
 config ARCH_UNIPHIER
 	bool "Socionext UniPhier SoC Family"
 	select ARCH_HAS_RESET_CONTROLLER
 	select PINCTRL
-	select RESET_CONTROLLER
 	help
 	  This enables support for Socionext UniPhier SoC family.
 
@@ -281,7 +213,10 @@ config ARCH_VEXPRESS
 	  Express).
 
 config ARCH_VULCAN
-	def_bool n
+	bool "Broadcom Vulcan SOC Family"
+	select GPIOLIB
+	help
+	  This enables support for Broadcom Vulcan SoC Family
 
 config ARCH_XGENE
 	bool "AppliedMicro X-Gene SOC Family"
@@ -290,7 +225,6 @@ config ARCH_XGENE
 
 config ARCH_ZX
 	bool "ZTE ZX SoC Family"
-	select PINCTRL
 	help
 	  This enables support for ZTE ZX SoC Family
 

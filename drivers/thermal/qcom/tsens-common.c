@@ -16,7 +16,6 @@
 #include <linux/io.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include "tsens.h"
@@ -104,11 +103,11 @@ int get_temp_common(struct tsens_device *tmdev, int id, int *temp)
 {
 	struct tsens_sensor *s = &tmdev->sensor[id];
 	u32 code;
-	unsigned int status_reg;
+	unsigned int sensor_addr;
 	int last_temp = 0, ret;
 
-	status_reg = S0_ST_ADDR + s->hw_id * SN_ADDR_OFFSET;
-	ret = regmap_read(tmdev->map, status_reg, &code);
+	sensor_addr = S0_ST_ADDR + s->hw_id * SN_ADDR_OFFSET;
+	ret = regmap_read(tmdev->map, sensor_addr, &code);
 	if (ret)
 		return ret;
 	last_temp = code & SN_ST_TEMP_MASK;
@@ -127,28 +126,16 @@ static const struct regmap_config tsens_config = {
 int __init init_common(struct tsens_device *tmdev)
 {
 	void __iomem *base;
-	struct resource *res;
-	struct platform_device *op = of_find_device_by_node(tmdev->dev->of_node);
 
-	if (!op)
+	base = of_iomap(tmdev->dev->of_node, 0);
+	if (!base)
 		return -EINVAL;
 
-	/* The driver only uses the TM register address space for now */
-	if (op->num_resources > 1) {
-		tmdev->tm_offset = 0;
-	} else {
-		/* old DTs where SROT and TM were in a contiguous 2K block */
-		tmdev->tm_offset = 0x1000;
-	}
-
-	res = platform_get_resource(op, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&op->dev, res);
-	if (IS_ERR(base))
-		return PTR_ERR(base);
-
 	tmdev->map = devm_regmap_init_mmio(tmdev->dev, base, &tsens_config);
-	if (IS_ERR(tmdev->map))
+	if (IS_ERR(tmdev->map)) {
+		iounmap(base);
 		return PTR_ERR(tmdev->map);
+	}
 
 	return 0;
 }

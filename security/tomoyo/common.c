@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * security/tomoyo/common.c
  *
@@ -2116,17 +2115,17 @@ static struct tomoyo_domain_info *tomoyo_find_domain_by_qid
  * @file: Pointer to "struct file".
  * @wait: Pointer to "poll_table".
  *
- * Returns EPOLLIN | EPOLLRDNORM when ready to read, 0 otherwise.
+ * Returns POLLIN | POLLRDNORM when ready to read, 0 otherwise.
  *
  * Waits for access requests which violated policy in enforcing mode.
  */
-static __poll_t tomoyo_poll_query(struct file *file, poll_table *wait)
+static unsigned int tomoyo_poll_query(struct file *file, poll_table *wait)
 {
 	if (!list_empty(&tomoyo_query_list))
-		return EPOLLIN | EPOLLRDNORM;
+		return POLLIN | POLLRDNORM;
 	poll_wait(file, &tomoyo_query_wait, wait);
 	if (!list_empty(&tomoyo_query_list))
-		return EPOLLIN | EPOLLRDNORM;
+		return POLLIN | POLLRDNORM;
 	return 0;
 }
 
@@ -2254,10 +2253,10 @@ static const char * const tomoyo_memory_headers[TOMOYO_MAX_MEMORY_STAT] = {
 	[TOMOYO_MEMORY_QUERY]  = "query message:",
 };
 
-/* Counter for number of updates. */
-static atomic_t tomoyo_stat_updated[TOMOYO_MAX_POLICY_STAT];
 /* Timestamp counter for last updated. */
-static time64_t tomoyo_stat_modified[TOMOYO_MAX_POLICY_STAT];
+static unsigned int tomoyo_stat_updated[TOMOYO_MAX_POLICY_STAT];
+/* Counter for number of updates. */
+static unsigned int tomoyo_stat_modified[TOMOYO_MAX_POLICY_STAT];
 
 /**
  * tomoyo_update_stat - Update statistic counters.
@@ -2268,8 +2267,11 @@ static time64_t tomoyo_stat_modified[TOMOYO_MAX_POLICY_STAT];
  */
 void tomoyo_update_stat(const u8 index)
 {
-	atomic_inc(&tomoyo_stat_updated[index]);
-	tomoyo_stat_modified[index] = ktime_get_real_seconds();
+	/*
+	 * I don't use atomic operations because race condition is not fatal.
+	 */
+	tomoyo_stat_updated[index]++;
+	tomoyo_stat_modified[index] = get_seconds();
 }
 
 /**
@@ -2288,7 +2290,7 @@ static void tomoyo_read_stat(struct tomoyo_io_buffer *head)
 	for (i = 0; i < TOMOYO_MAX_POLICY_STAT; i++) {
 		tomoyo_io_printf(head, "Policy %-30s %10u",
 				 tomoyo_policy_headers[i],
-				 atomic_read(&tomoyo_stat_updated[i]));
+				 tomoyo_stat_updated[i]);
 		if (tomoyo_stat_modified[i]) {
 			struct tomoyo_time stamp;
 			tomoyo_convert_time(tomoyo_stat_modified[i], &stamp);
@@ -2447,15 +2449,15 @@ int tomoyo_open_control(const u8 type, struct file *file)
  * @file: Pointer to "struct file".
  * @wait: Pointer to "poll_table". Maybe NULL.
  *
- * Returns EPOLLIN | EPOLLRDNORM | EPOLLOUT | EPOLLWRNORM if ready to read/write,
- * EPOLLOUT | EPOLLWRNORM otherwise.
+ * Returns POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM if ready to read/write,
+ * POLLOUT | POLLWRNORM otherwise.
  */
-__poll_t tomoyo_poll_control(struct file *file, poll_table *wait)
+unsigned int tomoyo_poll_control(struct file *file, poll_table *wait)
 {
 	struct tomoyo_io_buffer *head = file->private_data;
 	if (head->poll)
-		return head->poll(file, wait) | EPOLLOUT | EPOLLWRNORM;
-	return EPOLLIN | EPOLLRDNORM | EPOLLOUT | EPOLLWRNORM;
+		return head->poll(file, wait) | POLLOUT | POLLWRNORM;
+	return POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM;
 }
 
 /**

@@ -18,7 +18,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/seq_file.h>
 #include <linux/bitops.h>
 #include <linux/regmap.h>
@@ -295,7 +295,7 @@ static irqreturn_t crystalcove_gpio_irq_handler(int irq, void *data)
 
 	for (gpio = 0; gpio < CRYSTALCOVE_GPIO_NUM; gpio++) {
 		if (pending & BIT(gpio)) {
-			virq = irq_find_mapping(cg->chip.irq.domain, gpio);
+			virq = irq_find_mapping(cg->chip.irqdomain, gpio);
 			handle_nested_irq(virq);
 		}
 	}
@@ -369,8 +369,8 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 		return retval;
 	}
 
-	gpiochip_irqchip_add_nested(&cg->chip, &crystalcove_irqchip, 0,
-				    handle_simple_irq, IRQ_TYPE_NONE);
+	gpiochip_irqchip_add(&cg->chip, &crystalcove_irqchip, 0,
+			     handle_simple_irq, IRQ_TYPE_NONE);
 
 	retval = request_threaded_irq(irq, NULL, crystalcove_gpio_irq_handler,
 				      IRQF_ONESHOT, KBUILD_MODNAME, cg);
@@ -379,8 +379,6 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "request irq failed: %d\n", retval);
 		return retval;
 	}
-
-	gpiochip_set_nested_irqchip(&cg->chip, &crystalcove_irqchip, irq);
 
 	return 0;
 }

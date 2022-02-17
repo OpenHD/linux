@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # KVM configuration
 #
@@ -23,7 +22,6 @@ config KVM
 	select PREEMPT_NOTIFIERS
 	select ANON_INODES
 	select HAVE_KVM_CPU_RELAX_INTERCEPT
-	select HAVE_KVM_VCPU_ASYNC_IOCTL
 	select HAVE_KVM_EVENTFD
 	select KVM_ASYNC_PF
 	select KVM_ASYNC_PF_SYNC

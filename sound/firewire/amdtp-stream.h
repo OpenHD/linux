@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef SOUND_FIREWIRE_AMDTP_H_INCLUDED
 #define SOUND_FIREWIRE_AMDTP_H_INCLUDED
 
@@ -19,8 +18,8 @@
  *	SYT_INTERVAL samples, with these two types alternating so that
  *	the overall sample rate comes out right.
  * @CIP_EMPTY_WITH_TAG0: Only for in-stream. Empty in-packets have TAG0.
- * @CIP_DBC_IS_END_EVENT: The value of dbc in an packet corresponds to the end
- * of event in the packet. Out of IEC 61883.
+ * @CIP_DBC_IS_END_EVENT: Only for in-stream. The value of dbc in an in-packet
+ *	corresponds to the end of event in the packet. Out of IEC 61883.
  * @CIP_WRONG_DBS: Only for in-stream. The value of dbs is wrong in in-packets.
  *	The value of data_block_quadlets is used instead of reported value.
  * @CIP_SKIP_DBC_ZERO_CHECK: Only for in-stream.  Packets with zero in dbc is
@@ -32,7 +31,6 @@
  *	allows 5 times as large as IEC 61883-6 defines.
  * @CIP_HEADER_WITHOUT_EOH: Only for in-stream. CIP Header doesn't include
  *	valid EOH.
- * @CIP_NO_HEADERS: a lack of headers in packets
  */
 enum cip_flags {
 	CIP_NONBLOCKING		= 0x00,
@@ -44,7 +42,6 @@ enum cip_flags {
 	CIP_EMPTY_HAS_WRONG_DBC	= 0x20,
 	CIP_JUMBO_PAYLOAD	= 0x40,
 	CIP_HEADER_WITHOUT_EOH	= 0x80,
-	CIP_NO_HEADER		= 0x100,
 };
 
 /**
@@ -107,17 +104,11 @@ struct amdtp_stream {
 	struct fw_iso_context *context;
 	struct iso_packets_buffer buffer;
 	int packet_index;
-	int tag;
-	int (*handle_packet)(struct amdtp_stream *s,
-			unsigned int payload_quadlets, unsigned int cycle,
-			unsigned int index);
-	unsigned int max_payload_length;
 
 	/* For CIP headers. */
 	unsigned int source_node_id_field;
 	unsigned int data_block_quadlets;
 	unsigned int data_block_counter;
-	unsigned int sph;
 	unsigned int fmt;
 	unsigned int fdf;
 	/* quirk: fixed interval of dbc between previos/current packets. */
@@ -142,7 +133,6 @@ struct amdtp_stream {
 	/* To wait for first packet. */
 	bool callbacked;
 	wait_queue_head_t callback_wait;
-	u32 start_cycle;
 
 	/* For backends to process data blocks. */
 	void *protocol;
@@ -169,7 +159,6 @@ int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 
 void amdtp_stream_pcm_prepare(struct amdtp_stream *s);
 unsigned long amdtp_stream_pcm_pointer(struct amdtp_stream *s);
-int amdtp_stream_pcm_ack(struct amdtp_stream *s);
 void amdtp_stream_pcm_abort(struct amdtp_stream *s);
 
 extern const unsigned int amdtp_syt_intervals[CIP_SFC_COUNT];
@@ -221,7 +210,7 @@ static inline bool amdtp_stream_pcm_running(struct amdtp_stream *s)
 static inline void amdtp_stream_pcm_trigger(struct amdtp_stream *s,
 					    struct snd_pcm_substream *pcm)
 {
-	WRITE_ONCE(s->pcm, pcm);
+	ACCESS_ONCE(s->pcm) = pcm;
 }
 
 static inline bool cip_sfc_is_base_44100(enum cip_sfc sfc)

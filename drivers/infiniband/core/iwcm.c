@@ -59,28 +59,7 @@ MODULE_AUTHOR("Tom Tucker");
 MODULE_DESCRIPTION("iWARP CM");
 MODULE_LICENSE("Dual BSD/GPL");
 
-static const char * const iwcm_rej_reason_strs[] = {
-	[ECONNRESET]			= "reset by remote host",
-	[ECONNREFUSED]			= "refused by remote application",
-	[ETIMEDOUT]			= "setup timeout",
-};
-
-const char *__attribute_const__ iwcm_reject_msg(int reason)
-{
-	size_t index;
-
-	/* iWARP uses negative errnos */
-	index = -reason;
-
-	if (index < ARRAY_SIZE(iwcm_rej_reason_strs) &&
-	    iwcm_rej_reason_strs[index])
-		return iwcm_rej_reason_strs[index];
-	else
-		return "unrecognized reason";
-}
-EXPORT_SYMBOL(iwcm_reject_msg);
-
-static struct rdma_nl_cbs iwcm_nl_cb_table[RDMA_NL_IWPM_NUM_OPS] = {
+static struct ibnl_client_cbs iwcm_nl_cb_table[] = {
 	[RDMA_NL_IWPM_REG_PID] = {.dump = iwpm_register_pid_cb},
 	[RDMA_NL_IWPM_ADD_MAPPING] = {.dump = iwpm_add_mapping_cb},
 	[RDMA_NL_IWPM_QUERY_MAPPING] = {.dump = iwpm_add_and_query_mapping_cb},
@@ -158,8 +137,10 @@ static void dealloc_work_entries(struct iwcm_id_private *cm_id_priv)
 {
 	struct list_head *e, *tmp;
 
-	list_for_each_safe(e, tmp, &cm_id_priv->work_free_list)
+	list_for_each_safe(e, tmp, &cm_id_priv->work_free_list) {
+		list_del(e);
 		kfree(list_entry(e, struct iwcm_work, free_list));
+	}
 }
 
 static int alloc_work_entries(struct iwcm_id_private *cm_id_priv, int count)
@@ -447,6 +428,9 @@ static void destroy_cm_id(struct iw_cm_id *cm_id)
  */
 void iw_destroy_cm_id(struct iw_cm_id *cm_id)
 {
+	struct iwcm_id_private *cm_id_priv;
+
+	cm_id_priv = container_of(cm_id, struct iwcm_id_private, id);
 	destroy_cm_id(cm_id);
 }
 EXPORT_SYMBOL(iw_destroy_cm_id);
@@ -1172,9 +1156,13 @@ static int __init iw_cm_init(void)
 	ret = iwpm_init(RDMA_NL_IWCM);
 	if (ret)
 		pr_err("iw_cm: couldn't init iwpm\n");
-	else
-		rdma_nl_register(RDMA_NL_IWCM, iwcm_nl_cb_table);
-	iwcm_wq = alloc_ordered_workqueue("iw_cm_wq", 0);
+
+	ret = ibnl_add_client(RDMA_NL_IWCM, ARRAY_SIZE(iwcm_nl_cb_table),
+			      iwcm_nl_cb_table);
+	if (ret)
+		pr_err("iw_cm: couldn't register netlink callbacks\n");
+
+	iwcm_wq = alloc_ordered_workqueue("iw_cm_wq", WQ_MEM_RECLAIM);
 	if (!iwcm_wq)
 		return -ENOMEM;
 
@@ -1193,11 +1181,9 @@ static void __exit iw_cm_cleanup(void)
 {
 	unregister_net_sysctl_table(iwcm_ctl_table_hdr);
 	destroy_workqueue(iwcm_wq);
-	rdma_nl_unregister(RDMA_NL_IWCM);
+	ibnl_remove_client(RDMA_NL_IWCM);
 	iwpm_exit(RDMA_NL_IWCM);
 }
-
-MODULE_ALIAS_RDMA_NETLINK(RDMA_NL_IWCM, 2);
 
 module_init(iw_cm_init);
 module_exit(iw_cm_cleanup);

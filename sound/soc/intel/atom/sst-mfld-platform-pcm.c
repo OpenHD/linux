@@ -76,7 +76,7 @@ int sst_unregister_dsp(struct sst_device *dev)
 }
 EXPORT_SYMBOL_GPL(sst_unregister_dsp);
 
-static const struct snd_pcm_hardware sst_platform_pcm_hw = {
+static struct snd_pcm_hardware sst_platform_pcm_hw = {
 	.info =	(SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_DOUBLE |
 			SNDRV_PCM_INFO_PAUSE |
@@ -339,7 +339,7 @@ static int sst_media_open(struct snd_pcm_substream *substream,
 
 	ret_val = power_up_sst(stream);
 	if (ret_val < 0)
-		return ret_val;
+		goto out_power_up;
 
 	/* Make sure, that the period size is always even */
 	snd_pcm_hw_constraint_step(substream->runtime, 0,
@@ -348,8 +348,9 @@ static int sst_media_open(struct snd_pcm_substream *substream,
 	return snd_pcm_hw_constraint_integer(runtime,
 			 SNDRV_PCM_HW_PARAM_PERIODS);
 out_ops:
-	kfree(stream);
 	mutex_unlock(&sst_lock);
+out_power_up:
+	kfree(stream);
 	return ret_val;
 }
 
@@ -357,14 +358,14 @@ static void sst_media_close(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
 	struct sst_runtime_stream *stream;
-	int str_id;
+	int ret_val = 0, str_id;
 
 	stream = substream->runtime->private_data;
 	power_down_sst(stream);
 
 	str_id = stream->stream_info.str_id;
 	if (str_id)
-		stream->ops->close(sst->dev, str_id);
+		ret_val = stream->ops->close(sst->dev, str_id);
 	module_put(sst->dev->driver->owner);
 	kfree(stream);
 }
@@ -477,7 +478,7 @@ static void sst_disable_ssp(struct snd_pcm_substream *substream,
 	}
 }
 
-static const struct snd_soc_dai_ops sst_media_dai_ops = {
+static struct snd_soc_dai_ops sst_media_dai_ops = {
 	.startup = sst_media_open,
 	.shutdown = sst_media_close,
 	.prepare = sst_media_prepare,
@@ -486,11 +487,11 @@ static const struct snd_soc_dai_ops sst_media_dai_ops = {
 	.mute_stream = sst_media_digital_mute,
 };
 
-static const struct snd_soc_dai_ops sst_compr_dai_ops = {
+static struct snd_soc_dai_ops sst_compr_dai_ops = {
 	.mute_stream = sst_media_digital_mute,
 };
 
-static const struct snd_soc_dai_ops sst_be_dai_ops = {
+static struct snd_soc_dai_ops sst_be_dai_ops = {
 	.startup = sst_enable_ssp,
 	.hw_params = sst_be_hw_params,
 	.set_fmt = sst_set_format,
@@ -696,36 +697,32 @@ static int sst_pcm_new(struct snd_soc_pcm_runtime *rtd)
 			snd_dma_continuous_data(GFP_DMA),
 			SST_MIN_BUFFER, SST_MAX_BUFFER);
 		if (retval) {
-			dev_err(rtd->dev, "dma buffer allocation failure\n");
+			dev_err(rtd->dev, "dma buffer allocationf fail\n");
 			return retval;
 		}
 	}
 	return retval;
 }
 
-static int sst_soc_probe(struct snd_soc_component *component)
+static int sst_soc_probe(struct snd_soc_platform *platform)
 {
-	struct sst_data *drv = dev_get_drvdata(component->dev);
+	struct sst_data *drv = dev_get_drvdata(platform->dev);
 
-	drv->soc_card = component->card;
-	return sst_dsp_init_v2_dpcm(component);
+	drv->soc_card = platform->component.card;
+	return sst_dsp_init_v2_dpcm(platform);
 }
 
-static void sst_soc_remove(struct snd_soc_component *component)
-{
-	struct sst_data *drv = dev_get_drvdata(component->dev);
-
-	drv->soc_card = NULL;
-}
-
-static const struct snd_soc_component_driver sst_soc_platform_drv  = {
-	.name		= DRV_NAME,
+static struct snd_soc_platform_driver sst_soc_platform_drv  = {
 	.probe		= sst_soc_probe,
-	.remove		= sst_soc_remove,
 	.ops		= &sst_platform_ops,
 	.compr_ops	= &sst_platform_compr_ops,
 	.pcm_new	= sst_pcm_new,
 };
+
+static const struct snd_soc_component_driver sst_component = {
+	.name		= "sst",
+};
+
 
 static int sst_platform_probe(struct platform_device *pdev)
 {
@@ -750,16 +747,26 @@ static int sst_platform_probe(struct platform_device *pdev)
 	mutex_init(&drv->lock);
 	dev_set_drvdata(&pdev->dev, drv);
 
-	ret = devm_snd_soc_register_component(&pdev->dev, &sst_soc_platform_drv,
-				sst_platform_dai, ARRAY_SIZE(sst_platform_dai));
-	if (ret)
-		dev_err(&pdev->dev, "registering cpu dais failed\n");
+	ret = snd_soc_register_platform(&pdev->dev, &sst_soc_platform_drv);
+	if (ret) {
+		dev_err(&pdev->dev, "registering soc platform failed\n");
+		return ret;
+	}
 
+	ret = snd_soc_register_component(&pdev->dev, &sst_component,
+				sst_platform_dai, ARRAY_SIZE(sst_platform_dai));
+	if (ret) {
+		dev_err(&pdev->dev, "registering cpu dais failed\n");
+		snd_soc_unregister_platform(&pdev->dev);
+	}
 	return ret;
 }
 
 static int sst_platform_remove(struct platform_device *pdev)
 {
+
+	snd_soc_unregister_component(&pdev->dev);
+	snd_soc_unregister_platform(&pdev->dev);
 	dev_dbg(&pdev->dev, "sst_platform_remove success\n");
 	return 0;
 }
@@ -839,5 +846,4 @@ MODULE_DESCRIPTION("ASoC Intel(R) MID Platform driver");
 MODULE_AUTHOR("Vinod Koul <vinod.koul@intel.com>");
 MODULE_AUTHOR("Harsha Priya <priya.harsha@intel.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:sst-atom-hifi2-platform");
 MODULE_ALIAS("platform:sst-mfld-platform");

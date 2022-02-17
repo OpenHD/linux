@@ -20,7 +20,6 @@
 
 #include <asm/arcregs.h>
 #include <asm/tlb.h>
-#include <linux/sched/mm.h>
 
 #include <asm-generic/mm_hooks.h>
 

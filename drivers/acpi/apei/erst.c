@@ -513,7 +513,7 @@ retry:
 	if (i < erst_record_id_cache.len)
 		goto retry;
 	if (erst_record_id_cache.len >= erst_record_id_cache.size) {
-		int new_size;
+		int new_size, alloc_size;
 		u64 *new_entries;
 
 		new_size = erst_record_id_cache.size * 2;
@@ -524,8 +524,11 @@ retry:
 				pr_warn(FW_WARN "too many record IDs!\n");
 			return 0;
 		}
-		new_entries = kvmalloc_array(new_size, sizeof(entries[0]),
-					     GFP_KERNEL);
+		alloc_size = new_size * sizeof(entries[0]);
+		if (alloc_size < PAGE_SIZE)
+			new_entries = kmalloc(alloc_size, GFP_KERNEL);
+		else
+			new_entries = vmalloc(alloc_size);
 		if (!new_entries)
 			return -ENOMEM;
 		memcpy(new_entries, entries,
@@ -922,9 +925,15 @@ static int erst_check_table(struct acpi_table_erst *erst_tab)
 
 static int erst_open_pstore(struct pstore_info *psi);
 static int erst_close_pstore(struct pstore_info *psi);
-static ssize_t erst_reader(struct pstore_record *record);
-static int erst_writer(struct pstore_record *record);
-static int erst_clearer(struct pstore_record *record);
+static ssize_t erst_reader(u64 *id, enum pstore_type_id *type, int *count,
+			   struct timespec *time, char **buf,
+			   bool *compressed, ssize_t *ecc_notice_size,
+			   struct pstore_info *psi);
+static int erst_writer(enum pstore_type_id type, enum kmsg_dump_reason reason,
+		       u64 *id, unsigned int part, int count, bool compressed,
+		       size_t size, struct pstore_info *psi);
+static int erst_clearer(enum pstore_type_id type, u64 id, int count,
+			struct timespec time, struct pstore_info *psi);
 
 static struct pstore_info erst_info = {
 	.owner		= THIS_MODULE,
@@ -977,7 +986,10 @@ static int erst_close_pstore(struct pstore_info *psi)
 	return 0;
 }
 
-static ssize_t erst_reader(struct pstore_record *record)
+static ssize_t erst_reader(u64 *id, enum pstore_type_id *type, int *count,
+			   struct timespec *time, char **buf,
+			   bool *compressed, ssize_t *ecc_notice_size,
+			   struct pstore_info *psi)
 {
 	int rc;
 	ssize_t len = 0;
@@ -1015,40 +1027,42 @@ skip:
 	if (uuid_le_cmp(rcd->hdr.creator_id, CPER_CREATOR_PSTORE) != 0)
 		goto skip;
 
-	record->buf = kmalloc(len, GFP_KERNEL);
-	if (record->buf == NULL) {
+	*buf = kmalloc(len, GFP_KERNEL);
+	if (*buf == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
-	memcpy(record->buf, rcd->data, len - sizeof(*rcd));
-	record->id = record_id;
-	record->compressed = false;
-	record->ecc_notice_size = 0;
+	memcpy(*buf, rcd->data, len - sizeof(*rcd));
+	*id = record_id;
+	*compressed = false;
+	*ecc_notice_size = 0;
 	if (uuid_le_cmp(rcd->sec_hdr.section_type,
 			CPER_SECTION_TYPE_DMESG_Z) == 0) {
-		record->type = PSTORE_TYPE_DMESG;
-		record->compressed = true;
+		*type = PSTORE_TYPE_DMESG;
+		*compressed = true;
 	} else if (uuid_le_cmp(rcd->sec_hdr.section_type,
 			CPER_SECTION_TYPE_DMESG) == 0)
-		record->type = PSTORE_TYPE_DMESG;
+		*type = PSTORE_TYPE_DMESG;
 	else if (uuid_le_cmp(rcd->sec_hdr.section_type,
 			     CPER_SECTION_TYPE_MCE) == 0)
-		record->type = PSTORE_TYPE_MCE;
+		*type = PSTORE_TYPE_MCE;
 	else
-		record->type = PSTORE_TYPE_UNKNOWN;
+		*type = PSTORE_TYPE_UNKNOWN;
 
 	if (rcd->hdr.validation_bits & CPER_VALID_TIMESTAMP)
-		record->time.tv_sec = rcd->hdr.timestamp;
+		time->tv_sec = rcd->hdr.timestamp;
 	else
-		record->time.tv_sec = 0;
-	record->time.tv_nsec = 0;
+		time->tv_sec = 0;
+	time->tv_nsec = 0;
 
 out:
 	kfree(rcd);
 	return (rc < 0) ? rc : (len - sizeof(*rcd));
 }
 
-static int erst_writer(struct pstore_record *record)
+static int erst_writer(enum pstore_type_id type, enum kmsg_dump_reason reason,
+		       u64 *id, unsigned int part, int count, bool compressed,
+		       size_t size, struct pstore_info *psi)
 {
 	struct cper_pstore_record *rcd = (struct cper_pstore_record *)
 					(erst_info.buf - sizeof(*rcd));
@@ -1062,22 +1076,22 @@ static int erst_writer(struct pstore_record *record)
 	rcd->hdr.error_severity = CPER_SEV_FATAL;
 	/* timestamp valid. platform_id, partition_id are invalid */
 	rcd->hdr.validation_bits = CPER_VALID_TIMESTAMP;
-	rcd->hdr.timestamp = ktime_get_real_seconds();
-	rcd->hdr.record_length = sizeof(*rcd) + record->size;
+	rcd->hdr.timestamp = get_seconds();
+	rcd->hdr.record_length = sizeof(*rcd) + size;
 	rcd->hdr.creator_id = CPER_CREATOR_PSTORE;
 	rcd->hdr.notification_type = CPER_NOTIFY_MCE;
 	rcd->hdr.record_id = cper_next_record_id();
 	rcd->hdr.flags = CPER_HW_ERROR_FLAGS_PREVERR;
 
 	rcd->sec_hdr.section_offset = sizeof(*rcd);
-	rcd->sec_hdr.section_length = record->size;
+	rcd->sec_hdr.section_length = size;
 	rcd->sec_hdr.revision = CPER_SEC_REV;
 	/* fru_id and fru_text is invalid */
 	rcd->sec_hdr.validation_bits = 0;
 	rcd->sec_hdr.flags = CPER_SEC_PRIMARY;
-	switch (record->type) {
+	switch (type) {
 	case PSTORE_TYPE_DMESG:
-		if (record->compressed)
+		if (compressed)
 			rcd->sec_hdr.section_type = CPER_SECTION_TYPE_DMESG_Z;
 		else
 			rcd->sec_hdr.section_type = CPER_SECTION_TYPE_DMESG;
@@ -1091,14 +1105,15 @@ static int erst_writer(struct pstore_record *record)
 	rcd->sec_hdr.section_severity = CPER_SEV_FATAL;
 
 	ret = erst_write(&rcd->hdr);
-	record->id = rcd->hdr.record_id;
+	*id = rcd->hdr.record_id;
 
 	return ret;
 }
 
-static int erst_clearer(struct pstore_record *record)
+static int erst_clearer(enum pstore_type_id type, u64 id, int count,
+			struct timespec time, struct pstore_info *psi)
 {
-	return erst_clear(record->id);
+	return erst_clear(id);
 }
 
 static int __init erst_init(void)
@@ -1176,6 +1191,7 @@ static int __init erst_init(void)
 	"Error Record Serialization Table (ERST) support is initialized.\n");
 
 	buf = kmalloc(erst_erange.size, GFP_KERNEL);
+	spin_lock_init(&erst_info.buf_lock);
 	if (buf) {
 		erst_info.buf = buf + sizeof(struct cper_pstore_record);
 		erst_info.bufsize = erst_erange.size -

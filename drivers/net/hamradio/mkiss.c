@@ -17,7 +17,7 @@
  */
 #include <linux/module.h>
 #include <linux/bitops.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/crc16.h>
 #include <linux/string.h>
 #include <linux/mm.h>
@@ -217,7 +217,7 @@ static int kiss_esc_crc(unsigned char *s, unsigned char *d, unsigned short crc,
 			c = *s++;
 		else if (len > 1)
 			c = crc >> 8;
-		else
+		else if (len > 0)
 			c = crc & 0xff;
 
 		len--;
@@ -298,7 +298,7 @@ static void ax_bump(struct mkiss *ax)
 		return;
 	}
 
-	skb_put_data(skb, ax->rbuff, count);
+	memcpy(skb_put(skb,count), ax->rbuff, count);
 	skb->protocol = ax25_type_trans(skb, ax->dev);
 	netif_rx(skb);
 	ax->dev->stats.rx_packets++;
@@ -440,6 +440,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 		ax_changedmtu(ax);
 
 	if (len > ax->mtu) {		/* Sigh, shouldn't occur BUT ... */
+		len = ax->mtu;
 		printk(KERN_ERR "mkiss: %s: truncating oversized transmit packet!\n", ax->dev->name);
 		dev->stats.tx_dropped++;
 		netif_start_queue(dev);
@@ -476,8 +477,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 				  cmd = 0;
 				}
 				ax->crcauto = (cmd ? 0 : 1);
-				printk(KERN_INFO "mkiss: %s: crc mode set to %d\n",
-				       ax->dev->name, cmd);
+				printk(KERN_INFO "mkiss: %s: crc mode %s %d\n", ax->dev->name, (len) ? "set to" : "is", cmd);
 			}
 			spin_unlock_bh(&ax->buflock);
 			netif_start_queue(dev);

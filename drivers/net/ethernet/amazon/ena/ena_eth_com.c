@@ -45,16 +45,11 @@ static inline struct ena_eth_io_rx_cdesc_base *ena_com_get_next_rx_cdesc(
 	cdesc = (struct ena_eth_io_rx_cdesc_base *)(io_cq->cdesc_addr.virt_addr
 			+ (head_masked * io_cq->cdesc_entry_size_in_bytes));
 
-	desc_phase = (READ_ONCE(cdesc->status) & ENA_ETH_IO_RX_CDESC_BASE_PHASE_MASK) >>
+	desc_phase = (cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_PHASE_MASK) >>
 			ENA_ETH_IO_RX_CDESC_BASE_PHASE_SHIFT;
 
 	if (desc_phase != expected_phase)
 		return NULL;
-
-	/* Make sure we read the rest of the descriptor after the phase bit
-	 * has been read
-	 */
-	dma_rmb();
 
 	return cdesc;
 }
@@ -146,7 +141,7 @@ static inline u16 ena_com_cdesc_rx_pkt_get(struct ena_com_io_cq *io_cq,
 
 		ena_com_cq_inc_head(io_cq);
 		count++;
-		last = (READ_ONCE(cdesc->status) & ENA_ETH_IO_RX_CDESC_BASE_LAST_MASK) >>
+		last = (cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_LAST_MASK) >>
 			ENA_ETH_IO_RX_CDESC_BASE_LAST_SHIFT;
 	} while (!last);
 
@@ -245,11 +240,11 @@ static inline void ena_com_rx_set_flags(struct ena_com_rx_ctx *ena_rx_ctx,
 		(cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_L4_PROTO_IDX_MASK) >>
 		ENA_ETH_IO_RX_CDESC_BASE_L4_PROTO_IDX_SHIFT;
 	ena_rx_ctx->l3_csum_err =
-		!!((cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_L3_CSUM_ERR_MASK) >>
-		ENA_ETH_IO_RX_CDESC_BASE_L3_CSUM_ERR_SHIFT);
+		(cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_L3_CSUM_ERR_MASK) >>
+		ENA_ETH_IO_RX_CDESC_BASE_L3_CSUM_ERR_SHIFT;
 	ena_rx_ctx->l4_csum_err =
-		!!((cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_L4_CSUM_ERR_MASK) >>
-		ENA_ETH_IO_RX_CDESC_BASE_L4_CSUM_ERR_SHIFT);
+		(cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_L4_CSUM_ERR_MASK) >>
+		ENA_ETH_IO_RX_CDESC_BASE_L4_CSUM_ERR_SHIFT;
 	ena_rx_ctx->hash = cdesc->hash;
 	ena_rx_ctx->frag =
 		(cdesc->status & ENA_ETH_IO_RX_CDESC_BASE_IPV4_FRAG_MASK) >>
@@ -494,30 +489,13 @@ int ena_com_tx_comp_req_id_get(struct ena_com_io_cq *io_cq, u16 *req_id)
 	 * expected, it mean that the device still didn't update
 	 * this completion.
 	 */
-	cdesc_phase = READ_ONCE(cdesc->flags) & ENA_ETH_IO_TX_CDESC_PHASE_MASK;
+	cdesc_phase = cdesc->flags & ENA_ETH_IO_TX_CDESC_PHASE_MASK;
 	if (cdesc_phase != expected_phase)
 		return -EAGAIN;
 
-	dma_rmb();
-	if (unlikely(cdesc->req_id >= io_cq->q_depth)) {
-		pr_err("Invalid req id %d\n", cdesc->req_id);
-		return -EINVAL;
-	}
-
 	ena_com_cq_inc_head(io_cq);
 
-	*req_id = READ_ONCE(cdesc->req_id);
+	*req_id = cdesc->req_id;
 
 	return 0;
-}
-
-bool ena_com_cq_empty(struct ena_com_io_cq *io_cq)
-{
-	struct ena_eth_io_rx_cdesc_base *cdesc;
-
-	cdesc = ena_com_get_next_rx_cdesc(io_cq);
-	if (cdesc)
-		return false;
-	else
-		return true;
 }

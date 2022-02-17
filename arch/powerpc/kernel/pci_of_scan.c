@@ -38,7 +38,7 @@ static u32 get_int_prop(struct device_node *np, const char *name, u32 def)
  * @addr0: value of 1st cell of a device tree PCI address.
  * @bridge: Set this flag if the address is from a bridge 'ranges' property
  */
-unsigned int pci_parse_of_flags(u32 addr0, int bridge)
+static unsigned int pci_parse_of_flags(u32 addr0, int bridge)
 {
 	unsigned int flags = 0;
 
@@ -82,10 +82,16 @@ static void of_pci_parse_addrs(struct device_node *node, struct pci_dev *dev)
 	const __be32 *addrs;
 	u32 i;
 	int proplen;
+	bool mark_unset = false;
 
 	addrs = of_get_property(node, "assigned-addresses", &proplen);
-	if (!addrs)
-		return;
+	if (!addrs || !proplen) {
+		addrs = of_get_property(node, "reg", &proplen);
+		if (!addrs || !proplen)
+			return;
+		mark_unset = true;
+	}
+
 	pr_debug("    parse addresses (%d bytes) @ %p\n", proplen, addrs);
 	for (; proplen >= 20; proplen -= 20, addrs += 5) {
 		flags = pci_parse_of_flags(of_read_number(addrs, 1), 0);
@@ -110,6 +116,8 @@ static void of_pci_parse_addrs(struct device_node *node, struct pci_dev *dev)
 			continue;
 		}
 		res->flags = flags;
+		if (mark_unset)
+			res->flags |= IORESOURCE_UNSET;
 		res->name = pci_name(dev);
 		region.start = base;
 		region.end = base + size - 1;
@@ -213,19 +221,19 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 	unsigned int flags;
 	u64 size;
 
-	pr_debug("of_scan_pci_bridge(%pOF)\n", node);
+	pr_debug("of_scan_pci_bridge(%s)\n", node->full_name);
 
 	/* parse bus-range property */
 	busrange = of_get_property(node, "bus-range", &len);
 	if (busrange == NULL || len != 8) {
-		printk(KERN_DEBUG "Can't get bus-range for PCI-PCI bridge %pOF\n",
-		       node);
+		printk(KERN_DEBUG "Can't get bus-range for PCI-PCI bridge %s\n",
+		       node->full_name);
 		return;
 	}
 	ranges = of_get_property(node, "ranges", &len);
 	if (ranges == NULL) {
-		printk(KERN_DEBUG "Can't get ranges for PCI-PCI bridge %pOF\n",
-		       node);
+		printk(KERN_DEBUG "Can't get ranges for PCI-PCI bridge %s\n",
+		       node->full_name);
 		return;
 	}
 
@@ -235,8 +243,8 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 		bus = pci_add_new_bus(dev->bus, dev,
 				      of_read_number(busrange, 1));
 		if (!bus) {
-			printk(KERN_ERR "Failed to create pci bus for %pOF\n",
-			       node);
+			printk(KERN_ERR "Failed to create pci bus for %s\n",
+			       node->full_name);
 			return;
 		}
 	}
@@ -264,13 +272,13 @@ void of_scan_pci_bridge(struct pci_dev *dev)
 			res = bus->resource[0];
 			if (res->flags) {
 				printk(KERN_ERR "PCI: ignoring extra I/O range"
-				       " for bridge %pOF\n", node);
+				       " for bridge %s\n", node->full_name);
 				continue;
 			}
 		} else {
 			if (i >= PCI_NUM_RESOURCES - PCI_BRIDGE_RESOURCES) {
 				printk(KERN_ERR "PCI: too many memory ranges"
-				       " for bridge %pOF\n", node);
+				       " for bridge %s\n", node->full_name);
 				continue;
 			}
 			res = bus->resource[i];
@@ -309,7 +317,7 @@ static struct pci_dev *of_scan_pci_dev(struct pci_bus *bus,
 	struct eeh_dev *edev = pdn_to_eeh_dev(PCI_DN(dn));
 #endif
 
-	pr_debug("  * %pOF\n", dn);
+	pr_debug("  * %s\n", dn->full_name);
 	if (!of_device_is_available(dn))
 		return NULL;
 
@@ -352,8 +360,8 @@ static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
 	struct device_node *child;
 	struct pci_dev *dev;
 
-	pr_debug("of_scan_bus(%pOF) bus no %d...\n",
-		 node, bus->number);
+	pr_debug("of_scan_bus(%s) bus no %d...\n",
+		 node->full_name, bus->number);
 
 	/* Scan direct children */
 	for_each_child_of_node(node, child) {
@@ -371,8 +379,11 @@ static void __of_scan_bus(struct device_node *node, struct pci_bus *bus,
 	pcibios_setup_bus_devices(bus);
 
 	/* Now scan child busses */
-	for_each_pci_bridge(dev, bus)
-		of_scan_pci_bridge(dev);
+	list_for_each_entry(dev, &bus->devices, bus_list) {
+		if (pci_is_bridge(dev)) {
+			of_scan_pci_bridge(dev);
+		}
+	}
 }
 
 /**

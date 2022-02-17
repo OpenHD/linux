@@ -24,7 +24,6 @@
 #include <asm/machdep.h>
 #include <asm/iommu.h>
 #include <asm/ppc-pci.h>
-#include <asm/isa-bridge.h>
 
 #include "maple.h"
 
@@ -73,8 +72,8 @@ static void __init fixup_bus_range(struct device_node *bridge)
 	/* Lookup the "bus-range" property for the hose */
 	prop = of_find_property(bridge, "bus-range", &len);
 	if (prop == NULL  || prop->value == NULL || len < 2 * sizeof(int)) {
-		printk(KERN_WARNING "Can't get bus-range for %pOF\n",
-			       bridge);
+		printk(KERN_WARNING "Can't get bus-range for %s\n",
+			       bridge->full_name);
 		return;
 	}
 	bus_range = prop->value;
@@ -498,12 +497,12 @@ static int __init maple_add_bridge(struct device_node *dev)
 	const int *bus_range;
 	int primary = 1;
 
-	DBG("Adding PCI host bridge %pOF\n", dev);
+	DBG("Adding PCI host bridge %s\n", dev->full_name);
 
 	bus_range = of_get_property(dev, "bus-range", &len);
 	if (bus_range == NULL || len < 2 * sizeof(int)) {
-		printk(KERN_WARNING "Can't get bus-range for %pOF, assume bus 0\n",
-		dev);
+		printk(KERN_WARNING "Can't get bus-range for %s, assume bus 0\n",
+		dev->full_name);
 	}
 
 	hose = pcibios_alloc_controller(dev);

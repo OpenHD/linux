@@ -1,14 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// Core driver for the imx pin controller in imx1/21/27
-//
-// Copyright (C) 2013 Pengutronix
-// Author: Markus Pargmann <mpa@pengutronix.de>
-//
-// Based on pinctrl-imx.c:
-//	Author: Dong Aisheng <dong.aisheng@linaro.org>
-//	Copyright (C) 2012 Freescale Semiconductor, Inc.
-//	Copyright (C) 2012 Linaro Ltd.
+/*
+ * Core driver for the imx pin controller in imx1/21/27
+ *
+ * Copyright (C) 2013 Pengutronix
+ * Author: Markus Pargmann <mpa@pengutronix.de>
+ *
+ * Based on pinctrl-imx.c:
+ *	Author: Dong Aisheng <dong.aisheng@linaro.org>
+ *	Copyright (C) 2012 Freescale Semiconductor, Inc.
+ *	Copyright (C) 2012 Linaro Ltd.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
 
 #include <linux/bitops.h>
 #include <linux/err.h>
@@ -241,8 +246,7 @@ static int imx1_dt_node_to_map(struct pinctrl_dev *pctldev,
 	for (i = 0; i < grp->npins; i++)
 		map_num++;
 
-	new_map = kmalloc_array(map_num, sizeof(struct pinctrl_map),
-				GFP_KERNEL);
+	new_map = kmalloc(sizeof(struct pinctrl_map) * map_num, GFP_KERNEL);
 	if (!new_map)
 		return -ENOMEM;
 
@@ -483,10 +487,10 @@ static int imx1_pinctrl_parse_groups(struct device_node *np,
 	}
 
 	grp->npins = size / 12;
-	grp->pins = devm_kcalloc(info->dev,
-			grp->npins, sizeof(struct imx1_pin), GFP_KERNEL);
-	grp->pin_ids = devm_kcalloc(info->dev,
-			grp->npins, sizeof(unsigned int), GFP_KERNEL);
+	grp->pins = devm_kzalloc(info->dev,
+			grp->npins * sizeof(struct imx1_pin), GFP_KERNEL);
+	grp->pin_ids = devm_kzalloc(info->dev,
+			grp->npins * sizeof(unsigned int), GFP_KERNEL);
 
 	if (!grp->pins || !grp->pin_ids)
 		return -ENOMEM;
@@ -523,8 +527,8 @@ static int imx1_pinctrl_parse_functions(struct device_node *np,
 	if (func->num_groups == 0)
 		return -EINVAL;
 
-	func->groups = devm_kcalloc(info->dev,
-			func->num_groups, sizeof(char *), GFP_KERNEL);
+	func->groups = devm_kzalloc(info->dev,
+			func->num_groups * sizeof(char *), GFP_KERNEL);
 
 	if (!func->groups)
 		return -ENOMEM;
@@ -566,12 +570,12 @@ static int imx1_pinctrl_parse_dt(struct platform_device *pdev,
 	}
 
 	info->nfunctions = nfuncs;
-	info->functions = devm_kcalloc(&pdev->dev,
-			nfuncs, sizeof(struct imx1_pmx_func), GFP_KERNEL);
+	info->functions = devm_kzalloc(&pdev->dev,
+			nfuncs * sizeof(struct imx1_pmx_func), GFP_KERNEL);
 
 	info->ngroups = ngroups;
-	info->groups = devm_kcalloc(&pdev->dev,
-			ngroups, sizeof(struct imx1_pin_group), GFP_KERNEL);
+	info->groups = devm_kzalloc(&pdev->dev,
+			ngroups * sizeof(struct imx1_pin_group), GFP_KERNEL);
 
 
 	if (!info->functions || !info->groups)
@@ -638,7 +642,6 @@ int imx1_pinctrl_core_probe(struct platform_device *pdev,
 
 	ret = of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 	if (ret) {
-		pinctrl_unregister(ipctl->pctl);
 		dev_err(&pdev->dev, "Failed to populate subdevices\n");
 		return ret;
 	}

@@ -19,7 +19,6 @@
 #include <linux/slab.h>
 #include <linux/seq_file.h>
 #include <linux/cryptouser.h>
-#include <linux/compiler.h>
 #include <net/netlink.h>
 
 #include <crypto/scatterwalk.h>
@@ -324,8 +323,10 @@ static int setkey(struct crypto_ablkcipher *tfm, const u8 *key,
 {
 	struct ablkcipher_alg *cipher = crypto_ablkcipher_alg(tfm);
 	unsigned long alignmask = crypto_ablkcipher_alignmask(tfm);
+	int in_mem = IS_KEY_IN_MEM(keylen);
 
-	if (keylen < cipher->min_keysize || keylen > cipher->max_keysize) {
+	if ((keylen < cipher->min_keysize || keylen > cipher->max_keysize)
+				&& !in_mem) {
 		crypto_ablkcipher_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return -EINVAL;
 	}
@@ -366,7 +367,7 @@ static int crypto_ablkcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
 	struct crypto_report_blkcipher rblkcipher;
 
 	strncpy(rblkcipher.type, "ablkcipher", sizeof(rblkcipher.type));
-	strncpy(rblkcipher.geniv, alg->cra_ablkcipher.geniv ?: "<default>",
+	strlcpy(rblkcipher.geniv, alg->cra_ablkcipher.geniv ?: "<default>",
 		sizeof(rblkcipher.geniv));
 	rblkcipher.geniv[sizeof(rblkcipher.geniv) - 1] = '\0';
 
@@ -391,7 +392,7 @@ static int crypto_ablkcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
 #endif
 
 static void crypto_ablkcipher_show(struct seq_file *m, struct crypto_alg *alg)
-	__maybe_unused;
+	__attribute__ ((unused));
 static void crypto_ablkcipher_show(struct seq_file *m, struct crypto_alg *alg)
 {
 	struct ablkcipher_alg *ablkcipher = &alg->cra_ablkcipher;
@@ -441,7 +442,7 @@ static int crypto_givcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
 	struct crypto_report_blkcipher rblkcipher;
 
 	strncpy(rblkcipher.type, "givcipher", sizeof(rblkcipher.type));
-	strncpy(rblkcipher.geniv, alg->cra_ablkcipher.geniv ?: "<built-in>",
+	strlcpy(rblkcipher.geniv, alg->cra_ablkcipher.geniv ?: "<built-in>",
 		sizeof(rblkcipher.geniv));
 	rblkcipher.geniv[sizeof(rblkcipher.geniv) - 1] = '\0';
 
@@ -466,7 +467,7 @@ static int crypto_givcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
 #endif
 
 static void crypto_givcipher_show(struct seq_file *m, struct crypto_alg *alg)
-	__maybe_unused;
+	__attribute__ ((unused));
 static void crypto_givcipher_show(struct seq_file *m, struct crypto_alg *alg)
 {
 	struct ablkcipher_alg *ablkcipher = &alg->cra_ablkcipher;

@@ -2,9 +2,9 @@
 
 .. _frontend_legacy_dvbv3_api:
 
-***********************************************
-Digital TV Frontend legacy API (a. k. a. DVBv3)
-***********************************************
+****************************************
+DVB Frontend legacy API (a. k. a. DVBv3)
+****************************************
 
 The usage of this API is deprecated, as it doesn't support all digital
 TV standards, doesn't provide good statistics measurements and provides

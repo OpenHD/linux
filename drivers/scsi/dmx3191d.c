@@ -34,13 +34,13 @@
  * Definitions for the generic 5380 driver.
  */
 
-#define NCR5380_read(reg)		inb(hostdata->base + (reg))
-#define NCR5380_write(reg, value)	outb(value, hostdata->base + (reg))
+#define NCR5380_read(reg)		inb(instance->io_port + reg)
+#define NCR5380_write(reg, value)	outb(value, instance->io_port + reg)
 
-#define NCR5380_dma_xfer_len		NCR5380_dma_xfer_none
-#define NCR5380_dma_recv_setup		NCR5380_dma_setup_none
-#define NCR5380_dma_send_setup		NCR5380_dma_setup_none
-#define NCR5380_dma_residual		NCR5380_dma_residual_none
+#define NCR5380_dma_xfer_len(instance, cmd, phase)	(0)
+#define NCR5380_dma_recv_setup(instance, dst, len)	(0)
+#define NCR5380_dma_send_setup(instance, src, len)	(0)
+#define NCR5380_dma_residual(instance)			(0)
 
 #define NCR5380_implementation_fields	/* none */
 
@@ -58,7 +58,7 @@ static struct scsi_host_template dmx3191d_driver_template = {
 	.info			= NCR5380_info,
 	.queuecommand		= NCR5380_queue_command,
 	.eh_abort_handler	= NCR5380_abort,
-	.eh_host_reset_handler	= NCR5380_host_reset,
+	.eh_bus_reset_handler	= NCR5380_bus_reset,
 	.can_queue		= 32,
 	.this_id		= 7,
 	.sg_tablesize		= SG_ALL,
@@ -71,7 +71,6 @@ static int dmx3191d_probe_one(struct pci_dev *pdev,
 			      const struct pci_device_id *id)
 {
 	struct Scsi_Host *shost;
-	struct NCR5380_hostdata *hostdata;
 	unsigned long io;
 	int error = -ENODEV;
 
@@ -89,9 +88,7 @@ static int dmx3191d_probe_one(struct pci_dev *pdev,
 			sizeof(struct NCR5380_hostdata));
 	if (!shost)
 		goto out_release_region;       
-
-	hostdata = shost_priv(shost);
-	hostdata->base = io;
+	shost->io_port = io;
 
 	/* This card does not seem to raise an interrupt on pdev->irq.
 	 * Steam-powered SCSI controllers run without an IRQ anyway.
@@ -128,8 +125,7 @@ out_host_put:
 static void dmx3191d_remove_one(struct pci_dev *pdev)
 {
 	struct Scsi_Host *shost = pci_get_drvdata(pdev);
-	struct NCR5380_hostdata *hostdata = shost_priv(shost);
-	unsigned long io = hostdata->base;
+	unsigned long io = shost->io_port;
 
 	scsi_remove_host(shost);
 
@@ -153,7 +149,18 @@ static struct pci_driver dmx3191d_pci_driver = {
 	.remove		= dmx3191d_remove_one,
 };
 
-module_pci_driver(dmx3191d_pci_driver);
+static int __init dmx3191d_init(void)
+{
+	return pci_register_driver(&dmx3191d_pci_driver);
+}
+
+static void __exit dmx3191d_exit(void)
+{
+	pci_unregister_driver(&dmx3191d_pci_driver);
+}
+
+module_init(dmx3191d_init);
+module_exit(dmx3191d_exit);
 
 MODULE_AUTHOR("Massimo Piccioni <dafastidio@libero.it>");
 MODULE_DESCRIPTION("Domex DMX3191D SCSI driver");

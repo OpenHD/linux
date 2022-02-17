@@ -1,9 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Renesas R-Car Gen1 SRU/SSI support
-//
-// Copyright (C) 2013 Renesas Solutions Corp.
-// Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
+/*
+ * Renesas R-Car Gen1 SRU/SSI support
+ *
+ * Copyright (C) 2013 Renesas Solutions Corp.
+ * Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 
 /*
  * #define DEBUG
@@ -207,16 +211,6 @@ static int rsnd_gen2_probe(struct rsnd_priv *priv)
 		RSND_GEN_S_REG(SSI_MODE1,	0x804),
 		RSND_GEN_S_REG(SSI_MODE2,	0x808),
 		RSND_GEN_S_REG(SSI_CONTROL,	0x810),
-		RSND_GEN_S_REG(SSI_SYS_STATUS0,	0x840),
-		RSND_GEN_S_REG(SSI_SYS_STATUS1,	0x844),
-		RSND_GEN_S_REG(SSI_SYS_STATUS2,	0x848),
-		RSND_GEN_S_REG(SSI_SYS_STATUS3,	0x84c),
-		RSND_GEN_S_REG(SSI_SYS_STATUS4,	0x880),
-		RSND_GEN_S_REG(SSI_SYS_STATUS5,	0x884),
-		RSND_GEN_S_REG(SSI_SYS_STATUS6,	0x888),
-		RSND_GEN_S_REG(SSI_SYS_STATUS7,	0x88c),
-		RSND_GEN_S_REG(HDMI0_SEL,	0x9e0),
-		RSND_GEN_S_REG(HDMI1_SEL,	0x9e4),
 
 		/* FIXME: it needs SSI_MODE2/3 in the future */
 		RSND_GEN_M_REG(SSI_BUSIF_MODE,	0x0,	0x80),
@@ -234,7 +228,6 @@ static int rsnd_gen2_probe(struct rsnd_priv *priv)
 		RSND_GEN_M_REG(SRC_ROUTE_MODE0,	0xc,	0x20),
 		RSND_GEN_M_REG(SRC_CTRL,	0x10,	0x20),
 		RSND_GEN_M_REG(SRC_INT_ENABLE0,	0x18,	0x20),
-		RSND_GEN_M_REG(CMD_BUSIF_MODE,	0x184,	0x20),
 		RSND_GEN_M_REG(CMD_BUSIF_DALIGN,0x188,	0x20),
 		RSND_GEN_M_REG(CMD_ROUTE_SLCT,	0x18c,	0x20),
 		RSND_GEN_M_REG(CMD_CTRL,	0x190,	0x20),
@@ -318,7 +311,7 @@ static int rsnd_gen2_probe(struct rsnd_priv *priv)
 	static const struct rsnd_regmap_field_conf conf_adg[] = {
 		RSND_GEN_S_REG(BRRA,		0x00),
 		RSND_GEN_S_REG(BRRB,		0x04),
-		RSND_GEN_S_REG(BRGCKR,		0x08),
+		RSND_GEN_S_REG(SSICKR,		0x08),
 		RSND_GEN_S_REG(AUDIO_CLK_SEL0,	0x0c),
 		RSND_GEN_S_REG(AUDIO_CLK_SEL1,	0x10),
 		RSND_GEN_S_REG(AUDIO_CLK_SEL2,	0x14),
@@ -369,7 +362,7 @@ static int rsnd_gen1_probe(struct rsnd_priv *priv)
 	static const struct rsnd_regmap_field_conf conf_adg[] = {
 		RSND_GEN_S_REG(BRRA,		0x00),
 		RSND_GEN_S_REG(BRRB,		0x04),
-		RSND_GEN_S_REG(BRGCKR,		0x08),
+		RSND_GEN_S_REG(SSICKR,		0x08),
 		RSND_GEN_S_REG(AUDIO_CLK_SEL0,	0x0c),
 		RSND_GEN_S_REG(AUDIO_CLK_SEL1,	0x10),
 	};
@@ -402,16 +395,17 @@ int rsnd_gen_probe(struct rsnd_priv *priv)
 	int ret;
 
 	gen = devm_kzalloc(dev, sizeof(*gen), GFP_KERNEL);
-	if (!gen)
+	if (!gen) {
+		dev_err(dev, "GEN allocate failed\n");
 		return -ENOMEM;
+	}
 
 	priv->gen = gen;
 
 	ret = -ENODEV;
 	if (rsnd_is_gen1(priv))
 		ret = rsnd_gen1_probe(priv);
-	else if (rsnd_is_gen2(priv) ||
-		 rsnd_is_gen3(priv))
+	else if (rsnd_is_gen2(priv))
 		ret = rsnd_gen2_probe(priv);
 
 	if (ret < 0)

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 menu "Platform support"
 
 source "arch/powerpc/platforms/powernv/Kconfig"
@@ -60,17 +59,6 @@ config PPC_OF_BOOT_TRAMPOLINE
 
 	  In case of doubt, say Y
 
-config PPC_DT_CPU_FTRS
-	bool "Device-tree based CPU feature discovery & setup"
-	depends on PPC_BOOK3S_64
-	default y
-	help
-	  This enables code to use a new device tree binding for describing CPU
-	  compatibility and features. Saying Y here will attempt to use the new
-	  binding if the firmware provides it. Currently only the skiboot
-	  firmware provides this binding.
-	  If you're not sure say Y.
-
 config UDBG_RTAS_CONSOLE
 	bool "RTAS based debug console"
 	depends on PPC_RTAS
@@ -79,7 +67,7 @@ config UDBG_RTAS_CONSOLE
 config PPC_SMP_MUXED_IPI
 	bool
 	help
-	  Select this option if your platform supports SMP and your
+	  Select this opton if your platform supports SMP and your
 	  interrupt controller provides less than 4 interrupts to each
 	  cpu.	This will enable the generic code to multiplex the 4
 	  messages on to one ipi.
@@ -180,6 +168,17 @@ config MPIC_BROKEN_REGREAD
 	  well, but enabling it uses about 8KB of memory to keep copies
 	  of the register contents in software.
 
+config IBMVIO
+	depends on PPC_PSERIES
+	bool
+	default y
+
+config IBMEBUS
+	depends on PPC_PSERIES
+	bool "Support for GX bus based adapters"
+	help
+	  Bus device driver for GX bus based adapters.
+
 config EEH
 	bool
 	depends on (PPC_POWERNV || PPC_PSERIES) && PCI
@@ -243,7 +242,7 @@ config TAU
 	  temp is actually what /proc/cpuinfo says it is.
 
 config TAU_INT
-	bool "Interrupt driven TAU driver (DANGEROUS)"
+	bool "Interrupt driven TAU driver (EXPERIMENTAL)"
 	depends on TAU
 	---help---
 	  The TAU supports an interrupt driven mode which causes an interrupt
@@ -251,12 +250,7 @@ config TAU_INT
 	  to get notified the temp has exceeded a range. With this option off,
 	  a timer is used to re-check the temperature periodically.
 
-	  However, on some cpus it appears that the TAU interrupt hardware
-	  is buggy and can cause a situation which would lead unexplained hard
-	  lockups.
-
-	  Unless you are extending the TAU driver, or enjoy kernel/hardware
-	  debugging, leave this option off.
+	  If in doubt, say N here.
 
 config TAU_AVERAGE
 	bool "Average high and low temp"
@@ -292,6 +286,16 @@ config CPM2
 	  embedded CPUs made by Freescale.  Selecting this option means that
 	  you wish to build a kernel for a machine with a CPM2 coprocessor
 	  on it (826x, 827x, 8560).
+
+config AXON_RAM
+	tristate "Axon DDR2 memory device driver"
+	depends on PPC_IBM_CELL_BLADE && BLOCK
+	default m
+	help
+	  It registers one block device per Axon's DDR2 memory bank found
+	  on a system. Block devices are called axonram?, their major and
+	  minor numbers are available in /proc/devices, /proc/partitions or
+	  in /sys/block/axonram?/dev.
 
 config FSL_ULI1575
 	bool

@@ -482,7 +482,6 @@ int dock_notify(struct acpi_device *adev, u32 event)
 		surprise_removal = 1;
 		event = ACPI_NOTIFY_EJECT_REQUEST;
 		/* Fall back */
-		/* fall through */
 	case ACPI_NOTIFY_EJECT_REQUEST:
 		begin_undock(ds);
 		if ((immediate_undock && !(ds->flags & DOCK_IS_ATA))
@@ -586,7 +585,7 @@ static struct attribute *dock_attributes[] = {
 	NULL
 };
 
-static const struct attribute_group dock_attribute_group = {
+static struct attribute_group dock_attribute_group = {
 	.attrs = dock_attributes
 };
 

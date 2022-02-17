@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * io-unit.c:  IO-UNIT specific routines for memory management.
  *

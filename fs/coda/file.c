@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * File operations for Coda.
  * Original version: (C) 1996 Peter Braam 
@@ -27,13 +26,6 @@
 #include "coda_linux.h"
 #include "coda_int.h"
 
-struct coda_vm_ops {
-	atomic_t refcnt;
-	struct file *coda_file;
-	const struct vm_operations_struct *host_vm_ops;
-	struct vm_operations_struct vm_ops;
-};
-
 static ssize_t
 coda_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
@@ -42,7 +34,7 @@ coda_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 
 	BUG_ON(!cfi || cfi->cfi_magic != CODA_MAGIC);
 
-	return vfs_iter_read(cfi->cfi_container, to, &iocb->ki_pos, 0);
+	return vfs_iter_read(cfi->cfi_container, to, &iocb->ki_pos);
 }
 
 static ssize_t
@@ -59,7 +51,7 @@ coda_file_write_iter(struct kiocb *iocb, struct iov_iter *to)
 	host_file = cfi->cfi_container;
 	file_start_write(host_file);
 	inode_lock(coda_inode);
-	ret = vfs_iter_write(cfi->cfi_container, to, &iocb->ki_pos, 0);
+	ret = vfs_iter_write(cfi->cfi_container, to, &iocb->ki_pos);
 	coda_inode->i_size = file_inode(host_file)->i_size;
 	coda_inode->i_blocks = (coda_inode->i_size + 511) >> 9;
 	coda_inode->i_mtime = coda_inode->i_ctime = current_time(coda_inode);
@@ -67,6 +59,13 @@ coda_file_write_iter(struct kiocb *iocb, struct iov_iter *to)
 	file_end_write(host_file);
 	return ret;
 }
+
+struct coda_vm_ops {
+	atomic_t refcnt;
+	struct file *coda_file;
+	const struct vm_operations_struct *host_vm_ops;
+	struct vm_operations_struct vm_ops;
+};
 
 static void
 coda_vm_open(struct vm_area_struct *vma)
@@ -143,7 +142,7 @@ coda_file_mmap(struct file *coda_file, struct vm_area_struct *vma)
 	spin_unlock(&cii->c_lock);
 
 	vma->vm_file = get_file(host_file);
-	ret = call_mmap(vma->vm_file, vma);
+	ret = host_file->f_op->mmap(host_file, vma);
 
 	if (ret) {
 		/* if call_mmap fails, our caller will put coda_file so we
@@ -274,3 +273,4 @@ const struct file_operations coda_file_operations = {
 	.fsync		= coda_fsync,
 	.splice_read	= generic_file_splice_read,
 };
+

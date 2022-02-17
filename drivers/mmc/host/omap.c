@@ -626,9 +626,9 @@ static void mmc_omap_abort_command(struct work_struct *work)
 }
 
 static void
-mmc_omap_cmd_timer(struct timer_list *t)
+mmc_omap_cmd_timer(unsigned long data)
 {
-	struct mmc_omap_host *host = from_timer(host, t, cmd_abort_timer);
+	struct mmc_omap_host *host = (struct mmc_omap_host *) data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&host->slot_lock, flags);
@@ -655,9 +655,9 @@ mmc_omap_sg_to_buf(struct mmc_omap_host *host)
 }
 
 static void
-mmc_omap_clk_timer(struct timer_list *t)
+mmc_omap_clk_timer(unsigned long data)
 {
-	struct mmc_omap_host *host = from_timer(host, t, clk_timer);
+	struct mmc_omap_host *host = (struct mmc_omap_host *) data;
 
 	mmc_omap_fclk_enable(host, 0);
 }
@@ -875,9 +875,9 @@ void omap_mmc_notify_cover_event(struct device *dev, int num, int is_closed)
 	tasklet_hi_schedule(&slot->cover_tasklet);
 }
 
-static void mmc_omap_cover_timer(struct timer_list *t)
+static void mmc_omap_cover_timer(unsigned long arg)
 {
-	struct mmc_omap_slot *slot = from_timer(slot, t, cover_timer);
+	struct mmc_omap_slot *slot = (struct mmc_omap_slot *) arg;
 	tasklet_schedule(&slot->cover_tasklet);
 }
 
@@ -894,7 +894,7 @@ static void mmc_omap_cover_handler(unsigned long param)
 	 * If no card is inserted, we postpone polling until
 	 * the cover has been closed.
 	 */
-	if (slot->mmc->card == NULL)
+	if (slot->mmc->card == NULL || !mmc_card_present(slot->mmc->card))
 		return;
 
 	mod_timer(&slot->cover_timer,
@@ -1271,7 +1271,8 @@ static int mmc_omap_new_slot(struct mmc_omap_host *host, int id)
 	mmc->max_seg_size = mmc->max_req_size;
 
 	if (slot->pdata->get_cover_state != NULL) {
-		timer_setup(&slot->cover_timer, mmc_omap_cover_timer, 0);
+		setup_timer(&slot->cover_timer, mmc_omap_cover_timer,
+			    (unsigned long)slot);
 		tasklet_init(&slot->cover_tasklet, mmc_omap_cover_handler,
 			     (unsigned long)slot);
 	}
@@ -1358,10 +1359,11 @@ static int mmc_omap_probe(struct platform_device *pdev)
 	INIT_WORK(&host->send_stop_work, mmc_omap_send_stop_work);
 
 	INIT_WORK(&host->cmd_abort_work, mmc_omap_abort_command);
-	timer_setup(&host->cmd_abort_timer, mmc_omap_cmd_timer, 0);
+	setup_timer(&host->cmd_abort_timer, mmc_omap_cmd_timer,
+		    (unsigned long) host);
 
 	spin_lock_init(&host->clk_lock);
-	timer_setup(&host->clk_timer, mmc_omap_clk_timer, 0);
+	setup_timer(&host->clk_timer, mmc_omap_clk_timer, (unsigned long) host);
 
 	spin_lock_init(&host->dma_lock);
 	spin_lock_init(&host->slot_lock);

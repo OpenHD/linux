@@ -17,7 +17,6 @@
 #include <sys/resource.h>
 #include "libbpf.h"
 #include "bpf_load.h"
-#include "trace_helpers.h"
 
 #define PRINT_RAW_ADDR 0
 
@@ -50,14 +49,14 @@ static void print_stack(struct key_t *key, __u64 count)
 	int i;
 
 	printf("%s;", key->target);
-	if (bpf_map_lookup_elem(map_fd[3], &key->tret, ip) != 0) {
+	if (bpf_lookup_elem(map_fd[3], &key->tret, ip) != 0) {
 		printf("---;");
 	} else {
 		for (i = PERF_MAX_STACK_DEPTH - 1; i >= 0; i--)
 			print_ksym(ip[i]);
 	}
 	printf("-;");
-	if (bpf_map_lookup_elem(map_fd[3], &key->wret, ip) != 0) {
+	if (bpf_lookup_elem(map_fd[3], &key->wret, ip) != 0) {
 		printf("---;");
 	} else {
 		for (i = 0; i < PERF_MAX_STACK_DEPTH; i++)
@@ -78,8 +77,8 @@ static void print_stacks(int fd)
 	struct key_t key = {}, next_key;
 	__u64 value;
 
-	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
-		bpf_map_lookup_elem(fd, &next_key, &value);
+	while (bpf_get_next_key(fd, &key, &next_key) == 0) {
+		bpf_lookup_elem(fd, &next_key, &value);
 		print_stack(&next_key, value);
 		key = next_key;
 	}
@@ -101,7 +100,6 @@ int main(int argc, char **argv)
 	setrlimit(RLIMIT_MEMLOCK, &r);
 
 	signal(SIGINT, int_exit);
-	signal(SIGTERM, int_exit);
 
 	if (load_kallsyms()) {
 		printf("failed to process /proc/kallsyms\n");

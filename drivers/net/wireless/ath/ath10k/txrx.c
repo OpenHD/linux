@@ -1,7 +1,6 @@
 /*
  * Copyright (c) 2005-2011 Atheros Communications Inc.
- * Copyright (c) 2011-2016 Qualcomm Atheros, Inc.
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2013 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -35,8 +34,7 @@ static void ath10k_report_offchan_tx(struct ath10k *ar, struct sk_buff *skb)
 	/* If the original wait_for_completion() timed out before
 	 * {data,mgmt}_tx_completed() was called then we could complete
 	 * offchan_tx_completed for a different skb. Prevent this by using
-	 * offchan_tx_skb.
-	 */
+	 * offchan_tx_skb. */
 	spin_lock_bh(&ar->data_lock);
 	if (ar->offchan_tx_skb != skb) {
 		ath10k_warn(ar, "completed old offchannel frame\n");
@@ -105,6 +103,11 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 
 	trace_ath10k_txrx_tx_unref(ar, tx_done->msdu_id);
 
+	if (tx_done->status == HTT_TX_COMPL_STATE_DISCARD) {
+		ieee80211_free_txskb(htt->ar->hw, msdu);
+		return 0;
+	}
+
 	if (!(info->flags & IEEE80211_TX_CTL_NO_ACK))
 		info->flags |= IEEE80211_TX_STAT_ACK;
 
@@ -114,20 +117,6 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 	if ((tx_done->status == HTT_TX_COMPL_STATE_ACK) &&
 	    (info->flags & IEEE80211_TX_CTL_NO_ACK))
 		info->flags |= IEEE80211_TX_STAT_NOACK_TRANSMITTED;
-
-	if (tx_done->status == HTT_TX_COMPL_STATE_DISCARD) {
-		if (info->flags & IEEE80211_TX_CTL_NO_ACK)
-			info->flags &= ~IEEE80211_TX_STAT_NOACK_TRANSMITTED;
-		else
-			info->flags &= ~IEEE80211_TX_STAT_ACK;
-	}
-
-	if (tx_done->status == HTT_TX_COMPL_STATE_ACK &&
-	    tx_done->ack_rssi != ATH10K_INVALID_RSSI) {
-		info->status.ack_signal = ATH10K_DEFAULT_NOISE_FLOOR +
-						tx_done->ack_rssi;
-		info->status.is_valid_ack_signal = true;
-	}
 
 	ieee80211_tx_status(htt->ar->hw, msdu);
 	/* we do not own the msdu anymore */
@@ -157,9 +146,6 @@ struct ath10k_peer *ath10k_peer_find(struct ath10k *ar, int vdev_id,
 struct ath10k_peer *ath10k_peer_find_by_id(struct ath10k *ar, int peer_id)
 {
 	struct ath10k_peer *peer;
-
-	if (peer_id >= BITS_PER_TYPE(peer->peer_ids))
-		return NULL;
 
 	lockdep_assert_held(&ar->data_lock);
 

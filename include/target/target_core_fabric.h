@@ -1,10 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef TARGET_CORE_FABRIC_H
 #define TARGET_CORE_FABRIC_H
-
-#include <linux/configfs.h>
-#include <linux/types.h>
-#include <target/target_core_base.h>
 
 struct target_core_fabric_ops {
 	struct module *module;
@@ -48,7 +43,7 @@ struct target_core_fabric_ops {
 	u32 (*tpg_get_inst_index)(struct se_portal_group *);
 	/*
 	 * Optional to release struct se_cmd and fabric dependent allocated
-	 * I/O descriptor after command execution has finished.
+	 * I/O descriptor in transport_cmd_check_stop().
 	 *
 	 * Returning 1 will signal a descriptor has been released.
 	 * Returning 0 will signal a descriptor has not been released.
@@ -79,7 +74,7 @@ struct target_core_fabric_ops {
 	void (*fabric_drop_wwn)(struct se_wwn *);
 	void (*add_wwn_groups)(struct se_wwn *);
 	struct se_portal_group *(*fabric_make_tpg)(struct se_wwn *,
-						   const char *);
+				struct config_group *, const char *);
 	void (*fabric_drop_tpg)(struct se_portal_group *);
 	int (*fabric_post_link)(struct se_portal_group *,
 				struct se_lun *);
@@ -109,17 +104,17 @@ void target_unregister_template(const struct target_core_fabric_ops *fo);
 int target_depend_item(struct config_item *item);
 void target_undepend_item(struct config_item *item);
 
-struct se_session *target_setup_session(struct se_portal_group *,
+struct se_session *target_alloc_session(struct se_portal_group *,
 		unsigned int, unsigned int, enum target_prot_op prot_op,
 		const char *, void *,
 		int (*callback)(struct se_portal_group *,
 				struct se_session *, void *));
-void target_remove_session(struct se_session *);
 
-int transport_init_session(struct se_session *se_sess);
-struct se_session *transport_alloc_session(enum target_prot_op);
+struct se_session *transport_init_session(enum target_prot_op);
 int transport_alloc_session_tags(struct se_session *, unsigned int,
 		unsigned int);
+struct se_session *transport_init_session_tags(unsigned int, unsigned int,
+		enum target_prot_op);
 void	__transport_register_session(struct se_portal_group *,
 		struct se_node_acl *, struct se_session *, void *);
 void	transport_register_session(struct se_portal_group *,
@@ -161,7 +156,6 @@ int	target_get_sess_cmd(struct se_cmd *, bool);
 int	target_put_sess_cmd(struct se_cmd *);
 void	target_sess_cmd_list_set_waiting(struct se_session *);
 void	target_wait_for_sess_cmds(struct se_session *);
-void	target_show_cmd(const char *pfx, struct se_cmd *cmd);
 
 int	core_alua_check_nonop_delay(struct se_cmd *);
 

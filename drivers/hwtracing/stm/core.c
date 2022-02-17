@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * System Trace Module (STM) infrastructure
  * Copyright (c) 2014, Intel Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  *
  * STM class implements generic infrastructure for  System Trace Module devices
  * as defined in MIPI STPv2 specification.
@@ -166,10 +174,11 @@ stm_master(struct stm_device *stm, unsigned int idx)
 static int stp_master_alloc(struct stm_device *stm, unsigned int idx)
 {
 	struct stp_master *master;
+	size_t size;
 
-	master = kzalloc(struct_size(master, chan_map,
-				     BITS_TO_LONGS(stm->data->sw_nchannels)),
-			 GFP_ATOMIC);
+	size = ALIGN(stm->data->sw_nchannels, 8) / 8;
+	size += sizeof(struct stp_master);
+	master = kzalloc(size, GFP_ATOMIC);
 	if (!master)
 		return -ENOMEM;
 
@@ -422,7 +431,7 @@ static int stm_file_assign(struct stm_file *stmf, char *id, unsigned int width)
 	return ret;
 }
 
-static ssize_t notrace stm_write(struct stm_data *data, unsigned int master,
+static ssize_t stm_write(struct stm_data *data, unsigned int master,
 			  unsigned int channel, const char *buf, size_t count)
 {
 	unsigned int flags = STP_PACKET_TIMESTAMPED;
@@ -561,7 +570,7 @@ static int stm_char_policy_set_ioctl(struct stm_file *stmf, void __user *arg)
 	if (copy_from_user(&size, arg, sizeof(size)))
 		return -EFAULT;
 
-	if (size < sizeof(*id) || size >= PATH_MAX + sizeof(*id))
+	if (size >= PATH_MAX + sizeof(*id))
 		return -EINVAL;
 
 	/*
@@ -1119,9 +1128,8 @@ void stm_source_unregister_device(struct stm_source_data *data)
 }
 EXPORT_SYMBOL_GPL(stm_source_unregister_device);
 
-int notrace stm_source_write(struct stm_source_data *data,
-			     unsigned int chan,
-			     const char *buf, size_t count)
+int stm_source_write(struct stm_source_data *data, unsigned int chan,
+		     const char *buf, size_t count)
 {
 	struct stm_source_device *src = data->src;
 	struct stm_device *stm;

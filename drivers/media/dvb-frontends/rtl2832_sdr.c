@@ -301,7 +301,7 @@ static int rtl2832_sdr_submit_urbs(struct rtl2832_sdr_dev *dev)
 
 	for (i = 0; i < dev->urbs_initialized; i++) {
 		dev_dbg(&pdev->dev, "submit urb=%d\n", i);
-		ret = usb_submit_urb(dev->urb_list[i], GFP_KERNEL);
+		ret = usb_submit_urb(dev->urb_list[i], GFP_ATOMIC);
 		if (ret) {
 			dev_err(&pdev->dev,
 				"Could not submit urb no. %d - get them all back\n",
@@ -345,7 +345,7 @@ static int rtl2832_sdr_alloc_stream_bufs(struct rtl2832_sdr_dev *dev)
 
 	for (dev->buf_num = 0; dev->buf_num < MAX_BULK_BUFS; dev->buf_num++) {
 		dev->buf_list[dev->buf_num] = usb_alloc_coherent(dev->udev,
-				BULK_BUFFER_SIZE, GFP_KERNEL,
+				BULK_BUFFER_SIZE, GFP_ATOMIC,
 				&dev->dma_addr[dev->buf_num]);
 		if (!dev->buf_list[dev->buf_num]) {
 			dev_dbg(&pdev->dev, "alloc buf=%d failed\n",
@@ -390,7 +390,7 @@ static int rtl2832_sdr_alloc_urbs(struct rtl2832_sdr_dev *dev)
 	/* allocate the URBs */
 	for (i = 0; i < MAX_BULK_BUFS; i++) {
 		dev_dbg(&pdev->dev, "alloc urb=%d\n", i);
-		dev->urb_list[i] = usb_alloc_urb(0, GFP_KERNEL);
+		dev->urb_list[i] = usb_alloc_urb(0, GFP_ATOMIC);
 		if (!dev->urb_list[i]) {
 			for (j = 0; j < i; j++)
 				usb_free_urb(dev->urb_list[j]);
@@ -956,7 +956,7 @@ static void rtl2832_sdr_stop_streaming(struct vb2_queue *vq)
 	mutex_unlock(&dev->v4l2_lock);
 }
 
-static const struct vb2_ops rtl2832_sdr_vb2_ops = {
+static struct vb2_ops rtl2832_sdr_vb2_ops = {
 	.queue_setup            = rtl2832_sdr_queue_setup,
 	.buf_prepare            = rtl2832_sdr_buf_prepare,
 	.buf_queue              = rtl2832_sdr_buf_queue,

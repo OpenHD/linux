@@ -46,7 +46,7 @@
 #define IB_MGMT_BASE_VERSION			1
 #define OPA_MGMT_BASE_VERSION			0x80
 
-#define OPA_SM_CLASS_VERSION			0x80
+#define OPA_SMP_CLASS_VERSION			0x80
 
 /* Management classes */
 #define IB_MGMT_CLASS_SUBN_LID_ROUTED		0x01
@@ -262,66 +262,6 @@ struct ib_class_port_info {
 	__be32			trap_qkey;
 };
 
-/* PortInfo CapabilityMask */
-enum ib_port_capability_mask_bits {
-	IB_PORT_SM = 1 << 1,
-	IB_PORT_NOTICE_SUP = 1 << 2,
-	IB_PORT_TRAP_SUP = 1 << 3,
-	IB_PORT_OPT_IPD_SUP = 1 << 4,
-	IB_PORT_AUTO_MIGR_SUP = 1 << 5,
-	IB_PORT_SL_MAP_SUP = 1 << 6,
-	IB_PORT_MKEY_NVRAM = 1 << 7,
-	IB_PORT_PKEY_NVRAM = 1 << 8,
-	IB_PORT_LED_INFO_SUP = 1 << 9,
-	IB_PORT_SM_DISABLED = 1 << 10,
-	IB_PORT_SYS_IMAGE_GUID_SUP = 1 << 11,
-	IB_PORT_PKEY_SW_EXT_PORT_TRAP_SUP = 1 << 12,
-	IB_PORT_EXTENDED_SPEEDS_SUP = 1 << 14,
-	IB_PORT_CM_SUP = 1 << 16,
-	IB_PORT_SNMP_TUNNEL_SUP = 1 << 17,
-	IB_PORT_REINIT_SUP = 1 << 18,
-	IB_PORT_DEVICE_MGMT_SUP = 1 << 19,
-	IB_PORT_VENDOR_CLASS_SUP = 1 << 20,
-	IB_PORT_DR_NOTICE_SUP = 1 << 21,
-	IB_PORT_CAP_MASK_NOTICE_SUP = 1 << 22,
-	IB_PORT_BOOT_MGMT_SUP = 1 << 23,
-	IB_PORT_LINK_LATENCY_SUP = 1 << 24,
-	IB_PORT_CLIENT_REG_SUP = 1 << 25,
-	IB_PORT_OTHER_LOCAL_CHANGES_SUP = 1 << 26,
-	IB_PORT_LINK_SPEED_WIDTH_TABLE_SUP = 1 << 27,
-	IB_PORT_VENDOR_SPECIFIC_MADS_TABLE_SUP = 1 << 28,
-	IB_PORT_MCAST_PKEY_TRAP_SUPPRESSION_SUP = 1 << 29,
-	IB_PORT_MCAST_FDB_TOP_SUP = 1 << 30,
-	IB_PORT_HIERARCHY_INFO_SUP = 1ULL << 31,
-};
-
-#define OPA_CLASS_PORT_INFO_PR_SUPPORT BIT(26)
-
-struct opa_class_port_info {
-	u8 base_version;
-	u8 class_version;
-	__be16 cap_mask;
-	__be32 cap_mask2_resp_time;
-
-	u8 redirect_gid[16];
-	__be32 redirect_tc_fl;
-	__be32 redirect_lid;
-	__be32 redirect_sl_qp;
-	__be32 redirect_qkey;
-
-	u8 trap_gid[16];
-	__be32 trap_tc_fl;
-	__be32 trap_lid;
-	__be32 trap_hl_qp;
-	__be32 trap_qkey;
-
-	__be16 trap_pkey;
-	__be16 redirect_pkey;
-
-	u8 trap_sl_rsvd;
-	u8 reserved[3];
-} __packed;
-
 /**
  * ib_get_cpi_resp_time - Returns the resp_time value from
  * cap_mask2_resp_time in ib_class_port_info.
@@ -373,17 +313,6 @@ static inline void ib_set_cpi_capmask2(struct ib_class_port_info *cpi,
 		 cpu_to_be32(IB_CLASS_PORT_INFO_RESP_TIME_MASK)) |
 		cpu_to_be32(capmask2 <<
 			    IB_CLASS_PORT_INFO_RESP_TIME_FIELD_SIZE);
-}
-
-/**
- * opa_get_cpi_capmask2 - Returns the capmask2 value from
- * cap_mask2_resp_time in ib_class_port_info.
- * @cpi: A struct opa_class_port_info mad.
- */
-static inline u32 opa_get_cpi_capmask2(struct opa_class_port_info *cpi)
-{
-	return (be32_to_cpu(cpi->cap_mask2_resp_time) >>
-		IB_CLASS_PORT_INFO_RESP_TIME_FIELD_SIZE);
 }
 
 struct ib_mad_notice_attr {
@@ -608,10 +537,6 @@ struct ib_mad_agent {
 	u32			flags;
 	u8			port_num;
 	u8			rmpp_version;
-	void			*security;
-	bool			smp_allowed;
-	bool			lsm_nb_reg;
-	struct notifier_block   lsm_nb;
 };
 
 /**
@@ -748,7 +673,7 @@ struct ib_mad_agent *ib_register_mad_snoop(struct ib_device *device,
  * After invoking this routine, MAD services are no longer usable by the
  * client on the associated QP.
  */
-void ib_unregister_mad_agent(struct ib_mad_agent *mad_agent);
+int ib_unregister_mad_agent(struct ib_mad_agent *mad_agent);
 
 /**
  * ib_post_send_mad - Posts MAD(s) to the send queue of the QP associated

@@ -67,7 +67,6 @@ MODULE_LICENSE("GPL");
 #define NOTIFY_BRNDOWN_MAX		0x2e
 #define NOTIFY_KBD_BRTUP		0xc4
 #define NOTIFY_KBD_BRTDWN		0xc5
-#define NOTIFY_KBD_BRTTOGGLE		0xc7
 
 /* WMI Methods */
 #define ASUS_WMI_METHODID_SPEC	        0x43455053 /* BIOS SPECification */
@@ -120,7 +119,6 @@ MODULE_LICENSE("GPL");
 #define ASUS_WMI_DEVID_BRIGHTNESS	0x00050012
 #define ASUS_WMI_DEVID_KBD_BACKLIGHT	0x00050021
 #define ASUS_WMI_DEVID_LIGHT_SENSOR	0x00050022 /* ?? */
-#define ASUS_WMI_DEVID_LIGHTBAR		0x00050025
 
 /* Misc */
 #define ASUS_WMI_DEVID_CAMERA		0x00060013
@@ -150,7 +148,6 @@ MODULE_LICENSE("GPL");
 #define ASUS_WMI_DSTS_BIOS_BIT		0x00040000
 #define ASUS_WMI_DSTS_BRIGHTNESS_MASK	0x000000FF
 #define ASUS_WMI_DSTS_MAX_BRIGTH_MASK	0x0000FF00
-#define ASUS_WMI_DSTS_LIGHTBAR_MASK	0x0000000F
 
 #define ASUS_FAN_DESC			"cpu_fan"
 #define ASUS_FAN_MFUN			0x13
@@ -235,13 +232,10 @@ struct asus_wmi {
 	int tpd_led_wk;
 	struct led_classdev kbd_led;
 	int kbd_led_wk;
-	struct led_classdev lightbar_led;
-	int lightbar_led_wk;
 	struct workqueue_struct *led_workqueue;
 	struct work_struct tpd_led_work;
 	struct work_struct kbd_led_work;
 	struct work_struct wlan_led_work;
-	struct work_struct lightbar_led_work;
 
 	struct asus_rfkill wlan;
 	struct asus_rfkill bluetooth;
@@ -285,10 +279,12 @@ static int asus_wmi_input_init(struct asus_wmi *asus)
 
 	err = input_register_device(asus->inputdev);
 	if (err)
-		goto err_free_dev;
+		goto err_free_keymap;
 
 	return 0;
 
+err_free_keymap:
+	sparse_keymap_free(asus->inputdev);
 err_free_dev:
 	input_free_device(asus->inputdev);
 	return err;
@@ -296,8 +292,10 @@ err_free_dev:
 
 static void asus_wmi_input_exit(struct asus_wmi *asus)
 {
-	if (asus->inputdev)
+	if (asus->inputdev) {
+		sparse_keymap_free(asus->inputdev);
 		input_unregister_device(asus->inputdev);
+	}
 
 	asus->inputdev = NULL;
 }
@@ -315,7 +313,7 @@ static int asus_wmi_evaluate_method(u32 method_id, u32 arg0, u32 arg1,
 	union acpi_object *obj;
 	u32 tmp = 0;
 
-	status = wmi_evaluate_method(ASUS_WMI_MGMT_GUID, 0, method_id,
+	status = wmi_evaluate_method(ASUS_WMI_MGMT_GUID, 1, method_id,
 				     &input, &output);
 
 	if (ACPI_FAILURE(status))
@@ -465,7 +463,6 @@ static void kbd_led_update(struct work_struct *work)
 
 	ctrl_param = 0x80 | (asus->kbd_led_wk & 0x7F);
 	asus_wmi_set_devstate(ASUS_WMI_DEVID_KBD_BACKLIGHT, ctrl_param, NULL);
-	led_classdev_notify_brightness_hw_changed(&asus->kbd_led, asus->kbd_led_wk);
 }
 
 static int kbd_led_read(struct asus_wmi *asus, int *level, int *env)
@@ -496,27 +493,20 @@ static int kbd_led_read(struct asus_wmi *asus, int *level, int *env)
 	return retval;
 }
 
-static void do_kbd_led_set(struct led_classdev *led_cdev, int value)
+static void kbd_led_set(struct led_classdev *led_cdev,
+			enum led_brightness value)
 {
 	struct asus_wmi *asus;
-	int max_level;
 
 	asus = container_of(led_cdev, struct asus_wmi, kbd_led);
-	max_level = asus->kbd_led.max_brightness;
 
-	if (value > max_level)
-		value = max_level;
+	if (value > asus->kbd_led.max_brightness)
+		value = asus->kbd_led.max_brightness;
 	else if (value < 0)
 		value = 0;
 
 	asus->kbd_led_wk = value;
 	queue_work(asus->led_workqueue, &asus->kbd_led_work);
-}
-
-static void kbd_led_set(struct led_classdev *led_cdev,
-			enum led_brightness value)
-{
-	do_kbd_led_set(led_cdev, value);
 }
 
 static enum led_brightness kbd_led_get(struct led_classdev *led_cdev)
@@ -585,48 +575,6 @@ static enum led_brightness wlan_led_get(struct led_classdev *led_cdev)
 	return result & ASUS_WMI_DSTS_BRIGHTNESS_MASK;
 }
 
-static void lightbar_led_update(struct work_struct *work)
-{
-	struct asus_wmi *asus;
-	int ctrl_param;
-
-	asus = container_of(work, struct asus_wmi, lightbar_led_work);
-
-	ctrl_param = asus->lightbar_led_wk;
-	asus_wmi_set_devstate(ASUS_WMI_DEVID_LIGHTBAR, ctrl_param, NULL);
-}
-
-static void lightbar_led_set(struct led_classdev *led_cdev,
-			     enum led_brightness value)
-{
-	struct asus_wmi *asus;
-
-	asus = container_of(led_cdev, struct asus_wmi, lightbar_led);
-
-	asus->lightbar_led_wk = !!value;
-	queue_work(asus->led_workqueue, &asus->lightbar_led_work);
-}
-
-static enum led_brightness lightbar_led_get(struct led_classdev *led_cdev)
-{
-	struct asus_wmi *asus;
-	u32 result;
-
-	asus = container_of(led_cdev, struct asus_wmi, lightbar_led);
-	asus_wmi_get_devstate(asus, ASUS_WMI_DEVID_LIGHTBAR, &result);
-
-	return result & ASUS_WMI_DSTS_LIGHTBAR_MASK;
-}
-
-static int lightbar_led_presence(struct asus_wmi *asus)
-{
-	u32 result;
-
-	asus_wmi_get_devstate(asus, ASUS_WMI_DEVID_LIGHTBAR, &result);
-
-	return result & ASUS_WMI_DSTS_PRESENCE_BIT;
-}
-
 static void asus_wmi_led_exit(struct asus_wmi *asus)
 {
 	if (!IS_ERR_OR_NULL(asus->kbd_led.dev))
@@ -635,8 +583,6 @@ static void asus_wmi_led_exit(struct asus_wmi *asus)
 		led_classdev_unregister(&asus->tpd_led);
 	if (!IS_ERR_OR_NULL(asus->wlan_led.dev))
 		led_classdev_unregister(&asus->wlan_led);
-	if (!IS_ERR_OR_NULL(asus->lightbar_led.dev))
-		led_classdev_unregister(&asus->lightbar_led);
 	if (asus->led_workqueue)
 		destroy_workqueue(asus->led_workqueue);
 }
@@ -669,7 +615,6 @@ static int asus_wmi_led_init(struct asus_wmi *asus)
 
 		asus->kbd_led_wk = led_val;
 		asus->kbd_led.name = "asus::kbd_backlight";
-		asus->kbd_led.flags = LED_BRIGHT_HW_CHANGED;
 		asus->kbd_led.brightness_set = kbd_led_set;
 		asus->kbd_led.brightness_get = kbd_led_get;
 		asus->kbd_led.max_brightness = 3;
@@ -693,20 +638,6 @@ static int asus_wmi_led_init(struct asus_wmi *asus)
 
 		rv = led_classdev_register(&asus->platform_device->dev,
 					   &asus->wlan_led);
-		if (rv)
-			goto error;
-	}
-
-	if (lightbar_led_presence(asus)) {
-		INIT_WORK(&asus->lightbar_led_work, lightbar_led_update);
-
-		asus->lightbar_led.name = "asus::lightbar";
-		asus->lightbar_led.brightness_set = lightbar_led_set;
-		asus->lightbar_led.brightness_get = lightbar_led_get;
-		asus->lightbar_led.max_brightness = 1;
-
-		rv = led_classdev_register(&asus->platform_device->dev,
-					   &asus->lightbar_led);
 	}
 
 error:
@@ -862,6 +793,12 @@ static int asus_get_adapter_status(struct hotplug_slot *hotplug_slot,
 	return 0;
 }
 
+static void asus_cleanup_pci_hotplug(struct hotplug_slot *hotplug_slot)
+{
+	kfree(hotplug_slot->info);
+	kfree(hotplug_slot);
+}
+
 static struct hotplug_slot_ops asus_hotplug_slot_ops = {
 	.owner = THIS_MODULE,
 	.get_adapter_status = asus_get_adapter_status,
@@ -903,6 +840,7 @@ static int asus_setup_pci_hotplug(struct asus_wmi *asus)
 		goto error_info;
 
 	asus->hotplug_slot->private = asus;
+	asus->hotplug_slot->release = &asus_cleanup_pci_hotplug;
 	asus->hotplug_slot->ops = &asus_hotplug_slot_ops;
 	asus_get_adapter_status(asus->hotplug_slot,
 				&asus->hotplug_slot->info->adapter_status);
@@ -1048,11 +986,8 @@ static void asus_wmi_rfkill_exit(struct asus_wmi *asus)
 	 * asus_unregister_rfkill_notifier()
 	 */
 	asus_rfkill_hotplug(asus);
-	if (asus->hotplug_slot) {
+	if (asus->hotplug_slot)
 		pci_hp_deregister(asus->hotplug_slot);
-		kfree(asus->hotplug_slot->info);
-		kfree(asus->hotplug_slot);
-	}
 	if (asus->hotplug_workqueue)
 		destroy_workqueue(asus->hotplug_workqueue);
 
@@ -1509,7 +1444,7 @@ static umode_t asus_hwmon_sysfs_is_visible(struct kobject *kobj,
 	return ok ? attr->mode : 0;
 }
 
-static const struct attribute_group hwmon_attribute_group = {
+static struct attribute_group hwmon_attribute_group = {
 	.is_visible = asus_hwmon_sysfs_is_visible,
 	.attrs = hwmon_attributes
 };
@@ -1758,22 +1693,6 @@ static void asus_wmi_notify(u32 value, void *context)
 		}
 	}
 
-	if (code == NOTIFY_KBD_BRTUP) {
-		do_kbd_led_set(&asus->kbd_led, asus->kbd_led_wk + 1);
-		goto exit;
-	}
-	if (code == NOTIFY_KBD_BRTDWN) {
-		do_kbd_led_set(&asus->kbd_led, asus->kbd_led_wk - 1);
-		goto exit;
-	}
-	if (code == NOTIFY_KBD_BRTTOGGLE) {
-		if (asus->kbd_led_wk == asus->kbd_led.max_brightness)
-			do_kbd_led_set(&asus->kbd_led, 0);
-		else
-			do_kbd_led_set(&asus->kbd_led, asus->kbd_led_wk + 1);
-		goto exit;
-	}
-
 	if (is_display_toggle(code) &&
 	    asus->driver->quirks->no_display_toggle)
 		goto exit;
@@ -1858,7 +1777,7 @@ ASUS_WMI_CREATE_DEVICE_ATTR(cardr, 0644, ASUS_WMI_DEVID_CARDREADER);
 ASUS_WMI_CREATE_DEVICE_ATTR(lid_resume, 0644, ASUS_WMI_DEVID_LID_RESUME);
 ASUS_WMI_CREATE_DEVICE_ATTR(als_enable, 0644, ASUS_WMI_DEVID_ALS_ENABLE);
 
-static ssize_t cpufv_store(struct device *dev, struct device_attribute *attr,
+static ssize_t store_cpufv(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
 	int value, rv;
@@ -1875,7 +1794,7 @@ static ssize_t cpufv_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR_WO(cpufv);
+static DEVICE_ATTR(cpufv, S_IRUGO | S_IWUSR, NULL, store_cpufv);
 
 static struct attribute *platform_attributes[] = {
 	&dev_attr_cpufv.attr,
@@ -1891,7 +1810,8 @@ static umode_t asus_sysfs_is_visible(struct kobject *kobj,
 				    struct attribute *attr, int idx)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
-	struct asus_wmi *asus = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct asus_wmi *asus = platform_get_drvdata(pdev);
 	bool ok = true;
 	int devid = -1;
 
@@ -1912,7 +1832,7 @@ static umode_t asus_sysfs_is_visible(struct kobject *kobj,
 	return ok ? attr->mode : 0;
 }
 
-static const struct attribute_group platform_attribute_group = {
+static struct attribute_group platform_attribute_group = {
 	.is_visible = asus_sysfs_is_visible,
 	.attrs = platform_attributes
 };
@@ -2037,7 +1957,7 @@ static int show_call(struct seq_file *m, void *data)
 	acpi_status status;
 
 	status = wmi_evaluate_method(ASUS_WMI_MGMT_GUID,
-				     0, asus->debug.method_id,
+				     1, asus->debug.method_id,
 				     &input, &output);
 
 	if (ACPI_FAILURE(status))
@@ -2197,7 +2117,10 @@ static int asus_wmi_add(struct platform_device *pdev)
 	if (result & (ASUS_WMI_DSTS_PRESENCE_BIT | ASUS_WMI_DSTS_USER_BIT))
 		asus->driver->wlan_ctrl_by_user = 1;
 
-	if (!(asus->driver->wlan_ctrl_by_user && ashs_present())) {
+	if (asus->driver->wlan_ctrl_by_user && ashs_present())
+		asus->driver->quirks->no_rfkill = 1;
+
+	if (!asus->driver->quirks->no_rfkill) {
 		err = asus_wmi_rfkill_init(asus);
 		if (err)
 			goto fail_rfkill;

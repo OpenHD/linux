@@ -65,17 +65,16 @@ static int ad5820_write(struct ad5820_device *coil, u16 data)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&coil->subdev);
 	struct i2c_msg msg;
-	__be16 be_data;
 	int r;
 
 	if (!client->adapter)
 		return -ENODEV;
 
-	be_data = cpu_to_be16(data);
+	data = cpu_to_be16(data);
 	msg.addr  = client->addr;
 	msg.flags = 0;
 	msg.len   = 2;
-	msg.buf   = (u8 *)&be_data;
+	msg.buf   = (u8 *)&data;
 
 	r = i2c_transfer(client->adapter, &msg, 1);
 	if (r < 0) {
@@ -336,12 +335,12 @@ cleanup:
 	return ret;
 }
 
-static int ad5820_remove(struct i2c_client *client)
+static int __exit ad5820_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct ad5820_device *coil = to_ad5820_device(subdev);
 
-	v4l2_async_unregister_subdev(&coil->subdev);
+	v4l2_device_unregister_subdev(&coil->subdev);
 	v4l2_ctrl_handler_free(&coil->ctrls);
 	media_entity_cleanup(&coil->subdev.entity);
 	mutex_destroy(&coil->power_lock);
@@ -362,7 +361,7 @@ static struct i2c_driver ad5820_i2c_driver = {
 		.pm	= &ad5820_pm,
 	},
 	.probe		= ad5820_probe,
-	.remove		= ad5820_remove,
+	.remove		= __exit_p(ad5820_remove),
 	.id_table	= ad5820_id_table,
 };
 

@@ -19,11 +19,6 @@ unsigned long unwind_get_return_address(struct unwind_state *state)
 }
 EXPORT_SYMBOL_GPL(unwind_get_return_address);
 
-unsigned long *unwind_get_return_address_ptr(struct unwind_state *state)
-{
-	return NULL;
-}
-
 bool unwind_next_frame(struct unwind_state *state)
 {
 	struct stack_info *info = &state->stack_info;
@@ -39,7 +34,7 @@ bool unwind_next_frame(struct unwind_state *state)
 				return true;
 		}
 
-		state->sp = PTR_ALIGN(info->next_sp, sizeof(long));
+		state->sp = info->next_sp;
 
 	} while (!get_stack_info(state->sp, state->task, info,
 				 &state->stack_mask));
@@ -54,7 +49,7 @@ void __unwind_start(struct unwind_state *state, struct task_struct *task,
 	memset(state, 0, sizeof(*state));
 
 	state->task = task;
-	state->sp   = PTR_ALIGN(first_frame, sizeof(long));
+	state->sp   = first_frame;
 
 	get_stack_info(first_frame, state->task, &state->stack_info,
 		       &state->stack_mask);

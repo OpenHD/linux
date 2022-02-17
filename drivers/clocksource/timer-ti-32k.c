@@ -65,11 +65,11 @@ static inline struct ti_32k *to_ti_32k(struct clocksource *cs)
 	return container_of(cs, struct ti_32k, cs);
 }
 
-static u64 notrace ti_32k_read_cycles(struct clocksource *cs)
+static cycle_t notrace ti_32k_read_cycles(struct clocksource *cs)
 {
 	struct ti_32k *ti = to_ti_32k(cs);
 
-	return (u64)readl_relaxed(ti->counter);
+	return (cycle_t)readl_relaxed(ti->counter);
 }
 
 static struct ti_32k ti_32k_timer = {
@@ -78,7 +78,8 @@ static struct ti_32k ti_32k_timer = {
 		.rating		= 250,
 		.read		= ti_32k_read_cycles,
 		.mask		= CLOCKSOURCE_MASK(32),
-		.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
+		.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
+				CLOCK_SOURCE_SUSPEND_NONSTOP,
 	},
 };
 
@@ -126,5 +127,5 @@ static int __init ti_32k_timer_init(struct device_node *np)
 
 	return 0;
 }
-TIMER_OF_DECLARE(ti_32k_timer, "ti,omap-counter32k",
+CLOCKSOURCE_OF_DECLARE(ti_32k_timer, "ti,omap-counter32k",
 		ti_32k_timer_init);

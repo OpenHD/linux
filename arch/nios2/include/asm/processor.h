@@ -75,6 +75,9 @@ static inline void release_thread(struct task_struct *dead_task)
 {
 }
 
+/* Return saved PC of a blocked thread. */
+#define thread_saved_pc(tsk)	((tsk)->thread.kregs->ea)
+
 extern unsigned long get_wchan(struct task_struct *p);
 
 #define task_pt_regs(p) \
@@ -85,6 +88,7 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define KSTK_ESP(tsk)	((tsk)->thread.kregs->sp)
 
 #define cpu_relax()	barrier()
+#define cpu_relax_lowlatency()  cpu_relax()
 
 #endif /* __ASSEMBLY__ */
 

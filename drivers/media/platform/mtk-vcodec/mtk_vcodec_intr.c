@@ -30,7 +30,8 @@ int mtk_vcodec_wait_for_done_ctx(struct mtk_vcodec_ctx  *ctx, int command,
 	timeout_jiff = msecs_to_jiffies(timeout_ms);
 
 	ret = wait_event_interruptible_timeout(*waitqueue,
-				ctx->int_cond,
+				(ctx->int_cond &&
+				(ctx->int_type == command)),
 				timeout_jiff);
 
 	if (!ret) {

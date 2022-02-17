@@ -279,7 +279,7 @@ static int give_pages(struct mlx5_core_dev *dev, u16 func_id, int npages,
 	int i;
 
 	inlen += npages * MLX5_FLD_SZ_BYTES(manage_pages_in, pas[0]);
-	in = kvzalloc(inlen, GFP_KERNEL);
+	in = mlx5_vzalloc(inlen);
 	if (!in) {
 		err = -ENOMEM;
 		mlx5_core_warn(dev, "vzalloc failed %d\n", inlen);
@@ -331,6 +331,24 @@ out_free:
 	return err;
 }
 
+static u32 fwp_fill_manage_pages_out(struct fw_page *fwp, u32 *out, u32 index,
+				     u32 npages)
+{
+	u32 pages_set = 0;
+	unsigned int n;
+
+	for_each_clear_bit(n, &fwp->bitmask, MLX5_NUM_4K_IN_PAGE) {
+		MLX5_ARRAY_SET64(manage_pages_out, out, pas, index + pages_set,
+				 fwp->addr + (n * MLX5_ADAPTER_PAGE_SIZE));
+		pages_set++;
+
+		if (!--npages)
+			break;
+	}
+
+	return pages_set;
+}
+
 static int reclaim_pages_cmd(struct mlx5_core_dev *dev,
 			     u32 *in, int in_size, u32 *out, int out_size)
 {
@@ -354,8 +372,7 @@ static int reclaim_pages_cmd(struct mlx5_core_dev *dev,
 		if (fwp->func_id != func_id)
 			continue;
 
-		MLX5_ARRAY_SET64(manage_pages_out, out, pas, i, fwp->addr);
-		i++;
+		i += fwp_fill_manage_pages_out(fwp, out, i, npages - i);
 	}
 
 	MLX5_SET(manage_pages_out, out, output_num_entries, i);
@@ -376,7 +393,7 @@ static int reclaim_pages(struct mlx5_core_dev *dev, u32 func_id, int npages,
 		*nclaimed = 0;
 
 	outlen += npages * MLX5_FLD_SZ_BYTES(manage_pages_out, pas[0]);
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -402,6 +419,7 @@ static int reclaim_pages(struct mlx5_core_dev *dev, u32 func_id, int npages,
 
 	for (i = 0; i < num_claimed; i++)
 		free_4k(dev, MLX5_GET64(manage_pages_out, out, pas[i]));
+
 
 	if (nclaimed)
 		*nclaimed = num_claimed;

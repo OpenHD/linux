@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/list.h>
 #include <linux/pm.h>
+#include <asm/olpc.h>
 
 /*
  * The default port config.
@@ -723,7 +724,7 @@ static void via_pci_remove(struct pci_dev *pdev)
 }
 
 
-static const struct pci_device_id via_pci_table[] = {
+static struct pci_device_id via_pci_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, UNICHROME_CLE266_DID),
 	  .driver_data = UNICHROME_CLE266 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, UNICHROME_K400_DID),

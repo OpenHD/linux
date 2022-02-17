@@ -6,12 +6,13 @@
 
 #include <linux/cpu.h>
 #include <linux/kernel.h>
+#include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/seq_buf.h>
 
 #include <asm/asm-prototypes.h>
 #include <asm/code-patching.h>
-#include <asm/debugfs.h>
+#include <asm/debug.h>
 #include <asm/security_features.h>
 #include <asm/setup.h>
 
@@ -58,7 +59,7 @@ void setup_barrier_nospec(void)
 	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) &&
 		 security_ftr_enabled(SEC_FTR_BNDS_CHK_SPEC_BAR);
 
-	if (!no_nospec && !cpu_mitigations_off())
+	if (!no_nospec)
 		enable_barrier_nospec(enable);
 }
 
@@ -120,7 +121,7 @@ early_param("nospectre_v2", handle_nospectre_v2);
 #ifdef CONFIG_PPC_FSL_BOOK3E
 void setup_spectre_v2(void)
 {
-	if (no_spectrev2 || cpu_mitigations_off())
+	if (no_spectrev2)
 		do_btb_flush_fixups();
 	else
 		btb_flush_enabled = true;
@@ -156,6 +157,19 @@ ssize_t cpu_show_meltdown(struct device *dev, struct device_attribute *attr, cha
 
 	return sprintf(buf, "Vulnerable\n");
 }
+#endif
+
+ssize_t cpu_show_l1tf(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return cpu_show_meltdown(dev, attr, buf);
+}
+#endif
+
+ssize_t cpu_show_l1tf(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return cpu_show_meltdown(dev, attr, buf);
+}
+#endif
 
 ssize_t cpu_show_l1tf(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -313,7 +327,7 @@ void setup_stf_barrier(void)
 
 	stf_enabled_flush_types = type;
 
-	if (!no_stf_barrier && !cpu_mitigations_off())
+	if (!no_stf_barrier)
 		stf_barrier_enable(enable);
 }
 

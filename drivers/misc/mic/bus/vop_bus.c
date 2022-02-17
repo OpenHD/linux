@@ -135,9 +135,7 @@ EXPORT_SYMBOL_GPL(vop_unregister_driver);
 
 static void vop_release_dev(struct device *d)
 {
-	struct vop_device *dev = dev_to_vop(d);
-
-	kfree(dev);
+	put_device(d);
 }
 
 struct vop_device *
@@ -156,7 +154,7 @@ vop_register_device(struct device *pdev, int id,
 	vdev->dev.parent = pdev;
 	vdev->id.device = id;
 	vdev->id.vendor = VOP_DEV_ANY_ID;
-	vdev->dev.dma_ops = dma_ops;
+	vdev->dev.archdata.dma_ops = (struct dma_map_ops *)dma_ops;
 	vdev->dev.dma_mask = &vdev->dev.coherent_dma_mask;
 	dma_set_mask(&vdev->dev, DMA_BIT_MASK(64));
 	vdev->dev.release = vop_release_dev;
@@ -176,7 +174,7 @@ vop_register_device(struct device *pdev, int id,
 		goto free_vdev;
 	return vdev;
 free_vdev:
-	put_device(&vdev->dev);
+	kfree(vdev);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(vop_register_device);

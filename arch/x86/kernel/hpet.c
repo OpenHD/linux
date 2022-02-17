@@ -286,7 +286,7 @@ static void hpet_legacy_clockevent_register(void)
 	 * Start hpet with the boot cpu mask and make it
 	 * global after the IO_APIC has been initialized.
 	 */
-	hpet_clockevent.cpumask = cpumask_of(boot_cpu_data.cpu_index);
+	hpet_clockevent.cpumask = cpumask_of(smp_processor_id());
 	clockevents_config_and_register(&hpet_clockevent, hpet_freq,
 					HPET_MIN_PROG_DELTA, 0x7FFFFFFF);
 	global_clock_event = &hpet_clockevent;
@@ -346,10 +346,21 @@ static int hpet_shutdown(struct clock_event_device *evt, int timer)
 	return 0;
 }
 
-static int hpet_resume(struct clock_event_device *evt)
+static int hpet_resume(struct clock_event_device *evt, int timer)
 {
-	hpet_enable_legacy_int();
+	if (!timer) {
+		hpet_enable_legacy_int();
+	} else {
+		struct hpet_dev *hdev = EVT_TO_HPET_DEV(evt);
+
+		irq_domain_deactivate_irq(irq_get_irq_data(hdev->irq));
+		irq_domain_activate_irq(irq_get_irq_data(hdev->irq));
+		disable_hardirq(hdev->irq);
+		irq_set_affinity(hdev->irq, cpumask_of(hdev->cpu));
+		enable_irq(hdev->irq);
+	}
 	hpet_print_config();
+
 	return 0;
 }
 
@@ -407,7 +418,7 @@ static int hpet_legacy_set_periodic(struct clock_event_device *evt)
 
 static int hpet_legacy_resume(struct clock_event_device *evt)
 {
-	return hpet_resume(evt);
+	return hpet_resume(evt, 0);
 }
 
 static int hpet_legacy_next_event(unsigned long delta,
@@ -500,14 +511,8 @@ static int hpet_msi_set_periodic(struct clock_event_device *evt)
 static int hpet_msi_resume(struct clock_event_device *evt)
 {
 	struct hpet_dev *hdev = EVT_TO_HPET_DEV(evt);
-	struct irq_data *data = irq_get_irq_data(hdev->irq);
-	struct msi_msg msg;
 
-	/* Restore the MSI msg and unmask the interrupt */
-	irq_chip_compose_msi_msg(data, &msg);
-	hpet_msi_write(hdev, &msg);
-	hpet_msi_unmask(data);
-	return 0;
+	return hpet_resume(evt, hdev->num);
 }
 
 static int hpet_msi_next_event(unsigned long delta,
@@ -611,7 +616,7 @@ static void hpet_msi_capability_lookup(unsigned int start_timer)
 	if (!hpet_domain)
 		return;
 
-	hpet_devs = kcalloc(num_timers, sizeof(struct hpet_dev), GFP_KERNEL);
+	hpet_devs = kzalloc(sizeof(struct hpet_dev) * num_timers, GFP_KERNEL);
 	if (!hpet_devs)
 		return;
 
@@ -788,7 +793,7 @@ static union hpet_lock hpet __cacheline_aligned = {
 	{ .lock = __ARCH_SPIN_LOCK_UNLOCKED, },
 };
 
-static u64 read_hpet(struct clocksource *cs)
+static cycle_t read_hpet(struct clocksource *cs)
 {
 	unsigned long flags;
 	union hpet_lock old, new;
@@ -799,7 +804,7 @@ static u64 read_hpet(struct clocksource *cs)
 	 * Read HPET directly if in NMI.
 	 */
 	if (in_nmi())
-		return (u64)hpet_readl(HPET_COUNTER);
+		return (cycle_t)hpet_readl(HPET_COUNTER);
 
 	/*
 	 * Read the current state of the lock and HPET value atomically.
@@ -818,7 +823,7 @@ static u64 read_hpet(struct clocksource *cs)
 		WRITE_ONCE(hpet.value, new.value);
 		arch_spin_unlock(&hpet.lock);
 		local_irq_restore(flags);
-		return (u64)new.value;
+		return (cycle_t)new.value;
 	}
 	local_irq_restore(flags);
 
@@ -840,15 +845,15 @@ contended:
 		new.lockval = READ_ONCE(hpet.lockval);
 	} while ((new.value == old.value) && arch_spin_is_locked(&new.lock));
 
-	return (u64)new.value;
+	return (cycle_t)new.value;
 }
 #else
 /*
  * For UP or 32-bit.
  */
-static u64 read_hpet(struct clocksource *cs)
+static cycle_t read_hpet(struct clocksource *cs)
 {
-	return (u64)hpet_readl(HPET_COUNTER);
+	return (cycle_t)hpet_readl(HPET_COUNTER);
 }
 #endif
 
@@ -864,7 +869,7 @@ static struct clocksource clocksource_hpet = {
 static int hpet_clocksource_register(void)
 {
 	u64 start, now;
-	u64 t1;
+	cycle_t t1;
 
 	/* Start the counter */
 	hpet_restart_counter();
@@ -969,8 +974,8 @@ int __init hpet_enable(void)
 #endif
 
 	cfg = hpet_readl(HPET_CFG);
-	hpet_boot_cfg = kmalloc_array(last + 2, sizeof(*hpet_boot_cfg),
-				      GFP_KERNEL);
+	hpet_boot_cfg = kmalloc((last + 2) * sizeof(*hpet_boot_cfg),
+				GFP_KERNEL);
 	if (hpet_boot_cfg)
 		*hpet_boot_cfg = cfg;
 	else
@@ -978,7 +983,8 @@ int __init hpet_enable(void)
 	cfg &= ~(HPET_CFG_ENABLE | HPET_CFG_LEGACY);
 	hpet_writel(cfg, HPET_CFG);
 	if (cfg)
-		pr_warn("Unrecognized bits %#x set in global cfg\n", cfg);
+		pr_warn("HPET: Unrecognized bits %#x set in global cfg\n",
+			cfg);
 
 	for (i = 0; i <= last; ++i) {
 		cfg = hpet_readl(HPET_Tn_CFG(i));
@@ -990,7 +996,7 @@ int __init hpet_enable(void)
 			 | HPET_TN_64BIT_CAP | HPET_TN_32BIT | HPET_TN_ROUTE
 			 | HPET_TN_FSB | HPET_TN_FSB_CAP);
 		if (cfg)
-			pr_warn("Unrecognized bits %#x set in cfg#%u\n",
+			pr_warn("HPET: Unrecognized bits %#x set in cfg#%u\n",
 				cfg, i);
 	}
 	hpet_print_config();
@@ -1049,11 +1055,11 @@ static __init int hpet_late_init(void)
 		return 0;
 
 	/* This notifier should be called after workqueue is ready */
-	ret = cpuhp_setup_state(CPUHP_AP_X86_HPET_ONLINE, "x86/hpet:online",
+	ret = cpuhp_setup_state(CPUHP_AP_X86_HPET_ONLINE, "AP_X86_HPET_ONLINE",
 				hpet_cpuhp_online, NULL);
 	if (ret)
 		return ret;
-	ret = cpuhp_setup_state(CPUHP_X86_HPET_DEAD, "x86/hpet:dead", NULL,
+	ret = cpuhp_setup_state(CPUHP_X86_HPET_DEAD, "X86_HPET_DEAD", NULL,
 				hpet_cpuhp_dead);
 	if (ret)
 		goto err_cpuhp;

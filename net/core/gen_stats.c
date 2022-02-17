@@ -206,7 +206,8 @@ EXPORT_SYMBOL(gnet_stats_copy_basic);
 /**
  * gnet_stats_copy_rate_est - copy rate estimator statistics into statistics TLV
  * @d: dumping handle
- * @rate_est: rate estimator
+ * @b: basic statistics
+ * @r: rate estimator statistics
  *
  * Appends the rate estimator statistics to the top level TLV created by
  * gnet_stats_start_copy().
@@ -216,17 +217,18 @@ EXPORT_SYMBOL(gnet_stats_copy_basic);
  */
 int
 gnet_stats_copy_rate_est(struct gnet_dump *d,
-			 struct net_rate_estimator __rcu **rate_est)
+			 const struct gnet_stats_basic_packed *b,
+			 struct gnet_stats_rate_est64 *r)
 {
-	struct gnet_stats_rate_est64 sample;
 	struct gnet_stats_rate_est est;
 	int res;
 
-	if (!gen_estimator_read(rate_est, &sample))
+	if (b && !gen_estimator_active(b, r))
 		return 0;
-	est.bps = min_t(u64, UINT_MAX, sample.bps);
+
+	est.bps = min_t(u64, UINT_MAX, r->bps);
 	/* we have some time before reaching 2^32 packets per second */
-	est.pps = sample.pps;
+	est.pps = r->pps;
 
 	if (d->compat_tc_stats) {
 		d->tc_stats.bps = est.bps;
@@ -236,11 +238,11 @@ gnet_stats_copy_rate_est(struct gnet_dump *d,
 	if (d->tail) {
 		res = gnet_stats_copy(d, TCA_STATS_RATE_EST, &est, sizeof(est),
 				      TCA_STATS_PAD);
-		if (res < 0 || est.bps == sample.bps)
+		if (res < 0 || est.bps == r->bps)
 			return res;
 		/* emit 64bit stats only if needed */
-		return gnet_stats_copy(d, TCA_STATS_RATE_EST64, &sample,
-				       sizeof(sample), TCA_STATS_PAD);
+		return gnet_stats_copy(d, TCA_STATS_RATE_EST64, r, sizeof(*r),
+				       TCA_STATS_PAD);
 	}
 
 	return 0;
@@ -256,6 +258,7 @@ __gnet_stats_copy_queue_cpu(struct gnet_stats_queue *qstats,
 	for_each_possible_cpu(i) {
 		const struct gnet_stats_queue *qcpu = per_cpu_ptr(q, i);
 
+		qstats->qlen = 0;
 		qstats->backlog += qcpu->backlog;
 		qstats->drops += qcpu->drops;
 		qstats->requeues += qcpu->requeues;
@@ -263,14 +266,15 @@ __gnet_stats_copy_queue_cpu(struct gnet_stats_queue *qstats,
 	}
 }
 
-void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
-			     const struct gnet_stats_queue __percpu *cpu,
-			     const struct gnet_stats_queue *q,
-			     __u32 qlen)
+static void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
+				    const struct gnet_stats_queue __percpu *cpu,
+				    const struct gnet_stats_queue *q,
+				    __u32 qlen)
 {
 	if (cpu) {
 		__gnet_stats_copy_queue_cpu(qstats, cpu);
 	} else {
+		qstats->qlen = q->qlen;
 		qstats->backlog = q->backlog;
 		qstats->drops = q->drops;
 		qstats->requeues = q->requeues;
@@ -279,7 +283,6 @@ void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
 
 	qstats->qlen = qlen;
 }
-EXPORT_SYMBOL(__gnet_stats_copy_queue);
 
 /**
  * gnet_stats_copy_queue - copy queue statistics into statistics TLV

@@ -336,9 +336,6 @@ enum p9_qid_t {
 #define P9_NOFID	(u32)(~0)
 #define P9_MAXWELEM	16
 
-/* Minimal header size: size[4] type[1] tag[2] */
-#define P9_HDRSZ	7
-
 /* ample room for Twrite/Rread header */
 #define P9_IOHDRSZ	24
 
@@ -405,10 +402,10 @@ struct p9_wstat {
 	u32 atime;
 	u32 mtime;
 	u64 length;
-	const char *name;
-	const char *uid;
-	const char *gid;
-	const char *muid;
+	char *name;
+	char *uid;
+	char *gid;
+	char *muid;
 	char *extension;	/* 9p2000.u extensions */
 	kuid_t n_uid;		/* 9p2000.u extensions */
 	kgid_t n_gid;		/* 9p2000.u extensions */
@@ -561,7 +558,6 @@ struct p9_fcall {
 	size_t offset;
 	size_t capacity;
 
-	struct kmem_cache *cache;
 	u8 *sdata;
 };
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 /*
  *	Types and definitions for AF_INET6 
  *	Linux INET6 implementation 
@@ -284,8 +283,6 @@ struct in6_flowlabel_req {
 #define IPV6_RECVORIGDSTADDR    IPV6_ORIGDSTADDR
 #define IPV6_TRANSPARENT        75
 #define IPV6_UNICAST_IF         76
-#define IPV6_RECVFRAGSIZE	77
-#define IPV6_FREEBIND		78
 
 /*
  * Multicast Routing:

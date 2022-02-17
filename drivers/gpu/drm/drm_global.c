@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0 OR MIT
 /**************************************************************************
  *
  * Copyright 2008-2009 VMware, Inc., Palo Alto, CA., USA
+ * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -63,18 +63,6 @@ void drm_global_release(void)
 	}
 }
 
-/**
- * drm_global_item_ref - Initialize and acquire reference to memory
- * object
- * @ref: Object for initialization
- *
- * This initializes a memory object, allocating memory and calling the
- * .init() hook. Further calls will increase the reference count for
- * that item.
- *
- * Returns:
- * Zero on success, non-zero otherwise.
- */
 int drm_global_item_ref(struct drm_global_reference *ref)
 {
 	int ret = 0;
@@ -108,17 +96,6 @@ error_unlock:
 	return ret;
 }
 EXPORT_SYMBOL(drm_global_item_ref);
-
-/**
- * drm_global_item_unref - Drop reference to memory
- * object
- * @ref: Object being removed
- *
- * Drop a reference to the memory object and eventually call the
- * release() hook.  The allocated object should be dropped in the
- * release() hook or before calling this function
- *
- */
 
 void drm_global_item_unref(struct drm_global_reference *ref)
 {

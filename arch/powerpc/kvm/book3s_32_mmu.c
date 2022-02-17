@@ -23,6 +23,7 @@
 #include <linux/kvm_host.h>
 #include <linux/highmem.h>
 
+#include <asm/tlbflush.h>
 #include <asm/kvm_ppc.h>
 #include <asm/kvm_book3s.h>
 
@@ -51,7 +52,7 @@
 static inline bool check_debug_ip(struct kvm_vcpu *vcpu)
 {
 #ifdef DEBUG_MMU_PTE_IP
-	return vcpu->arch.regs.nip == DEBUG_MMU_PTE_IP;
+	return vcpu->arch.pc == DEBUG_MMU_PTE_IP;
 #else
 	return true;
 #endif
@@ -223,8 +224,7 @@ static int kvmppc_mmu_book3s_32_xlate_pte(struct kvm_vcpu *vcpu, gva_t eaddr,
 	ptem = kvmppc_mmu_book3s_32_get_ptem(sre, eaddr, primary);
 
 	if(copy_from_user(pteg, (void __user *)ptegp, sizeof(pteg))) {
-		printk_ratelimited(KERN_ERR
-			"KVM: Can't copy data from 0x%lx!\n", ptegp);
+		printk(KERN_ERR "KVM: Can't copy data from 0x%lx!\n", ptegp);
 		goto no_page_found;
 	}
 

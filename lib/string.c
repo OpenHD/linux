@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/lib/string.c
  *
@@ -132,7 +131,7 @@ EXPORT_SYMBOL(strncpy);
  * @src: Where to copy the string from
  * @size: size of destination buffer
  *
- * Compatible with ``*BSD``: the result is always a valid
+ * Compatible with *BSD: the result is always a valid
  * NUL-terminated string that fits in the buffer (unless,
  * of course, the buffer size is zero). It does not pad
  * out the result like strncpy() does.
@@ -235,6 +234,30 @@ ssize_t strscpy(char *dest, const char *src, size_t count)
 }
 EXPORT_SYMBOL(strscpy);
 #endif
+
+/**
+ * stpcpy - copy a string from src to dest returning a pointer to the new end
+ *          of dest, including src's %NUL-terminator. May overrun dest.
+ * @dest: pointer to end of string being copied into. Must be large enough
+ *        to receive copy.
+ * @src: pointer to the beginning of string being copied from. Must not overlap
+ *       dest.
+ *
+ * stpcpy differs from strcpy in a key way: the return value is a pointer
+ * to the new %NUL-terminating character in @dest. (For strcpy, the return
+ * value is a pointer to the start of @dest). This interface is considered
+ * unsafe as it doesn't perform bounds checking of the inputs. As such it's
+ * not recommended for usage. Instead, its definition is provided in case
+ * the compiler lowers other libcalls to stpcpy.
+ */
+char *stpcpy(char *__restrict__ dest, const char *__restrict__ src);
+char *stpcpy(char *__restrict__ dest, const char *__restrict__ src)
+{
+	while ((*dest++ = *src++) != '\0')
+		/* nothing */;
+	return --dest;
+}
+EXPORT_SYMBOL(stpcpy);
 
 #ifndef __HAVE_ARCH_STRCAT
 /**
@@ -724,72 +747,6 @@ void memzero_explicit(void *s, size_t count)
 }
 EXPORT_SYMBOL(memzero_explicit);
 
-#ifndef __HAVE_ARCH_MEMSET16
-/**
- * memset16() - Fill a memory area with a uint16_t
- * @s: Pointer to the start of the area.
- * @v: The value to fill the area with
- * @count: The number of values to store
- *
- * Differs from memset() in that it fills with a uint16_t instead
- * of a byte.  Remember that @count is the number of uint16_ts to
- * store, not the number of bytes.
- */
-void *memset16(uint16_t *s, uint16_t v, size_t count)
-{
-	uint16_t *xs = s;
-
-	while (count--)
-		*xs++ = v;
-	return s;
-}
-EXPORT_SYMBOL(memset16);
-#endif
-
-#ifndef __HAVE_ARCH_MEMSET32
-/**
- * memset32() - Fill a memory area with a uint32_t
- * @s: Pointer to the start of the area.
- * @v: The value to fill the area with
- * @count: The number of values to store
- *
- * Differs from memset() in that it fills with a uint32_t instead
- * of a byte.  Remember that @count is the number of uint32_ts to
- * store, not the number of bytes.
- */
-void *memset32(uint32_t *s, uint32_t v, size_t count)
-{
-	uint32_t *xs = s;
-
-	while (count--)
-		*xs++ = v;
-	return s;
-}
-EXPORT_SYMBOL(memset32);
-#endif
-
-#ifndef __HAVE_ARCH_MEMSET64
-/**
- * memset64() - Fill a memory area with a uint64_t
- * @s: Pointer to the start of the area.
- * @v: The value to fill the area with
- * @count: The number of values to store
- *
- * Differs from memset() in that it fills with a uint64_t instead
- * of a byte.  Remember that @count is the number of uint64_ts to
- * store, not the number of bytes.
- */
-void *memset64(uint64_t *s, uint64_t v, size_t count)
-{
-	uint64_t *xs = s;
-
-	while (count--)
-		*xs++ = v;
-	return s;
-}
-EXPORT_SYMBOL(memset64);
-#endif
-
 #ifndef __HAVE_ARCH_MEMCPY
 /**
  * memcpy - Copy one area of memory to another
@@ -1065,10 +1022,3 @@ char *strreplace(char *s, char old, char new)
 	return s;
 }
 EXPORT_SYMBOL(strreplace);
-
-void fortify_panic(const char *name)
-{
-	pr_emerg("detected buffer overflow in %s\n", name);
-	BUG();
-}
-EXPORT_SYMBOL(fortify_panic);

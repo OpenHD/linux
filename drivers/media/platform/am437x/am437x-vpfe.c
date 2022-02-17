@@ -26,7 +26,6 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_graph.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -37,7 +36,7 @@
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
-#include <media/v4l2-fwnode.h>
+#include <media/v4l2-of.h>
 
 #include "am437x-vpfe.h"
 
@@ -2308,8 +2307,7 @@ vpfe_async_bound(struct v4l2_async_notifier *notifier,
 	vpfe_dbg(1, vpfe, "vpfe_async_bound\n");
 
 	for (i = 0; i < ARRAY_SIZE(vpfe->cfg->asd); i++) {
-		if (vpfe->cfg->asd[i]->match.fwnode ==
-		    asd[i].match.fwnode) {
+		if (vpfe->cfg->asd[i]->match.of.node == asd[i].match.of.node) {
 			sdinfo = &vpfe->cfg->sub_devs[i];
 			vpfe->sd[i] = subdev;
 			vpfe->sd[i]->grp_id = sdinfo->grp_id;
@@ -2421,16 +2419,11 @@ static int vpfe_async_complete(struct v4l2_async_notifier *notifier)
 	return vpfe_probe_complete(vpfe);
 }
 
-static const struct v4l2_async_notifier_operations vpfe_async_ops = {
-	.bound = vpfe_async_bound,
-	.complete = vpfe_async_complete,
-};
-
 static struct vpfe_config *
 vpfe_get_pdata(struct platform_device *pdev)
 {
 	struct device_node *endpoint = NULL;
-	struct v4l2_fwnode_endpoint bus_cfg;
+	struct v4l2_of_endpoint bus_cfg;
 	struct vpfe_subdev_info *sdinfo;
 	struct vpfe_config *pdata;
 	unsigned int flags;
@@ -2474,8 +2467,7 @@ vpfe_get_pdata(struct platform_device *pdev)
 			sdinfo->vpfe_param.if_type = VPFE_RAW_BAYER;
 		}
 
-		err = v4l2_fwnode_endpoint_parse(of_fwnode_handle(endpoint),
-						 &bus_cfg);
+		err = v4l2_of_parse_endpoint(endpoint, &bus_cfg);
 		if (err) {
 			dev_err(&pdev->dev, "Could not parse the endpoint\n");
 			goto done;
@@ -2499,8 +2491,8 @@ vpfe_get_pdata(struct platform_device *pdev)
 
 		rem = of_graph_get_remote_port_parent(endpoint);
 		if (!rem) {
-			dev_err(&pdev->dev, "Remote device at %pOF not found\n",
-				endpoint);
+			dev_err(&pdev->dev, "Remote device at %s not found\n",
+				endpoint->full_name);
 			goto done;
 		}
 
@@ -2513,8 +2505,8 @@ vpfe_get_pdata(struct platform_device *pdev)
 			goto done;
 		}
 
-		pdata->asd[i]->match_type = V4L2_ASYNC_MATCH_FWNODE;
-		pdata->asd[i]->match.fwnode = of_fwnode_handle(rem);
+		pdata->asd[i]->match_type = V4L2_ASYNC_MATCH_OF;
+		pdata->asd[i]->match.of.node = rem;
 		of_node_put(rem);
 	}
 
@@ -2590,10 +2582,8 @@ static int vpfe_probe(struct platform_device *pdev)
 
 	pm_runtime_put_sync(&pdev->dev);
 
-	vpfe->sd = devm_kcalloc(&pdev->dev,
-				ARRAY_SIZE(vpfe->cfg->asd),
-				sizeof(struct v4l2_subdev *),
-				GFP_KERNEL);
+	vpfe->sd = devm_kzalloc(&pdev->dev, sizeof(struct v4l2_subdev *) *
+				ARRAY_SIZE(vpfe->cfg->asd), GFP_KERNEL);
 	if (!vpfe->sd) {
 		ret = -ENOMEM;
 		goto probe_out_v4l2_unregister;
@@ -2601,7 +2591,8 @@ static int vpfe_probe(struct platform_device *pdev)
 
 	vpfe->notifier.subdevs = vpfe->cfg->asd;
 	vpfe->notifier.num_subdevs = ARRAY_SIZE(vpfe->cfg->asd);
-	vpfe->notifier.ops = &vpfe_async_ops;
+	vpfe->notifier.bound = vpfe_async_bound;
+	vpfe->notifier.complete = vpfe_async_complete;
 	ret = v4l2_async_notifier_register(&vpfe->v4l2_dev,
 						&vpfe->notifier);
 	if (ret) {
@@ -2668,7 +2659,8 @@ static void vpfe_save_context(struct vpfe_ccdc *ccdc)
 
 static int vpfe_suspend(struct device *dev)
 {
-	struct vpfe_device *vpfe = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct vpfe_device *vpfe = platform_get_drvdata(pdev);
 	struct vpfe_ccdc *ccdc = &vpfe->ccdc;
 
 	/* if streaming has not started we don't care */
@@ -2725,7 +2717,8 @@ static void vpfe_restore_context(struct vpfe_ccdc *ccdc)
 
 static int vpfe_resume(struct device *dev)
 {
-	struct vpfe_device *vpfe = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct vpfe_device *vpfe = platform_get_drvdata(pdev);
 	struct vpfe_ccdc *ccdc = &vpfe->ccdc;
 
 	/* if streaming has not started we don't care */

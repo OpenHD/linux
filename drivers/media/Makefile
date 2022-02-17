@@ -1,7 +1,10 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the kernel multimedia device drivers.
 #
+
+ifeq ($(CONFIG_MEDIA_CEC_EDID),y)
+  obj-$(CONFIG_MEDIA_SUPPORT) += cec-edid.o
+endif
 
 media-objs	:= media-device.o media-devnode.o media-entity.o
 
@@ -24,8 +27,6 @@ obj-$(CONFIG_DVB_CORE)  += dvb-core/
 
 # There are both core and drivers at RC subtree - merge before drivers
 obj-y += rc/
-
-obj-$(CONFIG_CEC_CORE) += cec/
 
 #
 # Finally, merge the drivers that require the core

@@ -38,7 +38,6 @@ struct metapage {
 
 	/* implementation */
 	struct page *page;
-	struct super_block *sb;
 	unsigned int logical_size;
 
 	/* Journal management */

@@ -22,6 +22,9 @@
 
 #include <asm/cpuidle.h>
 
+#include <soc/tegra/fuse.h>
+#include <soc/tegra/pm.h>
+
 #include "dt_idle_states.h"
 
 /*
@@ -37,12 +40,47 @@
 static int arm_enter_idle_state(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int idx)
 {
-	/*
-	 * Pass idle state index to arm_cpuidle_suspend which in turn
-	 * will call the CPU ops suspend protocol with idle index as a
-	 * parameter.
-	 */
-	return CPU_PM_CPU_IDLE_ENTER(arm_cpuidle_suspend, idx);
+	int ret;
+
+	if (!idx) {
+		cpu_do_idle();
+		return idx;
+	}
+
+	ret = cpu_pm_enter();
+	if (!ret) {
+		if (tegra_get_chip_id() == TEGRA210) {
+			void *idle_idx = (void *)(long)idx;
+			int not_tolerance;
+
+			not_tolerance = tegra210_cpu_pm_enter(idle_idx);
+			if (not_tolerance)
+				/*
+				 * If tegra210_cpu_pm_enter() returns fail,
+				 * that means BPMP-L isn't tolerated with
+				 * the state. So fall back to C7 state
+				 * (idx = 1).
+				 */
+				idx = 1;
+		}
+
+		/*
+		 * Pass idle state index to cpu_suspend which in turn will
+		 * call the CPU ops suspend protocol with idle index as a
+		 * parameter.
+		 */
+		ret = arm_cpuidle_suspend(idx);
+
+		if (tegra_get_chip_id() == TEGRA210) {
+			void *idle_idx = (void *)(long)idx;
+
+			tegra210_cpu_pm_exit(idle_idx);
+		}
+
+		cpu_pm_exit();
+	}
+
+	return ret ? -1 : idx;
 }
 
 static struct cpuidle_driver arm_idle_driver __initdata = {
@@ -72,72 +110,79 @@ static const struct of_device_id arm_idle_state_match[] __initconst = {
 };
 
 /*
- * arm_idle_init_cpu
+ * arm_idle_init
  *
  * Registers the arm specific cpuidle driver with the cpuidle
  * framework. It relies on core code to parse the idle states
  * and initialize them using driver data structures accordingly.
  */
-static int __init arm_idle_init_cpu(int cpu)
+static int __init arm_idle_init(void)
 {
-	int ret;
+	int cpu, ret;
 	struct cpuidle_driver *drv;
 	struct cpuidle_device *dev;
 
-	drv = kmemdup(&arm_idle_driver, sizeof(*drv), GFP_KERNEL);
-	if (!drv)
-		return -ENOMEM;
+	for_each_possible_cpu(cpu) {
 
-	drv->cpumask = (struct cpumask *)cpumask_of(cpu);
+		drv = kmemdup(&arm_idle_driver, sizeof(*drv), GFP_KERNEL);
+		if (!drv) {
+			ret = -ENOMEM;
+			goto out_fail;
+		}
 
-	/*
-	 * Initialize idle states data, starting at index 1.  This
-	 * driver is DT only, if no DT idle states are detected (ret
-	 * == 0) let the driver initialization fail accordingly since
-	 * there is no reason to initialize the idle driver if only
-	 * wfi is supported.
-	 */
-	ret = dt_init_idle_driver(drv, arm_idle_state_match, 1);
-	if (ret <= 0) {
-		ret = ret ? : -ENODEV;
-		goto out_kfree_drv;
-	}
+		drv->cpumask = (struct cpumask *)cpumask_of(cpu);
 
-	/*
-	 * Call arch CPU operations in order to initialize
-	 * idle states suspend back-end specific data
-	 */
-	ret = arm_cpuidle_init(cpu);
+		/*
+		 * Initialize idle states data, starting at index 1.  This
+		 * driver is DT only, if no DT idle states are detected (ret
+		 * == 0) let the driver initialization fail accordingly since
+		 * there is no reason to initialize the idle driver if only
+		 * wfi is supported.
+		 */
+		ret = dt_init_idle_driver(drv, arm_idle_state_match, 1);
+		if (ret <= 0) {
+			ret = ret ? : -ENODEV;
+			goto out_kfree_drv;
+		}
 
-	/*
-	 * Allow the initialization to continue for other CPUs, if the reported
-	 * failure is a HW misconfiguration/breakage (-ENXIO).
-	 */
-	if (ret) {
-		pr_err("CPU %d failed to init idle CPU ops\n", cpu);
-		ret = ret == -ENXIO ? 0 : ret;
-		goto out_kfree_drv;
-	}
-
-	ret = cpuidle_register_driver(drv);
-	if (ret) {
-		if (ret != -EBUSY)
+		ret = cpuidle_register_driver(drv);
+		if (ret) {
 			pr_err("Failed to register cpuidle driver\n");
-		goto out_kfree_drv;
-	}
+			goto out_kfree_drv;
+		}
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev) {
-		ret = -ENOMEM;
-		goto out_unregister_drv;
-	}
-	dev->cpu = cpu;
+		/*
+		 * Call arch CPU operations in order to initialize
+		 * idle states suspend back-end specific data
+		 */
+		ret = arm_cpuidle_init(cpu);
 
-	ret = cpuidle_register_device(dev);
-	if (ret) {
-		pr_err("Failed to register cpuidle device for CPU %d\n",
-		       cpu);
-		goto out_kfree_dev;
+		/*
+		 * Skip the cpuidle device initialization if the reported
+		 * failure is a HW misconfiguration/breakage (-ENXIO).
+		 */
+		if (ret == -ENXIO)
+			continue;
+
+		if (ret) {
+			pr_err("CPU %d failed to init idle CPU ops\n", cpu);
+			goto out_unregister_drv;
+		}
+
+		dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+		if (!dev) {
+			pr_err("Failed to allocate cpuidle device\n");
+			ret = -ENOMEM;
+			goto out_unregister_drv;
+		}
+		dev->cpu = cpu;
+
+		ret = cpuidle_register_device(dev);
+		if (ret) {
+			pr_err("Failed to register cpuidle device for CPU %d\n",
+			       cpu);
+			goto out_kfree_dev;
+		}
 	}
 
 	return 0;
@@ -148,30 +193,6 @@ out_unregister_drv:
 	cpuidle_unregister_driver(drv);
 out_kfree_drv:
 	kfree(drv);
-	return ret;
-}
-
-/*
- * arm_idle_init - Initializes arm cpuidle driver
- *
- * Initializes arm cpuidle driver for all CPUs, if any CPU fails
- * to register cpuidle driver then rollback to cancel all CPUs
- * registeration.
- */
-static int __init arm_idle_init(void)
-{
-	int cpu, ret;
-	struct cpuidle_driver *drv;
-	struct cpuidle_device *dev;
-
-	for_each_possible_cpu(cpu) {
-		ret = arm_idle_init_cpu(cpu);
-		if (ret)
-			goto out_fail;
-	}
-
-	return 0;
-
 out_fail:
 	while (--cpu >= 0) {
 		dev = per_cpu(cpuidle_devices, cpu);

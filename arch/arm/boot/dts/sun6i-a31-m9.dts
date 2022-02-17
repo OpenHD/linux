@@ -45,6 +45,7 @@
 #include "sunxi-common-regulators.dtsi"
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/sun4i-a10.h>
 
 / {
 	model = "Mele M9 top set box";
@@ -107,7 +108,8 @@
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin_m9>;
 	vmmc-supply = <&reg_dcdc1>;
 	bus-width = <4>;
-	cd-gpios = <&pio 7 22 GPIO_ACTIVE_LOW>; /* PH22 */
+	cd-gpios = <&pio 7 22 GPIO_ACTIVE_HIGH>; /* PH22 */
+	cd-inverted;
 	status = "okay";
 };
 
@@ -126,19 +128,24 @@
 
 &pio {
 	led_pins_m9: led_pins@0 {
-		pins = "PH13";
-		function = "gpio_out";
+		allwinner,pins = "PH13";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 
 	mmc0_cd_pin_m9: mmc0_cd_pin@0 {
-		pins = "PH22";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PH22";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	usb1_vbus_pin_m9: usb1_vbus_pin@0 {
-		pins = "PC27";
-		function = "gpio_out";
+		allwinner,pins = "PC27";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 };
 

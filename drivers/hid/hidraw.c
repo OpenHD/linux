@@ -33,7 +33,7 @@
 #include <linux/slab.h>
 #include <linux/hid.h>
 #include <linux/mutex.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/string.h>
 
 #include <linux/hidraw.h>
@@ -115,7 +115,7 @@ static ssize_t hidraw_send_report(struct file *file, const char __user *buffer, 
 	unsigned int minor = iminor(file_inode(file));
 	struct hid_device *dev;
 	__u8 *buf;
-	int ret = 0;
+	long ret = 0;
 
 	if (!hidraw_table[minor] || !hidraw_table[minor]->exist) {
 		ret = -ENODEV;
@@ -218,7 +218,7 @@ static ssize_t hidraw_get_report(struct file *file, char __user *buffer, size_t 
 		goto out;
 	}
 
-	buf = kmalloc(count, GFP_KERNEL);
+	buf = kmalloc(count * sizeof(__u8), GFP_KERNEL);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto out;
@@ -254,16 +254,16 @@ out:
 	return ret;
 }
 
-static __poll_t hidraw_poll(struct file *file, poll_table *wait)
+static unsigned int hidraw_poll(struct file *file, poll_table *wait)
 {
 	struct hidraw_list *list = file->private_data;
-	__poll_t mask = EPOLLOUT | EPOLLWRNORM; /* hidraw is always writable */
+	unsigned int mask = POLLOUT | POLLWRNORM; /* hidraw is always writable */
 
 	poll_wait(file, &list->hidraw->wait, wait);
 	if (list->head != list->tail)
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	if (!list->hidraw->exist)
-		mask |= EPOLLERR | EPOLLHUP;
+		mask |= POLLERR | POLLHUP;
 	return mask;
 }
 
@@ -343,8 +343,8 @@ static void drop_ref(struct hidraw *hidraw, int exists_bit)
 			kfree(hidraw);
 		} else {
 			/* close device for last reader */
-			hid_hw_close(hidraw->hid);
 			hid_hw_power(hidraw->hid, PM_HINT_NORMAL);
+			hid_hw_close(hidraw->hid);
 		}
 	}
 }
@@ -497,6 +497,7 @@ int hidraw_report_event(struct hid_device *hid, u8 *data, int len)
 		if (new_head == list->tail)
 			continue;
 
+		kfree(list->buffer[list->head].value);
 		if (!(list->buffer[list->head].value = kmemdup(data, len, GFP_ATOMIC))) {
 			ret = -ENOMEM;
 			break;

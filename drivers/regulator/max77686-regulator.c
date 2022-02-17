@@ -1,12 +1,26 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// max77686.c - Regulator driver for the Maxim 77686
-//
-// Copyright (C) 2012 Samsung Electronics
-// Chiwoong Byun <woong.byun@samsung.com>
-// Jonghwa Lee <jonghwa3.lee@samsung.com>
-//
-// This driver is based on max8997.c
+/*
+ * max77686.c - Regulator driver for the Maxim 77686
+ *
+ * Copyright (C) 2012 Samsung Electronics
+ * Chiwoong Byun <woong.byun@samsung.com>
+ * Jonghwa Lee <jonghwa3.lee@samsung.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ * This driver is based on max8997.c
+ */
 
 #include <linux/kernel.h>
 #include <linux/bug.h>
@@ -275,7 +289,7 @@ static int max77686_of_parse_cb(struct device_node *np,
 	return 0;
 }
 
-static const struct regulator_ops max77686_ops = {
+static struct regulator_ops max77686_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -287,7 +301,7 @@ static const struct regulator_ops max77686_ops = {
 	.set_suspend_mode	= max77686_set_suspend_mode,
 };
 
-static const struct regulator_ops max77686_ldo_ops = {
+static struct regulator_ops max77686_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -300,7 +314,7 @@ static const struct regulator_ops max77686_ldo_ops = {
 	.set_suspend_disable	= max77686_set_suspend_disable,
 };
 
-static const struct regulator_ops max77686_buck1_ops = {
+static struct regulator_ops max77686_buck1_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -312,7 +326,7 @@ static const struct regulator_ops max77686_buck1_ops = {
 	.set_suspend_disable	= max77686_set_suspend_disable,
 };
 
-static const struct regulator_ops max77686_buck_dvs_ops = {
+static struct regulator_ops max77686_buck_dvs_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,

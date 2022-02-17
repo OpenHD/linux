@@ -13,6 +13,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  */
 
 #include <linux/kernel.h>
@@ -78,6 +82,18 @@ static int vbi_nr[PVR_NUM] = {[0 ... PVR_NUM-1] = -1};
 module_param_array(vbi_nr, int, NULL, 0444);
 MODULE_PARM_DESC(vbi_nr, "Offset for device's vbi dev minor");
 
+static struct v4l2_fmtdesc pvr_fmtdesc [] = {
+	{
+		.index          = 0,
+		.type           = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+		.flags          = V4L2_FMT_FLAG_COMPRESSED,
+		.description    = "MPEG1/2",
+		// This should really be V4L2_PIX_FMT_MPEG, but xawtv
+		// breaks when I do that.
+		.pixelformat    = 0, // V4L2_PIX_FMT_MPEG,
+	}
+};
+
 #define PVR_FORMAT_PIX  0
 #define PVR_FORMAT_VBI  1
 
@@ -87,11 +103,17 @@ static struct v4l2_format pvr_format [] = {
 		.fmt    = {
 			.pix        = {
 				.width          = 720,
-				.height         = 576,
-				.pixelformat    = V4L2_PIX_FMT_MPEG,
+				.height             = 576,
+				// This should really be V4L2_PIX_FMT_MPEG,
+				// but xawtv breaks when I do that.
+				.pixelformat    = 0, // V4L2_PIX_FMT_MPEG,
 				.field          = V4L2_FIELD_INTERLACED,
-				/* FIXME : Don't know what to put here... */
-				.sizeimage      = 32 * 1024,
+				.bytesperline   = 0,  // doesn't make sense
+						      // here
+				//FIXME : Don't know what to put here...
+				.sizeimage          = (32*1024),
+				.colorspace     = 0, // doesn't make sense here
+				.priv           = 0
 			}
 		}
 	},
@@ -135,8 +157,6 @@ static int pvr2_querycap(struct file *file, void *priv, struct v4l2_capability *
 	case VFL_TYPE_RADIO:
 		cap->device_caps = V4L2_CAP_RADIO;
 		break;
-	default:
-		return -EINVAL;
 	}
 	cap->device_caps |= V4L2_CAP_TUNER | V4L2_CAP_READWRITE;
 	return 0;
@@ -159,12 +179,9 @@ static int pvr2_s_std(struct file *file, void *priv, v4l2_std_id std)
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
-	int ret;
 
-	ret = pvr2_ctrl_set_value(
+	return pvr2_ctrl_set_value(
 		pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_STDCUR), std);
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
 }
 
 static int pvr2_querystd(struct file *file, void *priv, v4l2_std_id *std)
@@ -254,15 +271,12 @@ static int pvr2_s_input(struct file *file, void *priv, unsigned int inp)
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
-	int ret;
 
 	if (inp >= fh->input_cnt)
 		return -EINVAL;
-	ret = pvr2_ctrl_set_value(
+	return pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_INPUT),
 			fh->input_map[inp]);
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
 }
 
 static int pvr2_enumaudio(struct file *file, void *priv, struct v4l2_audio *vin)
@@ -321,16 +335,13 @@ static int pvr2_s_tuner(struct file *file, void *priv, const struct v4l2_tuner *
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
-	int ret;
 
 	if (vt->index != 0)
 		return -EINVAL;
 
-	ret = pvr2_ctrl_set_value(
+	return pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_AUDIOMODE),
 			vt->audmode);
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
 }
 
 static int pvr2_s_frequency(struct file *file, void *priv, const struct v4l2_frequency *vf)
@@ -362,10 +373,8 @@ static int pvr2_s_frequency(struct file *file, void *priv, const struct v4l2_fre
 		fv = (fv * 125) / 2;
 	else
 		fv = fv * 62500;
-	ret = pvr2_ctrl_set_value(
+	return pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw,PVR2_CID_FREQUENCY),fv);
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
 }
 
 static int pvr2_g_frequency(struct file *file, void *priv, struct v4l2_frequency *vf)
@@ -402,11 +411,11 @@ static int pvr2_g_frequency(struct file *file, void *priv, struct v4l2_frequency
 
 static int pvr2_enum_fmt_vid_cap(struct file *file, void *priv, struct v4l2_fmtdesc *fd)
 {
-	/* Only one format is supported: MPEG. */
-	if (fd->index)
+	/* Only one format is supported : mpeg.*/
+	if (fd->index != 0)
 		return -EINVAL;
 
-	fd->pixelformat = V4L2_PIX_FMT_MPEG;
+	memcpy(fd, pvr_fmtdesc, sizeof(struct v4l2_fmtdesc));
 	return 0;
 }
 
@@ -481,7 +490,6 @@ static int pvr2_s_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format 
 	vcp = pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_VRES);
 	pvr2_ctrl_set_value(hcp, vf->fmt.pix.width);
 	pvr2_ctrl_set_value(vcp, vf->fmt.pix.height);
-	pvr2_hdw_commit_ctl(hdw);
 	return 0;
 }
 
@@ -609,12 +617,9 @@ static int pvr2_s_ctrl(struct file *file, void *priv, struct v4l2_control *vc)
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
-	int ret;
 
-	ret = pvr2_ctrl_set_value(pvr2_hdw_get_ctrl_v4l(hdw, vc->id),
+	return pvr2_ctrl_set_value(pvr2_hdw_get_ctrl_v4l(hdw, vc->id),
 			vc->value);
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
 }
 
 static int pvr2_g_ext_ctrls(struct file *file, void *priv,
@@ -673,12 +678,10 @@ static int pvr2_s_ext_ctrls(struct file *file, void *priv,
 				ctrl->value);
 		if (ret) {
 			ctls->error_idx = idx;
-			goto commit;
+			return ret;
 		}
 	}
-commit:
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
+	return 0;
 }
 
 static int pvr2_try_ext_ctrls(struct file *file, void *priv,
@@ -781,23 +784,23 @@ static int pvr2_s_selection(struct file *file, void *priv,
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPL),
 			sel->r.left);
 	if (ret != 0)
-		goto commit;
+		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPT),
 			sel->r.top);
 	if (ret != 0)
-		goto commit;
+		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPW),
 			sel->r.width);
 	if (ret != 0)
-		goto commit;
+		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPH),
 			sel->r.height);
-commit:
-	pvr2_hdw_commit_ctl(hdw);
-	return ret;
+	if (ret != 0)
+		return -EINVAL;
+	return 0;
 }
 
 static int pvr2_log_status(struct file *file, void *priv)
@@ -926,6 +929,44 @@ static void pvr2_v4l2_internal_check(struct pvr2_channel *chp)
 }
 
 
+static long pvr2_v4l2_ioctl(struct file *file,
+			   unsigned int cmd, unsigned long arg)
+{
+
+	struct pvr2_v4l2_fh *fh = file->private_data;
+	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
+	long ret = -EINVAL;
+
+	if (pvrusb2_debug & PVR2_TRACE_V4LIOCTL)
+		v4l_printk_ioctl(pvr2_hdw_get_driver_name(hdw), cmd);
+
+	if (!pvr2_hdw_dev_ok(hdw)) {
+		pvr2_trace(PVR2_TRACE_ERROR_LEGS,
+			   "ioctl failed - bad or no context");
+		return -EFAULT;
+	}
+
+	ret = video_ioctl2(file, cmd, arg);
+
+	pvr2_hdw_commit_ctl(hdw);
+
+	if (ret < 0) {
+		if (pvrusb2_debug & PVR2_TRACE_V4LIOCTL) {
+			pvr2_trace(PVR2_TRACE_V4LIOCTL,
+				   "pvr2_v4l2_do_ioctl failure, ret=%ld"
+				   " command was:", ret);
+			v4l_printk_ioctl(pvr2_hdw_get_driver_name(hdw), cmd);
+		}
+	} else {
+		pvr2_trace(PVR2_TRACE_V4LIOCTL,
+			   "pvr2_v4l2_do_ioctl complete, ret=%ld (0x%lx)",
+			   ret, ret);
+	}
+	return ret;
+
+}
+
+
 static int pvr2_v4l2_release(struct file *file)
 {
 	struct pvr2_v4l2_fh *fhp = file->private_data;
@@ -1018,7 +1059,7 @@ static int pvr2_v4l2_open(struct file *file)
 		pvr2_trace(PVR2_TRACE_STRUCT,
 			   "Destroying pvr_v4l2_fh id=%p (input mask error)",
 			   fhp);
-		v4l2_fh_exit(&fhp->fh);
+
 		kfree(fhp);
 		return ret;
 	}
@@ -1035,7 +1076,6 @@ static int pvr2_v4l2_open(struct file *file)
 		pvr2_trace(PVR2_TRACE_STRUCT,
 			   "Destroying pvr_v4l2_fh id=%p (input map failure)",
 			   fhp);
-		v4l2_fh_exit(&fhp->fh);
 		kfree(fhp);
 		return -ENOMEM;
 	}
@@ -1158,26 +1198,26 @@ static ssize_t pvr2_v4l2_read(struct file *file,
 }
 
 
-static __poll_t pvr2_v4l2_poll(struct file *file, poll_table *wait)
+static unsigned int pvr2_v4l2_poll(struct file *file, poll_table *wait)
 {
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	int ret;
 
 	if (fh->fw_mode_flag) {
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 		return mask;
 	}
 
 	if (!fh->rhp) {
 		ret = pvr2_v4l2_iosetup(fh);
-		if (ret) return EPOLLERR;
+		if (ret) return POLLERR;
 	}
 
 	poll_wait(file,&fh->wait_data,wait);
 
 	if (pvr2_ioread_avail(fh->rhp) >= 0) {
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	}
 
 	return mask;
@@ -1189,12 +1229,12 @@ static const struct v4l2_file_operations vdev_fops = {
 	.open       = pvr2_v4l2_open,
 	.release    = pvr2_v4l2_release,
 	.read       = pvr2_v4l2_read,
-	.unlocked_ioctl = video_ioctl2,
+	.unlocked_ioctl = pvr2_v4l2_ioctl,
 	.poll       = pvr2_v4l2_poll,
 };
 
 
-static const struct video_device vdev_template = {
+static struct video_device vdev_template = {
 	.fops       = &vdev_fops,
 };
 
@@ -1219,7 +1259,8 @@ static void pvr2_v4l2_dev_init(struct pvr2_v4l2_dev *dip,
 		nr_ptr = video_nr;
 		if (!dip->stream) {
 			pr_err(KBUILD_MODNAME
-				": Failed to set up pvrusb2 v4l video dev due to missing stream instance\n");
+				": Failed to set up pvrusb2 v4l video dev"
+				" due to missing stream instance\n");
 			return;
 		}
 		break;
@@ -1236,7 +1277,8 @@ static void pvr2_v4l2_dev_init(struct pvr2_v4l2_dev *dip,
 		break;
 	default:
 		/* Bail out (this should be impossible) */
-		pr_err(KBUILD_MODNAME ": Failed to set up pvrusb2 v4l dev due to unrecognized config\n");
+		pr_err(KBUILD_MODNAME ": Failed to set up pvrusb2 v4l dev"
+		    " due to unrecognized config\n");
 		return;
 	}
 

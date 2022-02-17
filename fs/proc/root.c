@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/proc/root.c
  *
@@ -7,7 +6,7 @@
  *  proc root directory handling functions
  */
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/errno.h>
 #include <linux/time.h>
@@ -15,14 +14,12 @@
 #include <linux/stat.h>
 #include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/sched/stat.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/user_namespace.h>
 #include <linux/mount.h>
 #include <linux/pid_namespace.h>
 #include <linux/parser.h>
-#include <linux/cred.h>
 
 #include "internal.h"
 
@@ -61,8 +58,7 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 		case Opt_hidepid:
 			if (match_int(&args[0], &option))
 				return 0;
-			if (option < HIDEPID_OFF ||
-			    option > HIDEPID_INVISIBLE) {
+			if (option < 0 || option > 2) {
 				pr_err("proc: hidepid value must be between 0 and 2.\n");
 				return 0;
 			}
@@ -91,7 +87,7 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 {
 	struct pid_namespace *ns;
 
-	if (flags & SB_KERNMOUNT) {
+	if (flags & MS_KERNMOUNT) {
 		ns = data;
 		data = NULL;
 	} else {
@@ -123,13 +119,22 @@ static struct file_system_type proc_fs_type = {
 
 void __init proc_root_init(void)
 {
-	proc_init_kmemcache();
-	set_proc_pid_nlink();
+	int err;
+
+	proc_init_inodecache();
+	err = register_filesystem(&proc_fs_type);
+	if (err)
+		return;
+
 	proc_self_init();
 	proc_thread_self_init();
 	proc_symlink("mounts", NULL, "self/mounts");
 
 	proc_net_init();
+	proc_uid_init();
+#ifdef CONFIG_SYSVIPC
+	proc_mkdir("sysvipc", NULL);
+#endif
 	proc_mkdir("fs", NULL);
 	proc_mkdir("driver", NULL);
 	proc_create_mount_point("fs/nfsd"); /* somewhere for the nfsd filesystem to be mounted */
@@ -140,14 +145,12 @@ void __init proc_root_init(void)
 	proc_tty_init();
 	proc_mkdir("bus", NULL);
 	proc_sys_init();
-
-	register_filesystem(&proc_fs_type);
 }
 
-static int proc_root_getattr(const struct path *path, struct kstat *stat,
-			     u32 request_mask, unsigned int query_flags)
+static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat
+)
 {
-	generic_fillattr(d_inode(path->dentry), stat);
+	generic_fillattr(d_inode(dentry), stat);
 	stat->nlink = proc_root.nlink + nr_processes();
 	return 0;
 }
@@ -199,7 +202,7 @@ struct proc_dir_entry proc_root = {
 	.namelen	= 5, 
 	.mode		= S_IFDIR | S_IRUGO | S_IXUGO, 
 	.nlink		= 2, 
-	.refcnt		= REFCOUNT_INIT(1),
+	.count		= ATOMIC_INIT(1),
 	.proc_iops	= &proc_root_inode_operations, 
 	.proc_fops	= &proc_root_operations,
 	.parent		= &proc_root,

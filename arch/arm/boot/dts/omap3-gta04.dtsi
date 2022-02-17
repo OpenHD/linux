@@ -31,13 +31,6 @@
 		display1 = &tv0;
 	};
 
-	/* fixed 26MHz oscillator */
-	hfclk_26m: oscillator {
-		#clock-cells = <0>;
-		compatible = "fixed-clock";
-		clock-frequency = <26000000>;
-	};
-
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -63,8 +56,7 @@
 		simple-audio-card,bitclock-master = <&telephony_link_master>;
 		simple-audio-card,frame-master = <&telephony_link_master>;
 		simple-audio-card,format = "i2s";
-		simple-audio-card,bitclock-inversion;
-		simple-audio-card,frame-inversion;
+
 		simple-audio-card,cpu {
 			sound-dai = <&mcbsp4>;
 		};
@@ -94,7 +86,7 @@
 
 		/* lcd panel */
 		lcd: td028ttec1@0 {
-			compatible = "tpo,td028ttec1";
+			compatible = "toppoly,td028ttec1";
 			reg = <0>;
 			spi-max-frequency = <100000>;
 			spi-cpol;
@@ -128,7 +120,6 @@
 	hsusb2_phy: hsusb2_phy {
 		compatible = "usb-nop-xceiv";
 		reset-gpios = <&gpio6 14 GPIO_ACTIVE_LOW>;
-		#phy-cells = <0>;
 	};
 
 	tv0: connector {
@@ -327,9 +318,6 @@
 		interrupts = <7>; /* SYS_NIRQ cascaded to intc */
 		interrupt-parent = <&intc>;
 
-		clocks = <&hfclk_26m>;
-		clock-names = "fck";
-
 		twl_audio: audio {
 			compatible = "ti,twl4030-audio";
 			ti,enable-vibra = <1>;
@@ -447,7 +435,7 @@
 
 	/* RFID EEPROM */
 	m24lr64@50 {
-		compatible = "atmel,24c64";
+		compatible = "at,24c64";
 		reg = <0x50>;
 	};
 };

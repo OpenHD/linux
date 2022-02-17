@@ -72,13 +72,12 @@ static struct inet_frags ip6_frags;
 static int ip6_frag_reasm(struct frag_queue *fq, struct sk_buff *skb,
 			  struct sk_buff *prev_tail, struct net_device *dev);
 
-static void ip6_frag_expire(struct timer_list *t)
+static void ip6_frag_expire(unsigned long data)
 {
-	struct inet_frag_queue *frag = from_timer(frag, t, timer);
 	struct frag_queue *fq;
 	struct net *net;
 
-	fq = container_of(frag, struct frag_queue, q);
+	fq = container_of((struct inet_frag_queue *)data, struct frag_queue, q);
 	net = container_of(fq->q.net, struct net, ipv6.frags);
 
 	ip6frag_expire_frag_queue(net, fq);
@@ -373,7 +372,7 @@ static int ipv6_frag_rcv(struct sk_buff *skb)
 		spin_unlock(&fq->q.lock);
 		inet_frag_put(&fq->q);
 		if (prob_offset) {
-			__IP6_INC_STATS(net, __in6_dev_get_safely(skb->dev),
+			__IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)),
 					IPSTATS_MIB_INHDRERRORS);
 			/* icmpv6_param_prob() calls kfree_skb(skb) */
 			icmpv6_param_prob(skb, ICMPV6_HDR_FIELD, prob_offset);
@@ -386,7 +385,7 @@ static int ipv6_frag_rcv(struct sk_buff *skb)
 	return -1;
 
 fail_hdr:
-	__IP6_INC_STATS(net, __in6_dev_get_safely(skb->dev),
+	__IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)),
 			IPSTATS_MIB_INHDRERRORS);
 	icmpv6_param_prob(skb, ICMPV6_HDR_FIELD, skb_network_header_len(skb));
 	return -1;

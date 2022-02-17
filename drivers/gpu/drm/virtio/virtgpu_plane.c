@@ -39,84 +39,11 @@ static const uint32_t virtio_gpu_formats[] = {
 };
 
 static const uint32_t virtio_gpu_cursor_formats[] = {
-#ifdef __BIG_ENDIAN
-	DRM_FORMAT_BGRA8888,
-#else
 	DRM_FORMAT_ARGB8888,
-#endif
 };
-
-uint32_t virtio_gpu_translate_format(uint32_t drm_fourcc)
-{
-	uint32_t format;
-
-	switch (drm_fourcc) {
-#ifdef __BIG_ENDIAN
-	case DRM_FORMAT_XRGB8888:
-		format = VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM;
-		break;
-	case DRM_FORMAT_ARGB8888:
-		format = VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM;
-		break;
-	case DRM_FORMAT_BGRX8888:
-		format = VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM;
-		break;
-	case DRM_FORMAT_BGRA8888:
-		format = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
-		break;
-	case DRM_FORMAT_RGBX8888:
-		format = VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM;
-		break;
-	case DRM_FORMAT_RGBA8888:
-		format = VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
-		break;
-	case DRM_FORMAT_XBGR8888:
-		format = VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM;
-		break;
-	case DRM_FORMAT_ABGR8888:
-		format = VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM;
-		break;
-#else
-	case DRM_FORMAT_XRGB8888:
-		format = VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM;
-		break;
-	case DRM_FORMAT_ARGB8888:
-		format = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
-		break;
-	case DRM_FORMAT_BGRX8888:
-		format = VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM;
-		break;
-	case DRM_FORMAT_BGRA8888:
-		format = VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM;
-		break;
-	case DRM_FORMAT_RGBX8888:
-		format = VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM;
-		break;
-	case DRM_FORMAT_RGBA8888:
-		format = VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM;
-		break;
-	case DRM_FORMAT_XBGR8888:
-		format = VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM;
-		break;
-	case DRM_FORMAT_ABGR8888:
-		format = VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
-		break;
-#endif
-	default:
-		/*
-		 * This should not happen, we handle everything listed
-		 * in virtio_gpu_formats[].
-		 */
-		format = 0;
-		break;
-	}
-	WARN_ON(format == 0);
-	return format;
-}
 
 static void virtio_gpu_plane_destroy(struct drm_plane *plane)
 {
-	drm_plane_cleanup(plane);
 	kfree(plane);
 }
 
@@ -154,15 +81,15 @@ static void virtio_gpu_primary_plane_update(struct drm_plane *plane,
 
 	if (plane->state->fb) {
 		vgfb = to_virtio_gpu_framebuffer(plane->state->fb);
-		bo = gem_to_virtio_gpu_obj(vgfb->base.obj[0]);
+		bo = gem_to_virtio_gpu_obj(vgfb->obj);
 		handle = bo->hw_res_handle;
 		if (bo->dumb) {
 			virtio_gpu_cmd_transfer_to_host_2d
 				(vgdev, handle, 0,
 				 cpu_to_le32(plane->state->src_w >> 16),
 				 cpu_to_le32(plane->state->src_h >> 16),
-				 cpu_to_le32(plane->state->src_x >> 16),
-				 cpu_to_le32(plane->state->src_y >> 16), NULL);
+				 plane->state->src_x >> 16,
+				 plane->state->src_y >> 16, NULL);
 		}
 	} else {
 		handle = 0;
@@ -208,7 +135,7 @@ static void virtio_gpu_cursor_plane_update(struct drm_plane *plane,
 
 	if (plane->state->fb) {
 		vgfb = to_virtio_gpu_framebuffer(plane->state->fb);
-		bo = gem_to_virtio_gpu_obj(vgfb->base.obj[0]);
+		bo = gem_to_virtio_gpu_obj(vgfb->obj);
 		handle = bo->hw_res_handle;
 	} else {
 		handle = 0;
@@ -225,7 +152,7 @@ static void virtio_gpu_cursor_plane_update(struct drm_plane *plane,
 		if (!ret) {
 			reservation_object_add_excl_fence(bo->tbo.resv,
 							  &fence->f);
-			dma_fence_put(&fence->f);
+			fence_put(&fence->f);
 			fence = NULL;
 			virtio_gpu_object_unreserve(bo);
 			virtio_gpu_object_wait(bo, false);
@@ -298,7 +225,7 @@ struct drm_plane *virtio_gpu_plane_init(struct virtio_gpu_device *vgdev,
 	ret = drm_universal_plane_init(dev, plane, 1 << index,
 				       &virtio_gpu_plane_funcs,
 				       formats, nformats,
-				       NULL, type, NULL);
+				       type, NULL);
 	if (ret)
 		goto err_plane_init;
 

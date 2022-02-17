@@ -489,6 +489,7 @@ bfad_im_vport_delete(struct fc_vport *fc_vport)
 	struct bfad_im_port_s *im_port =
 			(struct bfad_im_port_s *) vport->drv_port.im_port;
 	struct bfad_s *bfad = im_port->bfad;
+	struct bfad_port_s *port;
 	struct bfa_fcs_vport_s *fcs_vport;
 	struct Scsi_Host *vshost;
 	wwn_t   pwwn;
@@ -502,6 +503,8 @@ bfad_im_vport_delete(struct fc_vport *fc_vport)
 		kfree(vport);
 		return 0;
 	}
+
+	port = im_port->port;
 
 	vshost = vport->drv_port.im_port->shost;
 	u64_to_wwn(fc_host_port_name(vshost), (u8 *)&pwwn);
@@ -929,7 +932,7 @@ bfad_im_num_of_discovered_ports_show(struct device *dev,
 	struct bfa_rport_qualifier_s *rports = NULL;
 	unsigned long   flags;
 
-	rports = kcalloc(nrports, sizeof(struct bfa_rport_qualifier_s),
+	rports = kzalloc(sizeof(struct bfa_rport_qualifier_s) * nrports,
 			 GFP_ATOMIC);
 	if (rports == NULL)
 		return snprintf(buf, PAGE_SIZE, "Failed\n");

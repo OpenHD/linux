@@ -38,12 +38,6 @@ static struct {
 	{HID_USAGE_SENSOR_ACCEL_3D,
 		HID_USAGE_SENSOR_UNITS_G, 9, 806650000},
 
-	{HID_USAGE_SENSOR_GRAVITY_VECTOR, 0, 9, 806650000},
-	{HID_USAGE_SENSOR_GRAVITY_VECTOR,
-		HID_USAGE_SENSOR_UNITS_METERS_PER_SEC_SQRD, 1, 0},
-	{HID_USAGE_SENSOR_GRAVITY_VECTOR,
-		HID_USAGE_SENSOR_UNITS_G, 9, 806650000},
-
 	{HID_USAGE_SENSOR_GYRO_3D, 0, 0, 17453293},
 	{HID_USAGE_SENSOR_GYRO_3D,
 		HID_USAGE_SENSOR_UNITS_RADIANS_PER_SECOND, 1, 0},
@@ -68,17 +62,6 @@ static struct {
 	{HID_USAGE_SENSOR_TIME_TIMESTAMP, 0, 1000000000, 0},
 	{HID_USAGE_SENSOR_TIME_TIMESTAMP, HID_USAGE_SENSOR_UNITS_MILLISECOND,
 		1000000, 0},
-
-	{HID_USAGE_SENSOR_DEVICE_ORIENTATION, 0, 1, 0},
-
-	{HID_USAGE_SENSOR_RELATIVE_ORIENTATION, 0, 1, 0},
-
-	{HID_USAGE_SENSOR_GEOMAGNETIC_ORIENTATION, 0, 1, 0},
-
-	{HID_USAGE_SENSOR_TEMPERATURE, 0, 1000, 0},
-	{HID_USAGE_SENSOR_TEMPERATURE, HID_USAGE_SENSOR_UNITS_DEGREES, 1000, 0},
-
-	{HID_USAGE_SENSOR_HUMIDITY, 0, 1000, 0},
 };
 
 static int pow_10(unsigned power)
@@ -222,7 +205,7 @@ int hid_sensor_write_samp_freq_value(struct hid_sensor_common *st,
 	int ret;
 
 	if (val1 < 0 || val2 < 0)
-		return -EINVAL;
+		ret = -EINVAL;
 
 	value = val1 * pow_10(6) + val2;
 	if (value) {
@@ -278,9 +261,6 @@ int hid_sensor_write_raw_hyst_value(struct hid_sensor_common *st,
 {
 	s32 value;
 	int ret;
-
-	if (val1 < 0 || val2 < 0)
-		return -EINVAL;
 
 	value = convert_to_vtf_format(st->sensitivity.size,
 				st->sensitivity.unit_expo,
@@ -410,56 +390,12 @@ int hid_sensor_get_reporting_interval(struct hid_sensor_hub_device *hsdev,
 
 }
 
-static void hid_sensor_get_report_latency_info(struct hid_sensor_hub_device *hsdev,
-					       u32 usage_id,
-					       struct hid_sensor_common *st)
-{
-	sensor_hub_input_get_attribute_info(hsdev, HID_FEATURE_REPORT,
-					    usage_id,
-					    HID_USAGE_SENSOR_PROP_REPORT_LATENCY,
-					    &st->report_latency);
-
-	hid_dbg(hsdev->hdev, "Report latency attributes: %x:%x\n",
-		st->report_latency.index, st->report_latency.report_id);
-}
-
-int hid_sensor_get_report_latency(struct hid_sensor_common *st)
-{
-	int ret;
-	int value;
-
-	ret = sensor_hub_get_feature(st->hsdev, st->report_latency.report_id,
-				     st->report_latency.index, sizeof(value),
-				     &value);
-	if (ret < 0)
-		return ret;
-
-	return value;
-}
-EXPORT_SYMBOL(hid_sensor_get_report_latency);
-
-int hid_sensor_set_report_latency(struct hid_sensor_common *st, int latency_ms)
-{
-	return sensor_hub_set_feature(st->hsdev, st->report_latency.report_id,
-				      st->report_latency.index,
-				      sizeof(latency_ms), &latency_ms);
-}
-EXPORT_SYMBOL(hid_sensor_set_report_latency);
-
-bool hid_sensor_batch_mode_supported(struct hid_sensor_common *st)
-{
-	return st->report_latency.index > 0 && st->report_latency.report_id > 0;
-}
-EXPORT_SYMBOL(hid_sensor_batch_mode_supported);
-
 int hid_sensor_parse_common_attributes(struct hid_sensor_hub_device *hsdev,
 					u32 usage_id,
 					struct hid_sensor_common *st)
 {
 
 	struct hid_sensor_hub_attribute_info timestamp;
-	s32 value;
-	int ret;
 
 	hid_sensor_get_reporting_interval(hsdev, usage_id, st);
 
@@ -473,15 +409,12 @@ int hid_sensor_parse_common_attributes(struct hid_sensor_hub_device *hsdev,
 					HID_USAGE_SENSOR_PROY_POWER_STATE,
 					&st->power_state);
 
-	st->power_state.logical_minimum = 1;
-	st->report_state.logical_minimum = 1;
+	st->raw_hystersis = -1;
 
 	sensor_hub_input_get_attribute_info(hsdev,
 			HID_FEATURE_REPORT, usage_id,
 			HID_USAGE_SENSOR_PROP_SENSITIVITY_ABS,
 			 &st->sensitivity);
-
-	st->raw_hystersis = -1;
 
 	sensor_hub_input_get_attribute_info(hsdev,
 					    HID_INPUT_REPORT, usage_id,
@@ -496,22 +429,12 @@ int hid_sensor_parse_common_attributes(struct hid_sensor_hub_device *hsdev,
 	} else
 		st->timestamp_ns_scale = 1000000000;
 
-	hid_sensor_get_report_latency_info(hsdev, usage_id, st);
-
 	hid_dbg(hsdev->hdev, "common attributes: %x:%x, %x:%x, %x:%x %x:%x %x:%x\n",
 		st->poll.index, st->poll.report_id,
 		st->report_state.index, st->report_state.report_id,
 		st->power_state.index, st->power_state.report_id,
 		st->sensitivity.index, st->sensitivity.report_id,
 		timestamp.index, timestamp.report_id);
-
-	ret = sensor_hub_get_feature(hsdev,
-				st->power_state.report_id,
-				st->power_state.index, sizeof(value), &value);
-	if (ret < 0)
-		return ret;
-	if (value < 0)
-		return -EINVAL;
 
 	return 0;
 }

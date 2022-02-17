@@ -54,7 +54,7 @@ static int mmc_pwrseq_emmc_reset_nb(struct notifier_block *this,
 }
 
 static const struct mmc_pwrseq_ops mmc_pwrseq_emmc_ops = {
-	.reset = mmc_pwrseq_emmc_reset,
+	.post_power_on = mmc_pwrseq_emmc_reset,
 };
 
 static int mmc_pwrseq_emmc_probe(struct platform_device *pdev)

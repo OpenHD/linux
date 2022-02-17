@@ -1,10 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_S390_FTRACE_H
 #define _ASM_S390_FTRACE_H
 
 #define ARCH_SUPPORTS_FTRACE_OPS 1
 
-#if defined(CC_USING_HOTPATCH) || defined(CC_USING_NOP_MCOUNT)
+#ifdef CC_USING_HOTPATCH
 #define MCOUNT_INSN_SIZE	6
 #else
 #define MCOUNT_INSN_SIZE	24
@@ -42,7 +41,7 @@ struct ftrace_insn {
 static inline void ftrace_generate_nop_insn(struct ftrace_insn *insn)
 {
 #ifdef CONFIG_FUNCTION_TRACER
-#if defined(CC_USING_HOTPATCH) || defined(CC_USING_NOP_MCOUNT)
+#ifdef CC_USING_HOTPATCH
 	/* brcl 0,0 */
 	insn->opc = 0xc004;
 	insn->disp = 0;
@@ -57,7 +56,7 @@ static inline void ftrace_generate_nop_insn(struct ftrace_insn *insn)
 static inline int is_ftrace_nop(struct ftrace_insn *insn)
 {
 #ifdef CONFIG_FUNCTION_TRACER
-#if defined(CC_USING_HOTPATCH) || defined(CC_USING_NOP_MCOUNT)
+#ifdef CC_USING_HOTPATCH
 	if (insn->disp == 0)
 		return 1;
 #else

@@ -17,7 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/init.h>
-#include <linux/sched/mm.h>
 #include <asm/cputable.h>
 #include <asm/code-patching.h>
 #include <asm/page.h>
@@ -25,6 +24,7 @@
 #include <asm/setup.h>
 #include <asm/security_features.h>
 #include <asm/firmware.h>
+#include <asm/setup.h>
 
 struct fixup_entry {
 	unsigned long	mask;
@@ -63,7 +63,7 @@ static int patch_alt_instruction(unsigned int *src, unsigned int *dest,
 		}
 	}
 
-	raw_patch_instruction(dest, instr);
+	patch_instruction(dest, instr);
 
 	return 0;
 }
@@ -92,7 +92,7 @@ static int patch_feature_section(unsigned long value, struct fixup_entry *fcur)
 	}
 
 	for (; dest < end; dest++)
-		raw_patch_instruction(dest, PPC_INST_NOP);
+		patch_instruction(dest, PPC_INST_NOP);
 
 	return 0;
 }
@@ -230,6 +230,110 @@ void do_stf_barrier_fixups(enum stf_barrier_type types)
 {
 	do_stf_entry_barrier_fixups(types);
 	do_stf_exit_barrier_fixups(types);
+}
+
+void do_uaccess_flush_fixups(enum l1d_flush_type types)
+{
+	unsigned int instrs[4], *dest;
+	long *start, *end;
+	int i;
+
+	start = PTRRELOC(&__start___uaccess_flush_fixup);
+	end = PTRRELOC(&__stop___uaccess_flush_fixup);
+
+	instrs[0] = 0x60000000; /* nop */
+	instrs[1] = 0x60000000; /* nop */
+	instrs[2] = 0x60000000; /* nop */
+	instrs[3] = 0x4e800020; /* blr */
+
+	i = 0;
+	if (types == L1D_FLUSH_FALLBACK) {
+		instrs[3] = 0x60000000; /* nop */
+		/* fallthrough to fallback flush */
+	}
+
+	if (types & L1D_FLUSH_ORI) {
+		instrs[i++] = 0x63ff0000; /* ori 31,31,0 speculation barrier */
+		instrs[i++] = 0x63de0000; /* ori 30,30,0 L1d flush*/
+	}
+
+	if (types & L1D_FLUSH_MTTRIG)
+		instrs[i++] = 0x7c12dba6; /* mtspr TRIG2,r0 (SPR #882) */
+
+	for (i = 0; start < end; start++, i++) {
+		dest = (void *)start + *start;
+
+		pr_devel("patching dest %lx\n", (unsigned long)dest);
+
+		patch_instruction(dest, instrs[0]);
+
+		patch_instruction((dest + 1), instrs[1]);
+		patch_instruction((dest + 2), instrs[2]);
+		patch_instruction((dest + 3), instrs[3]);
+	}
+
+	printk(KERN_DEBUG "uaccess-flush: patched %d locations (%s flush)\n", i,
+		(types == L1D_FLUSH_NONE)       ? "no" :
+		(types == L1D_FLUSH_FALLBACK)   ? "fallback displacement" :
+		(types &  L1D_FLUSH_ORI)        ? (types & L1D_FLUSH_MTTRIG)
+							? "ori+mttrig type"
+							: "ori type" :
+		(types &  L1D_FLUSH_MTTRIG)     ? "mttrig type"
+						: "unknown");
+}
+
+void do_entry_flush_fixups(enum l1d_flush_type types)
+{
+	unsigned int instrs[3], *dest;
+	long *start, *end;
+	int i;
+
+	start = PTRRELOC(&__start___entry_flush_fixup);
+	end = PTRRELOC(&__stop___entry_flush_fixup);
+
+	instrs[0] = 0x60000000; /* nop */
+	instrs[1] = 0x60000000; /* nop */
+	instrs[2] = 0x60000000; /* nop */
+
+	i = 0;
+	if (types == L1D_FLUSH_FALLBACK) {
+		instrs[i++] = 0x7d4802a6; /* mflr r10		*/
+		instrs[i++] = 0x60000000; /* branch patched below */
+		instrs[i++] = 0x7d4803a6; /* mtlr r10		*/
+	}
+
+	if (types & L1D_FLUSH_ORI) {
+		instrs[i++] = 0x63ff0000; /* ori 31,31,0 speculation barrier */
+		instrs[i++] = 0x63de0000; /* ori 30,30,0 L1d flush*/
+	}
+
+	if (types & L1D_FLUSH_MTTRIG)
+		instrs[i++] = 0x7c12dba6; /* mtspr TRIG2,r0 (SPR #882) */
+
+	for (i = 0; start < end; start++, i++) {
+		dest = (void *)start + *start;
+
+		pr_devel("patching dest %lx\n", (unsigned long)dest);
+
+		patch_instruction(dest, instrs[0]);
+
+		if (types == L1D_FLUSH_FALLBACK)
+			patch_branch((dest + 1), (unsigned long)&entry_flush_fallback,
+				     BRANCH_SET_LINK);
+		else
+			patch_instruction((dest + 1), instrs[1]);
+
+		patch_instruction((dest + 2), instrs[2]);
+	}
+
+	printk(KERN_DEBUG "entry-flush: patched %d locations (%s flush)\n", i,
+		(types == L1D_FLUSH_NONE)       ? "no" :
+		(types == L1D_FLUSH_FALLBACK)   ? "fallback displacement" :
+		(types &  L1D_FLUSH_ORI)        ? (types & L1D_FLUSH_MTTRIG)
+							? "ori+mttrig type"
+							: "ori type" :
+		(types &  L1D_FLUSH_MTTRIG)     ? "mttrig type"
+						: "unknown");
 }
 
 void do_rfi_flush_fixups(enum l1d_flush_type types)
@@ -385,7 +489,7 @@ void do_lwsync_fixups(unsigned long value, void *fixup_start, void *fixup_end)
 
 	for (; start < end; start++) {
 		dest = (void *)start + *start;
-		raw_patch_instruction(dest, PPC_INST_LWSYNC);
+		patch_instruction(dest, PPC_INST_LWSYNC);
 	}
 }
 
@@ -403,7 +507,7 @@ static void do_final_fixups(void)
 	length = (__end_interrupts - _stext) / sizeof(int);
 
 	while (length--) {
-		raw_patch_instruction(dest, *src);
+		patch_instruction(dest, *src);
 		src++;
 		dest++;
 	}
@@ -489,202 +593,192 @@ static long calc_offset(struct fixup_entry *entry, unsigned int *p)
 
 static void test_basic_patching(void)
 {
-	extern unsigned int ftr_fixup_test1[];
-	extern unsigned int end_ftr_fixup_test1[];
-	extern unsigned int ftr_fixup_test1_orig[];
-	extern unsigned int ftr_fixup_test1_expected[];
-	int size = 4 * (end_ftr_fixup_test1 - ftr_fixup_test1);
+	extern unsigned int ftr_fixup_test1;
+	extern unsigned int end_ftr_fixup_test1;
+	extern unsigned int ftr_fixup_test1_orig;
+	extern unsigned int ftr_fixup_test1_expected;
+	int size = &end_ftr_fixup_test1 - &ftr_fixup_test1;
 
 	fixup.value = fixup.mask = 8;
-	fixup.start_off = calc_offset(&fixup, ftr_fixup_test1 + 1);
-	fixup.end_off = calc_offset(&fixup, ftr_fixup_test1 + 2);
+	fixup.start_off = calc_offset(&fixup, &ftr_fixup_test1 + 1);
+	fixup.end_off = calc_offset(&fixup, &ftr_fixup_test1 + 2);
 	fixup.alt_start_off = fixup.alt_end_off = 0;
 
 	/* Sanity check */
-	check(memcmp(ftr_fixup_test1, ftr_fixup_test1_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test1, &ftr_fixup_test1_orig, size) == 0);
 
 	/* Check we don't patch if the value matches */
 	patch_feature_section(8, &fixup);
-	check(memcmp(ftr_fixup_test1, ftr_fixup_test1_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test1, &ftr_fixup_test1_orig, size) == 0);
 
 	/* Check we do patch if the value doesn't match */
 	patch_feature_section(0, &fixup);
-	check(memcmp(ftr_fixup_test1, ftr_fixup_test1_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test1, &ftr_fixup_test1_expected, size) == 0);
 
 	/* Check we do patch if the mask doesn't match */
-	memcpy(ftr_fixup_test1, ftr_fixup_test1_orig, size);
-	check(memcmp(ftr_fixup_test1, ftr_fixup_test1_orig, size) == 0);
+	memcpy(&ftr_fixup_test1, &ftr_fixup_test1_orig, size);
+	check(memcmp(&ftr_fixup_test1, &ftr_fixup_test1_orig, size) == 0);
 	patch_feature_section(~8, &fixup);
-	check(memcmp(ftr_fixup_test1, ftr_fixup_test1_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test1, &ftr_fixup_test1_expected, size) == 0);
 }
 
 static void test_alternative_patching(void)
 {
-	extern unsigned int ftr_fixup_test2[];
-	extern unsigned int end_ftr_fixup_test2[];
-	extern unsigned int ftr_fixup_test2_orig[];
-	extern unsigned int ftr_fixup_test2_alt[];
-	extern unsigned int ftr_fixup_test2_expected[];
-	int size = 4 * (end_ftr_fixup_test2 - ftr_fixup_test2);
+	extern unsigned int ftr_fixup_test2;
+	extern unsigned int end_ftr_fixup_test2;
+	extern unsigned int ftr_fixup_test2_orig;
+	extern unsigned int ftr_fixup_test2_alt;
+	extern unsigned int ftr_fixup_test2_expected;
+	int size = &end_ftr_fixup_test2 - &ftr_fixup_test2;
 
 	fixup.value = fixup.mask = 0xF;
-	fixup.start_off = calc_offset(&fixup, ftr_fixup_test2 + 1);
-	fixup.end_off = calc_offset(&fixup, ftr_fixup_test2 + 2);
-	fixup.alt_start_off = calc_offset(&fixup, ftr_fixup_test2_alt);
-	fixup.alt_end_off = calc_offset(&fixup, ftr_fixup_test2_alt + 1);
+	fixup.start_off = calc_offset(&fixup, &ftr_fixup_test2 + 1);
+	fixup.end_off = calc_offset(&fixup, &ftr_fixup_test2 + 2);
+	fixup.alt_start_off = calc_offset(&fixup, &ftr_fixup_test2_alt);
+	fixup.alt_end_off = calc_offset(&fixup, &ftr_fixup_test2_alt + 1);
 
 	/* Sanity check */
-	check(memcmp(ftr_fixup_test2, ftr_fixup_test2_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test2, &ftr_fixup_test2_orig, size) == 0);
 
 	/* Check we don't patch if the value matches */
 	patch_feature_section(0xF, &fixup);
-	check(memcmp(ftr_fixup_test2, ftr_fixup_test2_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test2, &ftr_fixup_test2_orig, size) == 0);
 
 	/* Check we do patch if the value doesn't match */
 	patch_feature_section(0, &fixup);
-	check(memcmp(ftr_fixup_test2, ftr_fixup_test2_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test2, &ftr_fixup_test2_expected, size) == 0);
 
 	/* Check we do patch if the mask doesn't match */
-	memcpy(ftr_fixup_test2, ftr_fixup_test2_orig, size);
-	check(memcmp(ftr_fixup_test2, ftr_fixup_test2_orig, size) == 0);
+	memcpy(&ftr_fixup_test2, &ftr_fixup_test2_orig, size);
+	check(memcmp(&ftr_fixup_test2, &ftr_fixup_test2_orig, size) == 0);
 	patch_feature_section(~0xF, &fixup);
-	check(memcmp(ftr_fixup_test2, ftr_fixup_test2_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test2, &ftr_fixup_test2_expected, size) == 0);
 }
 
 static void test_alternative_case_too_big(void)
 {
-	extern unsigned int ftr_fixup_test3[];
-	extern unsigned int end_ftr_fixup_test3[];
-	extern unsigned int ftr_fixup_test3_orig[];
-	extern unsigned int ftr_fixup_test3_alt[];
-	int size = 4 * (end_ftr_fixup_test3 - ftr_fixup_test3);
+	extern unsigned int ftr_fixup_test3;
+	extern unsigned int end_ftr_fixup_test3;
+	extern unsigned int ftr_fixup_test3_orig;
+	extern unsigned int ftr_fixup_test3_alt;
+	int size = &end_ftr_fixup_test3 - &ftr_fixup_test3;
 
 	fixup.value = fixup.mask = 0xC;
-	fixup.start_off = calc_offset(&fixup, ftr_fixup_test3 + 1);
-	fixup.end_off = calc_offset(&fixup, ftr_fixup_test3 + 2);
-	fixup.alt_start_off = calc_offset(&fixup, ftr_fixup_test3_alt);
-	fixup.alt_end_off = calc_offset(&fixup, ftr_fixup_test3_alt + 2);
+	fixup.start_off = calc_offset(&fixup, &ftr_fixup_test3 + 1);
+	fixup.end_off = calc_offset(&fixup, &ftr_fixup_test3 + 2);
+	fixup.alt_start_off = calc_offset(&fixup, &ftr_fixup_test3_alt);
+	fixup.alt_end_off = calc_offset(&fixup, &ftr_fixup_test3_alt + 2);
 
 	/* Sanity check */
-	check(memcmp(ftr_fixup_test3, ftr_fixup_test3_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test3, &ftr_fixup_test3_orig, size) == 0);
 
 	/* Expect nothing to be patched, and the error returned to us */
 	check(patch_feature_section(0xF, &fixup) == 1);
-	check(memcmp(ftr_fixup_test3, ftr_fixup_test3_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test3, &ftr_fixup_test3_orig, size) == 0);
 	check(patch_feature_section(0, &fixup) == 1);
-	check(memcmp(ftr_fixup_test3, ftr_fixup_test3_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test3, &ftr_fixup_test3_orig, size) == 0);
 	check(patch_feature_section(~0xF, &fixup) == 1);
-	check(memcmp(ftr_fixup_test3, ftr_fixup_test3_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test3, &ftr_fixup_test3_orig, size) == 0);
 }
 
 static void test_alternative_case_too_small(void)
 {
-	extern unsigned int ftr_fixup_test4[];
-	extern unsigned int end_ftr_fixup_test4[];
-	extern unsigned int ftr_fixup_test4_orig[];
-	extern unsigned int ftr_fixup_test4_alt[];
-	extern unsigned int ftr_fixup_test4_expected[];
-	int size = 4 * (end_ftr_fixup_test4 - ftr_fixup_test4);
+	extern unsigned int ftr_fixup_test4;
+	extern unsigned int end_ftr_fixup_test4;
+	extern unsigned int ftr_fixup_test4_orig;
+	extern unsigned int ftr_fixup_test4_alt;
+	extern unsigned int ftr_fixup_test4_expected;
+	int size = &end_ftr_fixup_test4 - &ftr_fixup_test4;
 	unsigned long flag;
 
 	/* Check a high-bit flag */
 	flag = 1UL << ((sizeof(unsigned long) - 1) * 8);
 	fixup.value = fixup.mask = flag;
-	fixup.start_off = calc_offset(&fixup, ftr_fixup_test4 + 1);
-	fixup.end_off = calc_offset(&fixup, ftr_fixup_test4 + 5);
-	fixup.alt_start_off = calc_offset(&fixup, ftr_fixup_test4_alt);
-	fixup.alt_end_off = calc_offset(&fixup, ftr_fixup_test4_alt + 2);
+	fixup.start_off = calc_offset(&fixup, &ftr_fixup_test4 + 1);
+	fixup.end_off = calc_offset(&fixup, &ftr_fixup_test4 + 5);
+	fixup.alt_start_off = calc_offset(&fixup, &ftr_fixup_test4_alt);
+	fixup.alt_end_off = calc_offset(&fixup, &ftr_fixup_test4_alt + 2);
 
 	/* Sanity check */
-	check(memcmp(ftr_fixup_test4, ftr_fixup_test4_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test4, &ftr_fixup_test4_orig, size) == 0);
 
 	/* Check we don't patch if the value matches */
 	patch_feature_section(flag, &fixup);
-	check(memcmp(ftr_fixup_test4, ftr_fixup_test4_orig, size) == 0);
+	check(memcmp(&ftr_fixup_test4, &ftr_fixup_test4_orig, size) == 0);
 
 	/* Check we do patch if the value doesn't match */
 	patch_feature_section(0, &fixup);
-	check(memcmp(ftr_fixup_test4, ftr_fixup_test4_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test4, &ftr_fixup_test4_expected, size) == 0);
 
 	/* Check we do patch if the mask doesn't match */
-	memcpy(ftr_fixup_test4, ftr_fixup_test4_orig, size);
-	check(memcmp(ftr_fixup_test4, ftr_fixup_test4_orig, size) == 0);
+	memcpy(&ftr_fixup_test4, &ftr_fixup_test4_orig, size);
+	check(memcmp(&ftr_fixup_test4, &ftr_fixup_test4_orig, size) == 0);
 	patch_feature_section(~flag, &fixup);
-	check(memcmp(ftr_fixup_test4, ftr_fixup_test4_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test4, &ftr_fixup_test4_expected, size) == 0);
 }
 
 static void test_alternative_case_with_branch(void)
 {
-	extern unsigned int ftr_fixup_test5[];
-	extern unsigned int end_ftr_fixup_test5[];
-	extern unsigned int ftr_fixup_test5_expected[];
-	int size = 4 * (end_ftr_fixup_test5 - ftr_fixup_test5);
+	extern unsigned int ftr_fixup_test5;
+	extern unsigned int end_ftr_fixup_test5;
+	extern unsigned int ftr_fixup_test5_expected;
+	int size = &end_ftr_fixup_test5 - &ftr_fixup_test5;
 
-	check(memcmp(ftr_fixup_test5, ftr_fixup_test5_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test5, &ftr_fixup_test5_expected, size) == 0);
 }
 
 static void test_alternative_case_with_external_branch(void)
 {
-	extern unsigned int ftr_fixup_test6[];
-	extern unsigned int end_ftr_fixup_test6[];
-	extern unsigned int ftr_fixup_test6_expected[];
-	int size = 4 * (end_ftr_fixup_test6 - ftr_fixup_test6);
+	extern unsigned int ftr_fixup_test6;
+	extern unsigned int end_ftr_fixup_test6;
+	extern unsigned int ftr_fixup_test6_expected;
+	int size = &end_ftr_fixup_test6 - &ftr_fixup_test6;
 
-	check(memcmp(ftr_fixup_test6, ftr_fixup_test6_expected, size) == 0);
-}
-
-static void test_alternative_case_with_branch_to_end(void)
-{
-	extern unsigned int ftr_fixup_test7[];
-	extern unsigned int end_ftr_fixup_test7[];
-	extern unsigned int ftr_fixup_test7_expected[];
-	int size = 4 * (end_ftr_fixup_test7 - ftr_fixup_test7);
-
-	check(memcmp(ftr_fixup_test7, ftr_fixup_test7_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test6, &ftr_fixup_test6_expected, size) == 0);
 }
 
 static void test_cpu_macros(void)
 {
-	extern u8 ftr_fixup_test_FTR_macros[];
-	extern u8 ftr_fixup_test_FTR_macros_expected[];
-	unsigned long size = ftr_fixup_test_FTR_macros_expected -
-			     ftr_fixup_test_FTR_macros;
+	extern u8 ftr_fixup_test_FTR_macros;
+	extern u8 ftr_fixup_test_FTR_macros_expected;
+	unsigned long size = &ftr_fixup_test_FTR_macros_expected -
+			     &ftr_fixup_test_FTR_macros;
 
 	/* The fixups have already been done for us during boot */
-	check(memcmp(ftr_fixup_test_FTR_macros,
-		     ftr_fixup_test_FTR_macros_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test_FTR_macros,
+		     &ftr_fixup_test_FTR_macros_expected, size) == 0);
 }
 
 static void test_fw_macros(void)
 {
 #ifdef CONFIG_PPC64
-	extern u8 ftr_fixup_test_FW_FTR_macros[];
-	extern u8 ftr_fixup_test_FW_FTR_macros_expected[];
-	unsigned long size = ftr_fixup_test_FW_FTR_macros_expected -
-			     ftr_fixup_test_FW_FTR_macros;
+	extern u8 ftr_fixup_test_FW_FTR_macros;
+	extern u8 ftr_fixup_test_FW_FTR_macros_expected;
+	unsigned long size = &ftr_fixup_test_FW_FTR_macros_expected -
+			     &ftr_fixup_test_FW_FTR_macros;
 
 	/* The fixups have already been done for us during boot */
-	check(memcmp(ftr_fixup_test_FW_FTR_macros,
-		     ftr_fixup_test_FW_FTR_macros_expected, size) == 0);
+	check(memcmp(&ftr_fixup_test_FW_FTR_macros,
+		     &ftr_fixup_test_FW_FTR_macros_expected, size) == 0);
 #endif
 }
 
 static void test_lwsync_macros(void)
 {
-	extern u8 lwsync_fixup_test[];
-	extern u8 end_lwsync_fixup_test[];
-	extern u8 lwsync_fixup_test_expected_LWSYNC[];
-	extern u8 lwsync_fixup_test_expected_SYNC[];
-	unsigned long size = end_lwsync_fixup_test -
-			     lwsync_fixup_test;
+	extern u8 lwsync_fixup_test;
+	extern u8 end_lwsync_fixup_test;
+	extern u8 lwsync_fixup_test_expected_LWSYNC;
+	extern u8 lwsync_fixup_test_expected_SYNC;
+	unsigned long size = &end_lwsync_fixup_test -
+			     &lwsync_fixup_test;
 
 	/* The fixups have already been done for us during boot */
 	if (cur_cpu_spec->cpu_features & CPU_FTR_LWSYNC) {
-		check(memcmp(lwsync_fixup_test,
-			     lwsync_fixup_test_expected_LWSYNC, size) == 0);
+		check(memcmp(&lwsync_fixup_test,
+			     &lwsync_fixup_test_expected_LWSYNC, size) == 0);
 	} else {
-		check(memcmp(lwsync_fixup_test,
-			     lwsync_fixup_test_expected_SYNC, size) == 0);
+		check(memcmp(&lwsync_fixup_test,
+			     &lwsync_fixup_test_expected_SYNC, size) == 0);
 	}
 }
 
@@ -698,7 +792,6 @@ static int __init test_feature_fixups(void)
 	test_alternative_case_too_small();
 	test_alternative_case_with_branch();
 	test_alternative_case_with_external_branch();
-	test_alternative_case_with_branch_to_end();
 	test_cpu_macros();
 	test_fw_macros();
 	test_lwsync_macros();

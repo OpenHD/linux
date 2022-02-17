@@ -252,7 +252,7 @@ int st21nfca_hci_se_io(struct nfc_hci_dev *hdev, u32 se_idx,
 }
 EXPORT_SYMBOL(st21nfca_hci_se_io);
 
-static void st21nfca_se_wt_timeout(struct timer_list *t)
+static void st21nfca_se_wt_timeout(unsigned long data)
 {
 	/*
 	 * No answer from the secure element
@@ -265,8 +265,7 @@ static void st21nfca_se_wt_timeout(struct timer_list *t)
 	 */
 	/* hardware reset managed through VCC_UICC_OUT power supply */
 	u8 param = 0x01;
-	struct st21nfca_hci_info *info = from_timer(info, t,
-						    se_info.bwi_timer);
+	struct st21nfca_hci_info *info = (struct st21nfca_hci_info *) data;
 
 	pr_debug("\n");
 
@@ -284,10 +283,9 @@ static void st21nfca_se_wt_timeout(struct timer_list *t)
 	info->se_info.cb(info->se_info.cb_context, NULL, 0, -ETIME);
 }
 
-static void st21nfca_se_activation_timeout(struct timer_list *t)
+static void st21nfca_se_activation_timeout(unsigned long data)
 {
-	struct st21nfca_hci_info *info = from_timer(info, t,
-						    se_info.se_active_timer);
+	struct st21nfca_hci_info *info = (struct st21nfca_hci_info *) data;
 
 	pr_debug("\n");
 
@@ -322,8 +320,15 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 		 * AID		81	5 to 16
 		 * PARAMETERS	82	0 to 255
 		 */
-		if (skb->len < NFC_MIN_AID_LENGTH + 2 &&
+		if (skb->len < NFC_MIN_AID_LENGTH + 2 ||
 		    skb->data[0] != NFC_EVT_TRANSACTION_AID_TAG)
+			return -EPROTO;
+
+		/*
+		 * Buffer should have enough space for at least
+		 * two tag fields + two length fields + aid_len (skb->data[1])
+		 */
+		if (skb->len < skb->data[1] + 4)
 			return -EPROTO;
 
 		transaction = (struct nfc_evt_transaction *)devm_kzalloc(dev,
@@ -334,13 +339,16 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 		transaction->aid_len = skb->data[1];
 		memcpy(transaction->aid, &skb->data[2],
 		       transaction->aid_len);
-
-		/* Check next byte is PARAMETERS tag (82) */
-		if (skb->data[transaction->aid_len + 2] !=
-		    NFC_EVT_TRANSACTION_PARAMS_TAG)
-			return -EPROTO;
-
 		transaction->params_len = skb->data[transaction->aid_len + 3];
+
+		/* Check next byte is PARAMETERS tag (82) and the length field */
+		if (skb->data[transaction->aid_len + 2] !=
+		    NFC_EVT_TRANSACTION_PARAMS_TAG ||
+		    skb->len < transaction->aid_len + transaction->params_len + 4) {
+			devm_kfree(dev, transaction);
+			return -EPROTO;
+		}
+
 		memcpy(transaction->params, skb->data +
 		       transaction->aid_len + 4, transaction->params_len);
 
@@ -396,11 +404,14 @@ void st21nfca_se_init(struct nfc_hci_dev *hdev)
 
 	init_completion(&info->se_info.req_completion);
 	/* initialize timers */
-	timer_setup(&info->se_info.bwi_timer, st21nfca_se_wt_timeout, 0);
+	init_timer(&info->se_info.bwi_timer);
+	info->se_info.bwi_timer.data = (unsigned long)info;
+	info->se_info.bwi_timer.function = st21nfca_se_wt_timeout;
 	info->se_info.bwi_active = false;
 
-	timer_setup(&info->se_info.se_active_timer,
-		    st21nfca_se_activation_timeout, 0);
+	init_timer(&info->se_info.se_active_timer);
+	info->se_info.se_active_timer.data = (unsigned long)info;
+	info->se_info.se_active_timer.function = st21nfca_se_activation_timeout;
 	info->se_info.se_active = false;
 
 	info->se_info.count_pipes = 0;

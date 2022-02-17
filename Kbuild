@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Kbuild for top-level directory of the kernel
 # This file takes care of the following:
@@ -18,6 +17,7 @@ targets := kernel/bounds.s
 
 # We use internal kbuild rules to avoid the "is up to date" message from make
 kernel/bounds.s: kernel/bounds.c FORCE
+	$(Q)mkdir -p $(dir $@)
 	$(call if_changed_dep,cc_s_c)
 
 $(obj)/$(bounds-file): kernel/bounds.s FORCE
@@ -53,6 +53,7 @@ targets += arch/$(SRCARCH)/kernel/asm-offsets.s
 # We use internal kbuild rules to avoid the "is up to date" message from make
 arch/$(SRCARCH)/kernel/asm-offsets.s: arch/$(SRCARCH)/kernel/asm-offsets.c \
                                       $(obj)/$(timeconst-file) $(obj)/$(bounds-file) FORCE
+	$(Q)mkdir -p $(dir $@)
 	$(call if_changed_dep,cc_s_c)
 
 $(obj)/$(offsets-file): arch/$(SRCARCH)/kernel/asm-offsets.s FORCE

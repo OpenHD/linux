@@ -189,14 +189,17 @@ struct lsi_umts_dual {
 #define SIERRA_NET_LSI_UMTS_DS_STATUS_LEN \
 	(SIERRA_NET_LSI_UMTS_DS_LEN - SIERRA_NET_LSI_COMMON_LEN)
 
+/* Forward definitions */
+static void sierra_sync_timer(unsigned long syncdata);
+static int sierra_net_change_mtu(struct net_device *net, int new_mtu);
+
 /* Our own net device operations structure */
 static const struct net_device_ops sierra_net_device_ops = {
 	.ndo_open               = usbnet_open,
 	.ndo_stop               = usbnet_stop,
 	.ndo_start_xmit         = usbnet_start_xmit,
 	.ndo_tx_timeout         = usbnet_tx_timeout,
-	.ndo_change_mtu         = usbnet_change_mtu,
-	.ndo_get_stats64        = usbnet_get_stats64,
+	.ndo_change_mtu         = sierra_net_change_mtu,
 	.ndo_set_mac_address    = eth_mac_addr,
 	.ndo_validate_addr      = eth_validate_addr,
 };
@@ -377,7 +380,7 @@ static int sierra_net_parse_lsi(struct usbnet *dev, char *data, int datalen)
 	u32 expected_length;
 
 	if (datalen < sizeof(struct lsi_umts_single)) {
-		netdev_err(dev->net, "%s: Data length %d, exp >= %zu\n",
+		netdev_err(dev->net, "%s: Data length %d, exp >= %Zu\n",
 			   __func__, datalen, sizeof(struct lsi_umts_single));
 		return -1;
 	}
@@ -472,6 +475,8 @@ static void sierra_net_dosync(struct usbnet *dev)
 			"Send SYNC failed, status %d\n", status);
 
 	/* Now, start a timer and make sure we get the Restart Indication */
+	priv->sync_timer.function = sierra_sync_timer;
+	priv->sync_timer.data = (unsigned long) dev;
 	priv->sync_timer.expires = jiffies + SIERRA_NET_SYNCDELAY;
 	add_timer(&priv->sync_timer);
 }
@@ -588,10 +593,9 @@ static void sierra_net_defer_kevent(struct usbnet *dev, int work)
 /*
  * Sync Retransmit Timer Handler. On expiry, kick the work queue
  */
-static void sierra_sync_timer(struct timer_list *t)
+static void sierra_sync_timer(unsigned long syncdata)
 {
-	struct sierra_net_data *priv = from_timer(priv, t, sync_timer);
-	struct usbnet *dev = priv->usbnet;
+	struct usbnet *dev = (struct usbnet *)syncdata;
 
 	dev_dbg(&dev->udev->dev, "%s", __func__);
 	/* Kick the tasklet */
@@ -645,10 +649,19 @@ static const struct ethtool_ops sierra_net_ethtool_ops = {
 	.get_link = sierra_net_get_link,
 	.get_msglevel = usbnet_get_msglevel,
 	.set_msglevel = usbnet_set_msglevel,
+	.get_settings = usbnet_get_settings,
+	.set_settings = usbnet_set_settings,
 	.nway_reset = usbnet_nway_reset,
-	.get_link_ksettings = usbnet_get_link_ksettings,
-	.set_link_ksettings = usbnet_set_link_ksettings,
 };
+
+/* MTU can not be more than 1500 bytes, enforce it. */
+static int sierra_net_change_mtu(struct net_device *net, int new_mtu)
+{
+	if (new_mtu > SIERRA_NET_MAX_SUPPORTED_MTU)
+		return -EINVAL;
+
+	return usbnet_change_mtu(net, new_mtu);
+}
 
 static int sierra_net_get_fw_attr(struct usbnet *dev, u16 *datap)
 {
@@ -733,7 +746,6 @@ static int sierra_net_bind(struct usbnet *dev, struct usb_interface *intf)
 
 	dev->net->hard_header_len += SIERRA_NET_HIP_EXT_HDR_LEN;
 	dev->hard_mtu = dev->net->mtu + dev->net->hard_header_len;
-	dev->net->max_mtu = SIERRA_NET_MAX_SUPPORTED_MTU;
 
 	/* Set up the netdev */
 	dev->net->flags |= IFF_NOARP;
@@ -748,7 +760,7 @@ static int sierra_net_bind(struct usbnet *dev, struct usb_interface *intf)
 	INIT_WORK(&priv->sierra_net_kevent, sierra_net_kevent);
 
 	/* Only need to do this once */
-	timer_setup(&priv->sync_timer, sierra_sync_timer, 0);
+	init_timer(&priv->sync_timer);
 
 	/* verify fw attributes */
 	status = sierra_net_get_fw_attr(dev, &fwattr);

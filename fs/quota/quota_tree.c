@@ -61,7 +61,7 @@ static ssize_t read_blk(struct qtree_mem_dqinfo *info, uint blk, char *buf)
 
 	memset(buf, 0, info->dqi_usable_bs);
 	return sb->s_op->quota_read(sb, info->dqi_type, buf,
-	       info->dqi_usable_bs, blk << info->dqi_blocksize_bits);
+	       info->dqi_usable_bs, (loff_t)blk << info->dqi_blocksize_bits);
 }
 
 static ssize_t write_blk(struct qtree_mem_dqinfo *info, uint blk, char *buf)
@@ -70,7 +70,7 @@ static ssize_t write_blk(struct qtree_mem_dqinfo *info, uint blk, char *buf)
 	ssize_t ret;
 
 	ret = sb->s_op->quota_write(sb, info->dqi_type, buf,
-	       info->dqi_usable_bs, blk << info->dqi_blocksize_bits);
+	       info->dqi_usable_bs, (loff_t)blk << info->dqi_blocksize_bits);
 	if (ret != info->dqi_usable_bs) {
 		quota_error(sb, "dquota write failed");
 		if (ret >= 0)
@@ -283,7 +283,7 @@ static uint find_free_dqentry(struct qtree_mem_dqinfo *info,
 			    blk);
 		goto out_buf;
 	}
-	dquot->dq_off = (blk << info->dqi_blocksize_bits) +
+	dquot->dq_off = ((loff_t)blk << info->dqi_blocksize_bits) +
 			sizeof(struct qt_disk_dqdbheader) +
 			i * info->dqi_entry_size;
 	kfree(buf);
@@ -379,7 +379,7 @@ int qtree_write_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 	if (!ddquot)
 		return -ENOMEM;
 
-	/* dq_off is guarded by dqio_sem */
+	/* dq_off is guarded by dqio_mutex */
 	if (!dquot->dq_off) {
 		ret = dq_insert_tree(info, dquot);
 		if (ret < 0) {
@@ -389,9 +389,9 @@ int qtree_write_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 			return ret;
 		}
 	}
-	spin_lock(&dquot->dq_dqb_lock);
+	spin_lock(&dq_data_lock);
 	info->dqi_ops->mem2disk_dqblk(ddquot, dquot);
-	spin_unlock(&dquot->dq_dqb_lock);
+	spin_unlock(&dq_data_lock);
 	ret = sb->s_op->quota_write(sb, type, ddquot, info->dqi_entry_size,
 				    dquot->dq_off);
 	if (ret != info->dqi_entry_size) {
@@ -558,7 +558,7 @@ static loff_t find_block_dqentry(struct qtree_mem_dqinfo *info,
 		ret = -EIO;
 		goto out_buf;
 	} else {
-		ret = (blk << info->dqi_blocksize_bits) + sizeof(struct
+		ret = ((loff_t)blk << info->dqi_blocksize_bits) + sizeof(struct
 		  qt_disk_dqdbheader) + i * info->dqi_entry_size;
 	}
 out_buf:
@@ -649,14 +649,14 @@ int qtree_read_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 		kfree(ddquot);
 		goto out;
 	}
-	spin_lock(&dquot->dq_dqb_lock);
+	spin_lock(&dq_data_lock);
 	info->dqi_ops->disk2mem_dqblk(dquot, ddquot);
 	if (!dquot->dq_dqb.dqb_bhardlimit &&
 	    !dquot->dq_dqb.dqb_bsoftlimit &&
 	    !dquot->dq_dqb.dqb_ihardlimit &&
 	    !dquot->dq_dqb.dqb_isoftlimit)
 		set_bit(DQ_FAKE_B, &dquot->dq_flags);
-	spin_unlock(&dquot->dq_dqb_lock);
+	spin_unlock(&dq_data_lock);
 	kfree(ddquot);
 out:
 	dqstats_inc(DQST_READS);

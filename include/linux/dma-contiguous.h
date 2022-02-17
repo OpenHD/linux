@@ -48,7 +48,7 @@
  *   CMA should not be used by the device drivers directly. It is
  *   only a helper framework for dma-mapping subsystem.
  *
- *   For more information, see kernel-docs in kernel/dma/contiguous.c
+ *   For more information, see kernel-docs in drivers/base/dma-contiguous.c
  */
 
 #ifdef __KERNEL__
@@ -59,6 +59,11 @@ struct cma;
 struct page;
 
 #ifdef CONFIG_DMA_CMA
+
+struct dma_contiguous_stats {
+	phys_addr_t base;
+	size_t size;
+};
 
 extern struct cma *dma_contiguous_default_area;
 
@@ -112,11 +117,20 @@ static inline int dma_declare_contiguous(struct device *dev, phys_addr_t size,
 }
 
 struct page *dma_alloc_from_contiguous(struct device *dev, size_t count,
-				       unsigned int order, bool no_warn);
+				       unsigned int order);
+struct page *dma_alloc_at_from_contiguous(struct device *dev, int count,
+				       unsigned int order, phys_addr_t at_addr,
+				       bool map_non_cached);
 bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 				 int count);
+int dma_get_contiguous_stats(struct device *dev,
+			struct dma_contiguous_stats *stats);
 
+bool dma_contiguous_should_replace_page(struct page *page);
+int dma_contiguous_enable_replace_pages(struct device *dev);
 #else
+
+struct dma_contiguous_stats;
 
 static inline struct cma *dev_get_cma_area(struct device *dev)
 {
@@ -144,8 +158,16 @@ int dma_declare_contiguous(struct device *dev, phys_addr_t size,
 }
 
 static inline
-struct page *dma_alloc_from_contiguous(struct device *dev, size_t count,
-				       unsigned int order, bool no_warn)
+struct page *dma_alloc_at_from_contiguous(struct device *dev, int count,
+				       unsigned int order, phys_addr_t at_addr,
+				       bool map_non_cached)
+{
+	return NULL;
+}
+
+static inline
+struct page *dma_alloc_from_contiguous(struct device *dev, int count,
+				       unsigned int order)
 {
 	return NULL;
 }
@@ -157,6 +179,24 @@ bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 	return false;
 }
 
+static inline
+int dma_get_contiguous_stats(struct device *dev,
+			struct dma_contiguous_stats *stats)
+{
+	return -ENOSYS;
+}
+
+static inline
+bool dma_contiguous_should_replace_page(struct page *page)
+{
+	return false;
+}
+
+static inline
+int dma_contiguous_enable_replace_pages(struct device *dev)
+{
+	return 0;
+}
 #endif
 
 #endif

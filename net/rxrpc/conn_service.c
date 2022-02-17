@@ -50,11 +50,12 @@ struct rxrpc_connection *rxrpc_find_service_conn_rcu(struct rxrpc_peer *peer,
 			else if (conn->proto.index_key > k.index_key)
 				p = rcu_dereference_raw(p->rb_right);
 			else
-				break;
+				goto done;
 			conn = NULL;
 		}
 	} while (need_seqretry(&peer->service_conn_lock, seq));
 
+done:
 	done_seqretry(&peer->service_conn_lock, seq);
 	_leave(" = %d", conn ? conn->debug_id : -1);
 	return conn;
@@ -120,8 +121,7 @@ replace_old_connection:
  * Preallocate a service connection.  The connection is placed on the proc and
  * reap lists so that we don't have to get the lock from BH context.
  */
-struct rxrpc_connection *rxrpc_prealloc_service_connection(struct rxrpc_net *rxnet,
-							   gfp_t gfp)
+struct rxrpc_connection *rxrpc_prealloc_service_connection(gfp_t gfp)
 {
 	struct rxrpc_connection *conn = rxrpc_alloc_connection(gfp);
 
@@ -132,13 +132,12 @@ struct rxrpc_connection *rxrpc_prealloc_service_connection(struct rxrpc_net *rxn
 		conn->state = RXRPC_CONN_SERVICE_PREALLOC;
 		atomic_set(&conn->usage, 2);
 
-		atomic_inc(&rxnet->nr_conns);
-		write_lock(&rxnet->conn_lock);
-		list_add_tail(&conn->link, &rxnet->service_conns);
-		list_add_tail(&conn->proc_link, &rxnet->conn_proc_list);
-		write_unlock(&rxnet->conn_lock);
+		write_lock(&rxrpc_connection_lock);
+		list_add_tail(&conn->link, &rxrpc_connections);
+		list_add_tail(&conn->proc_link, &rxrpc_connection_proc_list);
+		write_unlock(&rxrpc_connection_lock);
 
-		trace_rxrpc_conn(conn->debug_id, rxrpc_conn_new_service,
+		trace_rxrpc_conn(conn, rxrpc_conn_new_service,
 				 atomic_read(&conn->usage),
 				 __builtin_return_address(0));
 	}
@@ -150,8 +149,7 @@ struct rxrpc_connection *rxrpc_prealloc_service_connection(struct rxrpc_net *rxn
  * Set up an incoming connection.  This is called in BH context with the RCU
  * read lock held.
  */
-void rxrpc_new_incoming_connection(struct rxrpc_sock *rx,
-				   struct rxrpc_connection *conn,
+void rxrpc_new_incoming_connection(struct rxrpc_connection *conn,
 				   struct sk_buff *skb)
 {
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
@@ -161,21 +159,12 @@ void rxrpc_new_incoming_connection(struct rxrpc_sock *rx,
 	conn->proto.epoch	= sp->hdr.epoch;
 	conn->proto.cid		= sp->hdr.cid & RXRPC_CIDMASK;
 	conn->params.service_id	= sp->hdr.serviceId;
-	conn->service_id	= sp->hdr.serviceId;
 	conn->security_ix	= sp->hdr.securityIndex;
 	conn->out_clientflag	= 0;
 	if (conn->security_ix)
 		conn->state	= RXRPC_CONN_SERVICE_UNSECURED;
 	else
 		conn->state	= RXRPC_CONN_SERVICE;
-
-	/* See if we should upgrade the service.  This can only happen on the
-	 * first packet on a new connection.  Once done, it applies to all
-	 * subsequent calls on that connection.
-	 */
-	if (sp->hdr.userStatus == RXRPC_USERSTATUS_SERVICE_UPGRADE &&
-	    conn->service_id == rx->service_upgrade.from)
-		conn->service_id = rx->service_upgrade.to;
 
 	/* Make the connection a target for incoming packets. */
 	rxrpc_publish_service_conn(conn->params.peer, conn);

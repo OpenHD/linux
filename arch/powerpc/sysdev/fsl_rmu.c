@@ -104,8 +104,6 @@
 
 #define DOORBELL_MESSAGE_SIZE	0x08
 
-static DEFINE_SPINLOCK(fsl_rio_doorbell_lock);
-
 struct rio_msg_regs {
 	u32 omr;
 	u32 osr;
@@ -628,12 +626,8 @@ err_out:
 int fsl_rio_doorbell_send(struct rio_mport *mport,
 				int index, u16 destid, u16 data)
 {
-	unsigned long flags;
-
 	pr_debug("fsl_doorbell_send: index %d destid %4.4x data %4.4x\n",
 		 index, destid, data);
-
-	spin_lock_irqsave(&fsl_rio_doorbell_lock, flags);
 
 	/* In the serial version silicons, such as MPC8548, MPC8641,
 	 * below operations is must be.
@@ -643,8 +637,6 @@ int fsl_rio_doorbell_send(struct rio_mport *mport,
 	out_be32(&dbell->dbell_regs->oddpr, destid << 16);
 	out_be32(&dbell->dbell_regs->oddatr, (index << 20) | data);
 	out_be32(&dbell->dbell_regs->odmr, 0x00000001);
-
-	spin_unlock_irqrestore(&fsl_rio_doorbell_lock, flags);
 
 	return 0;
 }
@@ -1082,8 +1074,8 @@ int fsl_rio_setup_rmu(struct rio_mport *mport, struct device_node *node)
 	priv = mport->priv;
 
 	if (!node) {
-		dev_warn(priv->dev, "Can't get %pOF property 'fsl,rmu'\n",
-			priv->dev->of_node);
+		dev_warn(priv->dev, "Can't get %s property 'fsl,rmu'\n",
+			priv->dev->of_node->full_name);
 		return -EINVAL;
 	}
 
@@ -1094,8 +1086,8 @@ int fsl_rio_setup_rmu(struct rio_mport *mport, struct device_node *node)
 	aw = of_n_addr_cells(node);
 	msg_addr = of_get_property(node, "reg", &mlen);
 	if (!msg_addr) {
-		pr_err("%pOF: unable to find 'reg' property of message-unit\n",
-			node);
+		pr_err("%s: unable to find 'reg' property of message-unit\n",
+			node->full_name);
 		kfree(rmu);
 		return -ENOMEM;
 	}
@@ -1106,8 +1098,8 @@ int fsl_rio_setup_rmu(struct rio_mport *mport, struct device_node *node)
 
 	rmu->txirq = irq_of_parse_and_map(node, 0);
 	rmu->rxirq = irq_of_parse_and_map(node, 1);
-	printk(KERN_INFO "%pOF: txirq: %d, rxirq %d\n",
-		node, rmu->txirq, rmu->rxirq);
+	printk(KERN_INFO "%s: txirq: %d, rxirq %d\n",
+		node->full_name, rmu->txirq, rmu->rxirq);
 
 	priv->rmm_handle = rmu;
 

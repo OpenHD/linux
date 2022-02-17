@@ -208,7 +208,8 @@ return_null:
 
 ENDPROC(sha256_mb_mgr_submit_avx2)
 
-.section	.rodata.cst16.clear_low_nibble, "aM", @progbits, 16
+.data
+
 .align 16
 clear_low_nibble:
 	.octa	0x000000000000000000000000FFFFFFF0

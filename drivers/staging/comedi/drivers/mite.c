@@ -1,10 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/mite.c
  * Hardware driver for NI Mite PCI interface chip
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1997-2002 David A. Schleef <ds@schleef.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 /*
@@ -828,7 +837,7 @@ static int mite_setup(struct comedi_device *dev, struct mite *mite,
 	 * of 0x61f and bursts worked. 6281 powered up with register value of
 	 * 0x1f and bursts didn't work. The NI windows driver reads the
 	 * register, then does a bitwise-or of 0x600 with it and writes it back.
-	 *
+	*
 	 * The bits 0x90180700 in MITE_UNKNOWN_DMA_BURST_REG can be
 	 * written and read back.  The bits 0x1f always read as 1.
 	 * The rest always read as zero.

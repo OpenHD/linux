@@ -70,7 +70,8 @@ static void nes_process_mac_intr(struct nes_device *nesdev, u32 mac_number);
 static unsigned int nes_reset_adapter_ne020(struct nes_device *nesdev, u8 *OneG_Mode);
 static void nes_terminate_start_timer(struct nes_qp *nesqp);
 
-static const char *const nes_iwarp_state_str[] = {
+#ifdef CONFIG_INFINIBAND_NES_DEBUG
+static unsigned char *nes_iwarp_state_str[] = {
 	"Non-Existent",
 	"Idle",
 	"RTS",
@@ -81,7 +82,7 @@ static const char *const nes_iwarp_state_str[] = {
 	"RSVD2",
 };
 
-static const char *const nes_tcp_state_str[] = {
+static unsigned char *nes_tcp_state_str[] = {
 	"Non-Existent",
 	"Closed",
 	"Listen",
@@ -99,6 +100,7 @@ static const char *const nes_tcp_state_str[] = {
 	"RSVD3",
 	"RSVD4",
 };
+#endif
 
 static inline void print_ip(struct nes_cm_node *cm_node)
 {
@@ -349,8 +351,9 @@ struct nes_adapter *nes_init_adapter(struct nes_device *nesdev, u8 hw_rev) {
 
 	/* allocate a new adapter struct */
 	nesadapter = kzalloc(adapter_size, GFP_KERNEL);
-	if (!nesadapter)
+	if (nesadapter == NULL) {
 		return NULL;
+	}
 
 	nes_debug(NES_DBG_INIT, "Allocating new nesadapter @ %p, size = %u (actual size = %u).\n",
 			nesadapter, (u32)sizeof(struct nes_adapter), adapter_size);
@@ -379,7 +382,6 @@ struct nes_adapter *nes_init_adapter(struct nes_device *nesdev, u8 hw_rev) {
 	       sizeof nesadapter->pft_mcast_map);
 
 	/* populate the new nesadapter */
-	nesadapter->nesdev = nesdev;
 	nesadapter->devfn = nesdev->pcidev->devfn;
 	nesadapter->bus_number = nesdev->pcidev->bus->number;
 	nesadapter->ref_count = 1;
@@ -550,7 +552,7 @@ struct nes_adapter *nes_init_adapter(struct nes_device *nesdev, u8 hw_rev) {
 			if ((0x0F000100 == (pcs_control_status0 & 0x0F000100))
 			    || (0x0F000100 == (pcs_control_status1 & 0x0F000100)))
 				int_cnt++;
-			usleep_range(1000, 2000);
+			msleep(1);
 		}
 		if (int_cnt > 1) {
 			spin_lock_irqsave(&nesadapter->phy_lock, flags);
@@ -591,21 +593,25 @@ struct nes_adapter *nes_init_adapter(struct nes_device *nesdev, u8 hw_rev) {
 						break;
 					}
 				}
-				usleep_range(1000, 2000);
+				msleep(1);
 			}
 		}
 	}
 
 	if (nesadapter->hw_rev == NE020_REV) {
-		timer_setup(&nesadapter->mh_timer, nes_mh_fix, 0);
+		init_timer(&nesadapter->mh_timer);
+		nesadapter->mh_timer.function = nes_mh_fix;
 		nesadapter->mh_timer.expires = jiffies + (HZ/5);  /* 1 second */
+		nesadapter->mh_timer.data = (unsigned long)nesdev;
 		add_timer(&nesadapter->mh_timer);
 	} else {
 		nes_write32(nesdev->regs+NES_INTF_INT_STAT, 0x0f000000);
 	}
 
-	timer_setup(&nesadapter->lc_timer, nes_clc, 0);
+	init_timer(&nesadapter->lc_timer);
+	nesadapter->lc_timer.function = nes_clc;
 	nesadapter->lc_timer.expires = jiffies + 3600 * HZ;  /* 1 hour */
+	nesadapter->lc_timer.data = (unsigned long)nesdev;
 	add_timer(&nesadapter->lc_timer);
 
 	list_add_tail(&nesadapter->list, &nes_adapter_list);
@@ -1001,7 +1007,8 @@ int nes_init_cqp(struct nes_device *nesdev)
 	/* Allocate a twice the number of CQP requests as the SQ size */
 	nesdev->nes_cqp_requests = kzalloc(sizeof(struct nes_cqp_request) *
 			2 * NES_CQP_SQ_SIZE, GFP_KERNEL);
-	if (!nesdev->nes_cqp_requests) {
+	if (nesdev->nes_cqp_requests == NULL) {
+		nes_debug(NES_DBG_INIT, "Unable to allocate memory CQP request entries.\n");
 		pci_free_consistent(nesdev->pcidev, nesdev->cqp_mem_size, nesdev->cqp.sq_vbase,
 				nesdev->cqp.sq_pbase);
 		return -ENOMEM;
@@ -1618,9 +1625,9 @@ static void nes_replenish_nic_rq(struct nes_vnic *nesvnic)
 /**
  * nes_rq_wqes_timeout
  */
-static void nes_rq_wqes_timeout(struct timer_list *t)
+static void nes_rq_wqes_timeout(unsigned long parm)
 {
-	struct nes_vnic *nesvnic = from_timer(nesvnic, t, rq_wqes_timer);
+	struct nes_vnic *nesvnic = (struct nes_vnic *)parm;
 	printk("%s: Timer fired.\n", __func__);
 	atomic_set(&nesvnic->rx_skb_timer_running, 0);
 	if (atomic_read(&nesvnic->rx_skbs_needed))
@@ -1844,7 +1851,9 @@ int nes_init_nic_qp(struct nes_device *nesdev, struct net_device *netdev)
 		wqe_count -= counter;
 		nes_write32(nesdev->regs+NES_WQE_ALLOC, (counter << 24) | nesvnic->nic.qp_id);
 	} while (wqe_count);
-	timer_setup(&nesvnic->rq_wqes_timer, nes_rq_wqes_timeout, 0);
+	init_timer(&nesvnic->rq_wqes_timer);
+	nesvnic->rq_wqes_timer.function = nes_rq_wqes_timeout;
+	nesvnic->rq_wqes_timer.data = (unsigned long)nesvnic;
 	nes_debug(NES_DBG_INIT, "NAPI support Enabled\n");
 	if (nesdev->nesadapter->et_use_adaptive_rx_coalesce)
 	{
@@ -1855,9 +1864,8 @@ int nes_init_nic_qp(struct nes_device *nesdev, struct net_device *netdev)
 	}
 	if ((nesdev->nesadapter->allow_unaligned_fpdus) &&
 		(nes_init_mgt_qp(nesdev, netdev, nesvnic))) {
-		nes_debug(NES_DBG_INIT, "%s: Out of memory for pau nic\n",
-			  netdev->name);
-		nes_destroy_nic_qp(nesvnic);
+			nes_debug(NES_DBG_INIT, "%s: Out of memory for pau nic\n", netdev->name);
+			nes_destroy_nic_qp(nesvnic);
 		return -ENOMEM;
 	}
 
@@ -3049,7 +3057,7 @@ static void nes_cqp_ce_handler(struct nes_device *nesdev, struct nes_hw_cq *cq)
 		memcpy(cqp_wqe, &cqp_request->cqp_wqe, sizeof(*cqp_wqe));
 		barrier();
 
-		opcode = le32_to_cpu(cqp_wqe->wqe_words[NES_CQP_WQE_OPCODE_IDX]);
+		opcode = cqp_wqe->wqe_words[NES_CQP_WQE_OPCODE_IDX];
 		if ((opcode & NES_CQP_OPCODE_MASK) == NES_CQP_DOWNLOAD_SEGMENT)
 			ctx_index = NES_CQP_WQE_DL_COMP_CTX_LOW_IDX;
 		else
@@ -3469,9 +3477,9 @@ static void nes_terminate_received(struct nes_device *nesdev,
 }
 
 /* Timeout routine in case terminate fails to complete */
-void nes_terminate_timeout(struct timer_list *t)
+void nes_terminate_timeout(unsigned long context)
 {
-	struct nes_qp *nesqp = from_timer(nesqp, t, terminate_timer);
+	struct nes_qp *nesqp = (struct nes_qp *)(unsigned long)context;
 
 	nes_terminate_done(nesqp, 1);
 }
@@ -3626,7 +3634,7 @@ static void nes_process_iwarp_aeqe(struct nes_device *nesdev,
 				aeq_info |= NES_AEQE_AEID_RDMAP_ROE_UNEXPECTED_OPCODE;
 				aeqe->aeqe_words[NES_AEQE_MISC_IDX] = cpu_to_le32(aeq_info);
 			}
-			/* fall through */
+
 		case NES_AEQE_AEID_RDMAP_ROE_BAD_LLP_CLOSE:
 		case NES_AEQE_AEID_LLP_TOO_MANY_RETRIES:
 		case NES_AEQE_AEID_DDP_UBE_INVALID_MSN_NO_BUFFER_AVAILABLE:

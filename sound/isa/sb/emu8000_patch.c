@@ -20,8 +20,6 @@
  */
 
 #include "emu8000_local.h"
-
-#include <linux/sched/signal.h>
 #include <linux/uaccess.h>
 #include <linux/moduleparam.h>
 
@@ -165,8 +163,11 @@ snd_emu8000_sample_new(struct snd_emux *rec, struct snd_sf_sample *sp,
 		return 0;
 
 	/* be sure loop points start < end */
-	if (sp->v.loopstart > sp->v.loopend)
-		swap(sp->v.loopstart, sp->v.loopend);
+	if (sp->v.loopstart > sp->v.loopend) {
+		int tmp = sp->v.loopstart;
+		sp->v.loopstart = sp->v.loopend;
+		sp->v.loopend = tmp;
+	}
 
 	/* compute true data size to be loaded */
 	truesize = sp->v.size;

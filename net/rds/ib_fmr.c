@@ -89,15 +89,17 @@ struct rds_ib_mr *rds_ib_alloc_fmr(struct rds_ib_device *rds_ibdev, int npages)
 	return ibmr;
 
 out_no_cigar:
-	kfree(ibmr);
+	if (ibmr) {
+		if (fmr->fmr)
+			ib_dealloc_fmr(fmr->fmr);
+		kfree(ibmr);
+	}
 	atomic_dec(&pool->item_count);
-
 	return ERR_PTR(err);
 }
 
-static int rds_ib_map_fmr(struct rds_ib_device *rds_ibdev,
-			  struct rds_ib_mr *ibmr, struct scatterlist *sg,
-			  unsigned int nents)
+int rds_ib_map_fmr(struct rds_ib_device *rds_ibdev, struct rds_ib_mr *ibmr,
+		   struct scatterlist *sg, unsigned int nents)
 {
 	struct ib_device *dev = rds_ibdev->dev;
 	struct rds_ib_fmr *fmr = &ibmr->u.fmr;
@@ -123,39 +125,29 @@ static int rds_ib_map_fmr(struct rds_ib_device *rds_ibdev,
 		u64 dma_addr = ib_sg_dma_address(dev, &scat[i]);
 
 		if (dma_addr & ~PAGE_MASK) {
-			if (i > 0) {
-				ib_dma_unmap_sg(dev, sg, nents,
-						DMA_BIDIRECTIONAL);
+			if (i > 0)
 				return -EINVAL;
-			} else {
+			else
 				++page_cnt;
-			}
 		}
 		if ((dma_addr + dma_len) & ~PAGE_MASK) {
-			if (i < sg_dma_len - 1) {
-				ib_dma_unmap_sg(dev, sg, nents,
-						DMA_BIDIRECTIONAL);
+			if (i < sg_dma_len - 1)
 				return -EINVAL;
-			} else {
+			else
 				++page_cnt;
-			}
 		}
 
 		len += dma_len;
 	}
 
 	page_cnt += len >> PAGE_SHIFT;
-	if (page_cnt > ibmr->pool->fmr_attr.max_pages) {
-		ib_dma_unmap_sg(dev, sg, nents, DMA_BIDIRECTIONAL);
+	if (page_cnt > ibmr->pool->fmr_attr.max_pages)
 		return -EINVAL;
-	}
 
-	dma_pages = kmalloc_array_node(sizeof(u64), page_cnt, GFP_ATOMIC,
-				       rdsibdev_to_node(rds_ibdev));
-	if (!dma_pages) {
-		ib_dma_unmap_sg(dev, sg, nents, DMA_BIDIRECTIONAL);
+	dma_pages = kmalloc_node(sizeof(u64) * page_cnt, GFP_ATOMIC,
+				 rdsibdev_to_node(rds_ibdev));
+	if (!dma_pages)
 		return -ENOMEM;
-	}
 
 	page_cnt = 0;
 	for (i = 0; i < sg_dma_len; ++i) {
@@ -168,10 +160,8 @@ static int rds_ib_map_fmr(struct rds_ib_device *rds_ibdev,
 	}
 
 	ret = ib_map_phys_fmr(fmr->fmr, dma_pages, page_cnt, io_addr);
-	if (ret) {
-		ib_dma_unmap_sg(dev, sg, nents, DMA_BIDIRECTIONAL);
+	if (ret)
 		goto out;
-	}
 
 	/* Success - we successfully remapped the MR, so we can
 	 * safely tear down the old mapping.

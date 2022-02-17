@@ -19,6 +19,7 @@
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/spinlock.h>
+#include <linux/miscdevice.h>
 #include "ishtp-dev.h"
 #include "hbm.h"
 #include "client.h"
@@ -298,6 +299,7 @@ int ishtp_hbm_cl_flow_control_req(struct ishtp_device *dev,
 	struct ishtp_msg_hdr *ishtp_hdr = &hdr;
 	const size_t len = sizeof(struct hbm_flow_control);
 	int	rv;
+	unsigned int	num_frags;
 	unsigned long	flags;
 
 	spin_lock_irqsave(&cl->fc_spinlock, flags);
@@ -313,16 +315,20 @@ int ishtp_hbm_cl_flow_control_req(struct ishtp_device *dev,
 		return	0;
 	}
 
+	num_frags = cl->recv_msg_num_frags;
 	cl->recv_msg_num_frags = 0;
 
 	rv = ishtp_write_message(dev, ishtp_hdr, data);
 	if (!rv) {
 		++cl->out_flow_ctrl_creds;
 		++cl->out_flow_ctrl_cnt;
-		cl->ts_out_fc = ktime_get();
-		if (cl->ts_rx) {
-			ktime_t ts_diff = ktime_sub(cl->ts_out_fc, cl->ts_rx);
-			if (ktime_after(ts_diff, cl->ts_max_fc_delay))
+		getnstimeofday(&cl->ts_out_fc);
+		if (cl->ts_rx.tv_sec && cl->ts_rx.tv_nsec) {
+			struct timespec ts_diff;
+
+			ts_diff = timespec_sub(cl->ts_out_fc, cl->ts_rx);
+			if (timespec_compare(&ts_diff, &cl->ts_max_fc_delay)
+					> 0)
 				cl->ts_max_fc_delay = ts_diff;
 		}
 	} else {
@@ -372,10 +378,11 @@ static void ishtp_hbm_cl_disconnect_res(struct ishtp_device *dev,
 	list_for_each_entry(cl, &dev->cl_list, link) {
 		if (!rs->status && ishtp_hbm_cl_addr_equal(cl, rs)) {
 			cl->state = ISHTP_CL_DISCONNECTED;
-			wake_up_interruptible(&cl->wait_ctrl_res);
 			break;
 		}
 	}
+	if (cl)
+		wake_up_interruptible(&cl->wait_ctrl_res);
 	spin_unlock_irqrestore(&dev->cl_list_lock, flags);
 }
 
@@ -424,10 +431,11 @@ static void ishtp_hbm_cl_connect_res(struct ishtp_device *dev,
 				cl->state = ISHTP_CL_DISCONNECTED;
 				cl->status = -ENODEV;
 			}
-			wake_up_interruptible(&cl->wait_ctrl_res);
 			break;
 		}
 	}
+	if (cl)
+		wake_up_interruptible(&cl->wait_ctrl_res);
 	spin_unlock_irqrestore(&dev->cl_list_lock, flags);
 }
 

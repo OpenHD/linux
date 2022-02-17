@@ -146,9 +146,12 @@ static int max8997_battery_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	charger = devm_kzalloc(&pdev->dev, sizeof(*charger), GFP_KERNEL);
-	if (!charger)
+	charger = devm_kzalloc(&pdev->dev, sizeof(struct charger_data),
+				GFP_KERNEL);
+	if (charger == NULL) {
+		dev_err(&pdev->dev, "Cannot allocate memory.\n");
 		return -ENOMEM;
+	}
 
 	platform_set_drvdata(pdev, charger);
 
@@ -158,7 +161,7 @@ static int max8997_battery_probe(struct platform_device *pdev)
 
 	psy_cfg.drv_data = charger;
 
-	charger->battery = devm_power_supply_register(&pdev->dev,
+	charger->battery = power_supply_register(&pdev->dev,
 						 &max8997_battery_desc,
 						 &psy_cfg);
 	if (IS_ERR(charger->battery)) {
@@ -169,17 +172,25 @@ static int max8997_battery_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int max8997_battery_remove(struct platform_device *pdev)
+{
+	struct charger_data *charger = platform_get_drvdata(pdev);
+
+	power_supply_unregister(charger->battery);
+	return 0;
+}
+
 static const struct platform_device_id max8997_battery_id[] = {
 	{ "max8997-battery", 0 },
 	{ }
 };
-MODULE_DEVICE_TABLE(platform, max8997_battery_id);
 
 static struct platform_driver max8997_battery_driver = {
 	.driver = {
 		.name = "max8997-battery",
 	},
 	.probe = max8997_battery_probe,
+	.remove = max8997_battery_remove,
 	.id_table = max8997_battery_id,
 };
 

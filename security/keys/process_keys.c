@@ -12,15 +12,13 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/sched/user.h>
 #include <linux/keyctl.h>
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/security.h>
 #include <linux/user_namespace.h>
-#include <linux/uaccess.h>
-#include <keys/request_key_auth-type.h>
+#include <asm/uaccess.h>
 #include "internal.h"
 
 /* Session keyring create vs join semaphore */
@@ -31,7 +29,7 @@ static DEFINE_MUTEX(key_user_keyring_mutex);
 
 /* The root user's tracking struct */
 struct key_user root_key_user = {
-	.usage		= REFCOUNT_INIT(3),
+	.usage		= ATOMIC_INIT(3),
 	.cons_lock	= __MUTEX_INITIALIZER(root_key_user.cons_lock),
 	.lock		= __SPIN_LOCK_UNLOCKED(root_key_user.lock),
 	.nkeys		= ATOMIC_INIT(2),
@@ -739,7 +737,7 @@ try_again:
 	if (ret < 0)
 		goto invalid_key;
 
-	key->last_used_at = ktime_get_real_seconds();
+	key->last_used_at = current_kernel_time().tv_sec;
 
 error:
 	put_cred(ctx.cred);
@@ -812,14 +810,15 @@ long join_session_keyring(const char *name)
 		ret = PTR_ERR(keyring);
 		goto error2;
 	} else if (keyring == new->session_keyring) {
+		key_put(keyring);
 		ret = 0;
-		goto error3;
+		goto error2;
 	}
 
 	/* we've got a keyring - now to install it */
 	ret = install_session_keyring_to_cred(new, keyring);
 	if (ret < 0)
-		goto error3;
+		goto error2;
 
 	commit_creds(new);
 	mutex_unlock(&key_session_mutex);
@@ -829,8 +828,6 @@ long join_session_keyring(const char *name)
 okay:
 	return ret;
 
-error3:
-	key_put(keyring);
 error2:
 	mutex_unlock(&key_session_mutex);
 error:

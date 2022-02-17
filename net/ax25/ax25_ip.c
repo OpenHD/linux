@@ -23,7 +23,7 @@
 #include <linux/if_arp.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/fcntl.h>
 #include <linux/termios.h>	/* For TIOCINQ/OUTQ */
 #include <linux/mm.h>
@@ -249,3 +249,4 @@ const struct header_ops ax25_header_ops = {
 
 EXPORT_SYMBOL(ax25_header_ops);
 EXPORT_SYMBOL(ax25_ip_xmit);
+

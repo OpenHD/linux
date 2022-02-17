@@ -145,9 +145,6 @@ static int __init uefi_init(void)
 					 sizeof(efi_config_table_t),
 					 arch_tables);
 
-	if (!retval)
-		efi.config_table = (unsigned long)efi.systab->tables;
-
 	early_memunmap(config_tables, table_size);
 out:
 	early_memunmap(efi.systab,  sizeof(efi_system_table_t));
@@ -162,7 +159,6 @@ static __init int is_usable_memory(efi_memory_desc_t *md)
 	switch (md->type) {
 	case EFI_LOADER_CODE:
 	case EFI_LOADER_DATA:
-	case EFI_ACPI_RECLAIM_MEMORY:
 	case EFI_BOOT_SERVICES_CODE:
 	case EFI_BOOT_SERVICES_DATA:
 	case EFI_CONVENTIONAL_MEMORY:
@@ -193,7 +189,7 @@ static __init void reserve_regions(void)
 	 * uses its own memory map instead.
 	 */
 	memblock_dump_all();
-	memblock_remove(0, PHYS_ADDR_MAX);
+	memblock_remove(0, (phys_addr_t)ULLONG_MAX);
 
 	for_each_efi_memory_desc(md) {
 		paddr = md->phys_addr;
@@ -215,10 +211,6 @@ static __init void reserve_regions(void)
 
 			if (!is_usable_memory(md))
 				memblock_mark_nomap(paddr, size);
-
-			/* keep ACPI reclaim memory intact for kexec etc. */
-			if (md->type == EFI_ACPI_RECLAIM_MEMORY)
-				memblock_reserve(paddr, size);
 		}
 	}
 }
@@ -252,12 +244,11 @@ void __init efi_init(void)
 	     "Unexpected EFI_MEMORY_DESCRIPTOR version %ld",
 	      efi.memmap.desc_version);
 
-	if (uefi_init() < 0) {
-		efi_memmap_unmap();
+	if (uefi_init() < 0)
 		return;
-	}
 
 	reserve_regions();
+	efi_memattr_init();
 	efi_esrt_init();
 
 	memblock_reserve(params.mmap & PAGE_MASK,

@@ -13,8 +13,6 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/file.h>
-#include <linux/cred.h>
-
 #include <net/sock.h>
 #include <net/inet_sock.h>
 #include <linux/netfilter/x_tables.h>
@@ -65,9 +63,9 @@ owner_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	const struct xt_owner_match_info *info = par->matchinfo;
 	const struct file *filp;
 	struct sock *sk = skb_to_full_sk(skb);
-	struct net *net = xt_net(par);
+	struct net *net = par->net;
 
-	if (!sk || !sk->sk_socket || !net_eq(net, sock_net(sk)))
+	if (sk == NULL || sk->sk_socket == NULL)
 		return (info->match ^ info->invert) == 0;
 	else if (info->match & info->invert & XT_OWNER_SOCKET)
 		/*

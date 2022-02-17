@@ -96,7 +96,7 @@ static int hi655x_disable(struct regulator_dev *rdev)
 	return ret;
 }
 
-static const struct regulator_ops hi655x_regulator_ops = {
+static struct regulator_ops hi655x_regulator_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = hi655x_disable,
 	.is_enabled = hi655x_is_enabled,
@@ -105,7 +105,7 @@ static const struct regulator_ops hi655x_regulator_ops = {
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 };
 
-static const struct regulator_ops hi655x_ldo_linear_ops = {
+static struct regulator_ops hi655x_ldo_linear_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = hi655x_disable,
 	.is_enabled = hi655x_is_enabled,
@@ -214,14 +214,7 @@ static int hi655x_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct platform_device_id hi655x_regulator_table[] = {
-	{ .name = "hi655x-regulator" },
-	{},
-};
-MODULE_DEVICE_TABLE(platform, hi655x_regulator_table);
-
 static struct platform_driver hi655x_regulator_driver = {
-	.id_table = hi655x_regulator_table,
 	.driver = {
 		.name	= "hi655x-regulator",
 	},

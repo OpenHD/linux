@@ -21,25 +21,30 @@
 #include <linux/stat.h>
 #include <linux/kdev_t.h>
 #include <linux/syscalls.h>
+#include <linux/kconfig.h>
+#include <linux/initramfs.h>
 
 /*
  * Create a simple rootfs that is similar to the default initramfs
  */
-static int __init default_rootfs(void)
+#if !IS_BUILTIN(CONFIG_BLK_DEV_INITRD)
+static
+#endif
+int __init default_rootfs(void)
 {
 	int err;
 
-	err = ksys_mkdir((const char __user __force *) "/dev", 0755);
+	err = sys_mkdir((const char __user __force *) "/dev", 0755);
 	if (err < 0)
 		goto out;
 
-	err = ksys_mknod((const char __user __force *) "/dev/console",
+	err = sys_mknod((const char __user __force *) "/dev/console",
 			S_IFCHR | S_IRUSR | S_IWUSR,
 			new_encode_dev(MKDEV(5, 1)));
 	if (err < 0)
 		goto out;
 
-	err = ksys_mkdir((const char __user __force *) "/root", 0700);
+	err = sys_mkdir((const char __user __force *) "/root", 0700);
 	if (err < 0)
 		goto out;
 
@@ -49,4 +54,6 @@ out:
 	printk(KERN_WARNING "Failed to create a rootfs\n");
 	return err;
 }
+#if !IS_BUILTIN(CONFIG_BLK_DEV_INITRD)
 rootfs_initcall(default_rootfs);
+#endif

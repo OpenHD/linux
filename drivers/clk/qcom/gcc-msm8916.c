@@ -264,11 +264,13 @@ static const char * const gcc_xo_gpll1_emclk_sleep[] = {
 	"sleep_clk",
 };
 
+#define F(f, s, h, m, n) { (f), (s), (2 * (h) - 1), (m), (n) }
+
 static struct clk_pll gpll0 = {
 	.l_reg = 0x21004,
 	.m_reg = 0x21008,
 	.n_reg = 0x2100c,
-	.config_reg = 0x21014,
+	.config_reg = 0x21010,
 	.mode_reg = 0x21000,
 	.status_reg = 0x2101c,
 	.status_bit = 17,
@@ -295,7 +297,7 @@ static struct clk_pll gpll1 = {
 	.l_reg = 0x20004,
 	.m_reg = 0x20008,
 	.n_reg = 0x2000c,
-	.config_reg = 0x20014,
+	.config_reg = 0x20010,
 	.mode_reg = 0x20000,
 	.status_reg = 0x2001c,
 	.status_bit = 17,
@@ -322,7 +324,7 @@ static struct clk_pll gpll2 = {
 	.l_reg = 0x4a004,
 	.m_reg = 0x4a008,
 	.n_reg = 0x4a00c,
-	.config_reg = 0x4a014,
+	.config_reg = 0x4a010,
 	.mode_reg = 0x4a000,
 	.status_reg = 0x4a01c,
 	.status_bit = 17,
@@ -349,7 +351,7 @@ static struct clk_pll bimc_pll = {
 	.l_reg = 0x23004,
 	.m_reg = 0x23008,
 	.n_reg = 0x2300c,
-	.config_reg = 0x23014,
+	.config_reg = 0x23010,
 	.mode_reg = 0x23000,
 	.status_reg = 0x2301c,
 	.status_bit = 17,
@@ -1105,7 +1107,7 @@ static struct clk_rcg2 sdcc1_apps_clk_src = {
 		.name = "sdcc1_apps_clk_src",
 		.parent_names = gcc_xo_gpll0,
 		.num_parents = 2,
-		.ops = &clk_rcg2_floor_ops,
+		.ops = &clk_rcg2_ops,
 	},
 };
 
@@ -1130,7 +1132,7 @@ static struct clk_rcg2 sdcc2_apps_clk_src = {
 		.name = "sdcc2_apps_clk_src",
 		.parent_names = gcc_xo_gpll0,
 		.num_parents = 2,
-		.ops = &clk_rcg2_floor_ops,
+		.ops = &clk_rcg2_ops,
 	},
 };
 
@@ -1174,7 +1176,7 @@ static struct clk_rcg2 bimc_gpu_clk_src = {
 		.parent_names = gcc_xo_gpll0_bimc,
 		.num_parents = 3,
 		.flags = CLK_GET_RATE_NOCACHE,
-		.ops = &clk_rcg2_ops,
+		.ops = &clk_rcg2_shared_ops,
 	},
 };
 
@@ -1257,25 +1259,20 @@ static struct clk_branch gcc_ultaudio_ahbfabric_ixfabric_lpm_clk = {
 };
 
 static const struct freq_tbl ftbl_gcc_ultaudio_lpaif_i2s_clk[] = {
-	F(128000, P_XO, 10, 1, 15),
 	F(256000, P_XO, 5, 1, 15),
-	F(384000, P_XO, 5, 1, 10),
 	F(512000, P_XO, 5, 2, 15),
-	F(576000, P_XO, 5, 3, 20),
 	F(705600, P_GPLL1, 16, 1, 80),
 	F(768000, P_XO, 5, 1, 5),
 	F(800000, P_XO, 5, 5, 24),
-	F(1024000, P_XO, 5, 4, 15),
+	F(1024000, P_GPLL1, 14, 1, 63),
 	F(1152000, P_XO, 1, 3, 50),
 	F(1411200, P_GPLL1, 16, 1, 40),
 	F(1536000, P_XO, 1, 2, 25),
 	F(1600000, P_XO, 12, 0, 0),
-	F(1728000, P_XO, 5, 9, 20),
-	F(2048000, P_XO, 5, 8, 15),
-	F(2304000, P_XO, 5, 3, 5),
+	F(2048000, P_GPLL1, 9, 1, 49),
 	F(2400000, P_XO, 8, 0, 0),
 	F(2822400, P_GPLL1, 16, 1, 20),
-	F(3072000, P_XO, 5, 4, 5),
+	F(3072000, P_GPLL1, 14, 1, 21),
 	F(4096000, P_GPLL1, 9, 2, 49),
 	F(4800000, P_XO, 4, 0, 0),
 	F(5644800, P_GPLL1, 16, 1, 10),
@@ -1433,8 +1430,6 @@ static struct clk_branch gcc_ultaudio_stc_xo_clk = {
 };
 
 static const struct freq_tbl ftbl_codec_clk[] = {
-	F(9600000, P_XO, 2, 0, 0),
-	F(12288000, P_XO, 1, 16, 25),
 	F(19200000, P_XO, 1, 0, 0),
 	F(11289600, P_EXT_MCLK, 1, 0, 0),
 	{ }

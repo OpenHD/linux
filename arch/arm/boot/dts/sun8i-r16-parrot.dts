@@ -84,14 +84,6 @@
 
 };
 
-&codec {
-	status = "okay";
-};
-
-&dai {
-	status = "okay";
-};
-
 &ehci0 {
 	status = "okay";
 };
@@ -157,8 +149,8 @@
 };
 
 &mmc2_8bit_pins {
-	drive-strength = <40>;
-	bias-pull-up;
+	allwinner,drive = <SUN4I_PINCTRL_40_MA>;
+	allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 };
 
 &ohci0 {
@@ -167,32 +159,40 @@
 
 &pio {
 	mmc0_cd_pin_parrot: mmc0_cd_pin@0 {
-		pins = "PD14";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PD14";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	led_pins_parrot: led_pins@0 {
-		pins = "PE16", "PE17";
-		function = "gpio_out";
+		allwinner,pins = "PE16", "PE17";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 
 	usb0_id_det: usb0_id_detect_pin@0 {
-		pins = "PD10";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PD10";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	usb1_vbus_pin_parrot: usb1_vbus_pin@0 {
-		pins = "PD12";
-		function = "gpio_out";
+		allwinner,pins = "PD12";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 };
 
 &r_pio {
 	wifi_reset_pin_parrot: wifi_reset_pin@0 {
-		pins = "PL6";
-		function = "gpio_out";
+		allwinner,pins = "PL6";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 };
 
@@ -209,7 +209,7 @@
 	};
 };
 
-#include "axp223.dtsi"
+#include "axp22x.dtsi"
 
 &reg_aldo1 {
 	regulator-always-on;
@@ -322,10 +322,6 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&usb1_vbus_pin_parrot>;
 	gpio = <&pio 3 12 GPIO_ACTIVE_HIGH>; /* PD12 */
-	status = "okay";
-};
-
-&sound {
 	status = "okay";
 };
 

@@ -34,13 +34,12 @@
 #include <asm/cacheflush.h>
 #include <asm/desc.h>
 #include <asm/pgtable.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/alternative.h>
 #include <asm/insn.h>
 #include <asm/debugreg.h>
-#include <asm/set_memory.h>
-#include <asm/sections.h>
 #include <asm/nospec-branch.h>
+#include <asm/sections.h>
 
 #include "common.h"
 
@@ -69,10 +68,7 @@ found:
 	 * overwritten by jump destination address. In this case, original
 	 * bytes must be recovered from op->optinsn.copied_insn buffer.
 	 */
-	if (probe_kernel_read(buf, (void *)addr,
-		MAX_INSN_SIZE * sizeof(kprobe_opcode_t)))
-		return 0UL;
-
+	memcpy(buf, (void *)addr, MAX_INSN_SIZE * sizeof(kprobe_opcode_t));
 	if (addr == (unsigned long)kp->addr) {
 		buf[0] = kp->opcode;
 		memcpy(buf + 1, op->optinsn.copied_insn, RELATIVE_ADDR_SIZE);
@@ -141,18 +137,13 @@ asm (
 
 void optprobe_template_func(void);
 STACK_FRAME_NON_STANDARD(optprobe_template_func);
-NOKPROBE_SYMBOL(optprobe_template_func);
-NOKPROBE_SYMBOL(optprobe_template_entry);
-NOKPROBE_SYMBOL(optprobe_template_val);
-NOKPROBE_SYMBOL(optprobe_template_call);
-NOKPROBE_SYMBOL(optprobe_template_end);
 
 #define TMPL_MOVE_IDX \
-	((long)optprobe_template_val - (long)optprobe_template_entry)
+	((long)&optprobe_template_val - (long)&optprobe_template_entry)
 #define TMPL_CALL_IDX \
-	((long)optprobe_template_call - (long)optprobe_template_entry)
+	((long)&optprobe_template_call - (long)&optprobe_template_entry)
 #define TMPL_END_IDX \
-	((long)optprobe_template_end - (long)optprobe_template_entry)
+	((long)&optprobe_template_end - (long)&optprobe_template_entry)
 
 #define INT3_SIZE sizeof(kprobe_opcode_t)
 
@@ -160,15 +151,17 @@ NOKPROBE_SYMBOL(optprobe_template_end);
 static void
 optimized_callback(struct optimized_kprobe *op, struct pt_regs *regs)
 {
+	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
+	unsigned long flags;
+
 	/* This is possible if op is under delayed unoptimizing */
 	if (kprobe_disabled(&op->kp))
 		return;
 
-	preempt_disable();
+	local_irq_save(flags);
 	if (kprobe_running()) {
 		kprobes_inc_nmissed_count(&op->kp);
 	} else {
-		struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
 		/* Save skipped registers */
 #ifdef CONFIG_X86_64
 		regs->cs = __KERNEL_CS;
@@ -184,18 +177,17 @@ optimized_callback(struct optimized_kprobe *op, struct pt_regs *regs)
 		opt_pre_handler(&op->kp, regs);
 		__this_cpu_write(current_kprobe, NULL);
 	}
-	preempt_enable();
+	local_irq_restore(flags);
 }
 NOKPROBE_SYMBOL(optimized_callback);
 
-static int copy_optimized_instructions(u8 *dest, u8 *src, u8 *real)
+static int copy_optimized_instructions(u8 *dest, u8 *src)
 {
-	struct insn insn;
 	int len = 0, ret;
 
 	while (len < RELATIVEJUMP_SIZE) {
-		ret = __copy_instruction(dest + len, src + len, real + len, &insn);
-		if (!ret || !can_boost(&insn, src + len))
+		ret = __copy_instruction(dest + len, src + len);
+		if (!ret || !can_boost(dest + len, src + len))
 			return -EINVAL;
 		len += ret;
 	}
@@ -276,12 +268,10 @@ static int can_optimize(unsigned long paddr)
 
 	/*
 	 * Do not optimize in the entry code due to the unstable
-	 * stack handling and registers setup.
+	 * stack handling.
 	 */
-	if (((paddr >= (unsigned long)__entry_text_start) &&
-	     (paddr <  (unsigned long)__entry_text_end)) ||
-	    ((paddr >= (unsigned long)__irqentry_text_start) &&
-	     (paddr <  (unsigned long)__irqentry_text_end)))
+	if ((paddr >= (unsigned long)__entry_text_start) &&
+	    (paddr <  (unsigned long)__entry_text_end))
 		return 0;
 
 	/* Check there is enough space for a relative jump. */
@@ -367,66 +357,57 @@ void arch_remove_optimized_kprobe(struct optimized_kprobe *op)
 int arch_prepare_optimized_kprobe(struct optimized_kprobe *op,
 				  struct kprobe *__unused)
 {
-	u8 *buf = NULL, *slot;
-	int ret, len;
+	u8 *buf;
+	int ret;
 	long rel;
 
 	if (!can_optimize((unsigned long)op->kp.addr))
 		return -EILSEQ;
 
-	buf = kzalloc(MAX_OPTINSN_SIZE, GFP_KERNEL);
-	if (!buf)
+	op->optinsn.insn = get_optinsn_slot();
+	if (!op->optinsn.insn)
 		return -ENOMEM;
-
-	op->optinsn.insn = slot = get_optinsn_slot();
-	if (!slot) {
-		ret = -ENOMEM;
-		goto out;
-	}
 
 	/*
 	 * Verify if the address gap is in 2GB range, because this uses
 	 * a relative jump.
 	 */
-	rel = (long)slot - (long)op->kp.addr + RELATIVEJUMP_SIZE;
+	rel = (long)op->optinsn.insn - (long)op->kp.addr + RELATIVEJUMP_SIZE;
 	if (abs(rel) > 0x7fffffff) {
-		ret = -ERANGE;
-		goto err;
+		__arch_remove_optimized_kprobe(op, 0);
+		return -ERANGE;
 	}
 
-	/* Copy arch-dep-instance from template */
-	memcpy(buf, optprobe_template_entry, TMPL_END_IDX);
+	buf = (u8 *)op->optinsn.insn;
+	set_memory_rw((unsigned long)buf & PAGE_MASK, 1);
 
 	/* Copy instructions into the out-of-line buffer */
-	ret = copy_optimized_instructions(buf + TMPL_END_IDX, op->kp.addr,
-					  slot + TMPL_END_IDX);
-	if (ret < 0)
-		goto err;
+	ret = copy_optimized_instructions(buf + TMPL_END_IDX, op->kp.addr);
+	if (ret < 0) {
+		__arch_remove_optimized_kprobe(op, 0);
+		return ret;
+	}
 	op->optinsn.size = ret;
-	len = TMPL_END_IDX + op->optinsn.size;
+
+	/* Copy arch-dep-instance from template */
+	memcpy(buf, &optprobe_template_entry, TMPL_END_IDX);
 
 	/* Set probe information */
 	synthesize_set_arg1(buf + TMPL_MOVE_IDX, (unsigned long)op);
 
 	/* Set probe function call */
-	synthesize_relcall(buf + TMPL_CALL_IDX,
-			   slot + TMPL_CALL_IDX, optimized_callback);
+	synthesize_relcall(buf + TMPL_CALL_IDX, optimized_callback);
 
 	/* Set returning jmp instruction at the tail of out-of-line buffer */
-	synthesize_reljump(buf + len, slot + len,
+	synthesize_reljump(buf + TMPL_END_IDX + op->optinsn.size,
 			   (u8 *)op->kp.addr + op->optinsn.size);
-	len += RELATIVEJUMP_SIZE;
 
-	/* We have to use text_poke for instuction buffer because it is RO */
-	text_poke(slot, buf, len);
-	ret = 0;
-out:
-	kfree(buf);
-	return ret;
+	set_memory_ro((unsigned long)buf & PAGE_MASK, 1);
 
-err:
-	__arch_remove_optimized_kprobe(op, 0);
-	goto out;
+	flush_icache_range((unsigned long) buf,
+			   (unsigned long) buf + TMPL_END_IDX +
+			   op->optinsn.size + RELATIVEJUMP_SIZE);
+	return 0;
 }
 
 /*
@@ -496,6 +477,7 @@ int setup_detour_execution(struct kprobe *p, struct pt_regs *regs, int reenter)
 		regs->ip = (unsigned long)op->optinsn.insn + TMPL_END_IDX;
 		if (!reenter)
 			reset_current_kprobe();
+		preempt_enable_no_resched();
 		return 1;
 	}
 	return 0;

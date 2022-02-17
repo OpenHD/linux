@@ -27,7 +27,6 @@
 #include <linux/buffer_head.h>
 #include <linux/bitops.h>
 #include <linux/log2.h>
-#include <linux/bio.h>
 
 #include "attrib.h"
 #include "aops.h"

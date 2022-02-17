@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASMARM_TRAP_H
 #define _ASMARM_TRAP_H
 
@@ -26,6 +25,18 @@ static inline int __in_irqentry_text(unsigned long ptr)
 
 	return ptr >= (unsigned long)&__irqentry_text_start &&
 	       ptr < (unsigned long)&__irqentry_text_end;
+}
+
+static inline int in_exception_text(unsigned long ptr)
+{
+	extern char __exception_text_start[];
+	extern char __exception_text_end[];
+	int in;
+
+	in = ptr >= (unsigned long)&__exception_text_start &&
+	     ptr < (unsigned long)&__exception_text_end;
+
+	return in ? : __in_irqentry_text(ptr);
 }
 
 extern void __init early_trap_init(void *);

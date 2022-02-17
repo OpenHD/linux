@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PARISC_PGTABLE_H
 #define _PARISC_PGTABLE_H
 
@@ -117,7 +116,7 @@ static inline void purge_tlb_entries(struct mm_struct *mm, unsigned long addr)
 #if CONFIG_PGTABLE_LEVELS == 3
 #define BITS_PER_PMD	(PAGE_SHIFT + PMD_ORDER - BITS_PER_PMD_ENTRY)
 #else
-#define __PAGETABLE_PMD_FOLDED 1
+#define __PAGETABLE_PMD_FOLDED
 #define BITS_PER_PMD	0
 #endif
 #define PTRS_PER_PMD    (1UL << BITS_PER_PMD)
@@ -511,9 +510,6 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, 
 }
 
 #define pte_same(A,B)	(pte_val(A) == pte_val(B))
-
-struct seq_file;
-extern void arch_report_meminfo(struct seq_file *m);
 
 #endif /* !__ASSEMBLY__ */
 

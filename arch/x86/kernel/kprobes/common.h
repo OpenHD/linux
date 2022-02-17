@@ -1,17 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __X86_KERNEL_KPROBES_COMMON_H
 #define __X86_KERNEL_KPROBES_COMMON_H
 
 /* Kprobes and Optprobes common header */
-
-#include <asm/asm.h>
-
-#ifdef CONFIG_FRAME_POINTER
-# define SAVE_RBP_STRING "	push %" _ASM_BP "\n" \
-			 "	mov  %" _ASM_SP ", %" _ASM_BP "\n"
-#else
-# define SAVE_RBP_STRING "	push %" _ASM_BP "\n"
-#endif
 
 #ifdef CONFIG_X86_64
 #define SAVE_REGS_STRING			\
@@ -27,7 +17,7 @@
 	"	pushq %r10\n"			\
 	"	pushq %r11\n"			\
 	"	pushq %rbx\n"			\
-	SAVE_RBP_STRING				\
+	"	pushq %rbp\n"			\
 	"	pushq %r12\n"			\
 	"	pushq %r13\n"			\
 	"	pushq %r14\n"			\
@@ -58,7 +48,7 @@
 	"	pushl %es\n"			\
 	"	pushl %ds\n"			\
 	"	pushl %eax\n"			\
-	SAVE_RBP_STRING				\
+	"	pushl %ebp\n"			\
 	"	pushl %edi\n"			\
 	"	pushl %esi\n"			\
 	"	pushl %edx\n"			\
@@ -77,7 +67,7 @@
 #endif
 
 /* Ensure if the instruction can be boostable */
-extern int can_boost(struct insn *insn, void *orig_addr);
+extern int can_boost(kprobe_opcode_t *instruction, void *addr);
 /* Recover instruction if given address is probed */
 extern unsigned long recover_probed_instruction(kprobe_opcode_t *buf,
 					 unsigned long addr);
@@ -85,11 +75,11 @@ extern unsigned long recover_probed_instruction(kprobe_opcode_t *buf,
  * Copy an instruction and adjust the displacement if the instruction
  * uses the %rip-relative addressing mode.
  */
-extern int __copy_instruction(u8 *dest, u8 *src, u8 *real, struct insn *insn);
+extern int __copy_instruction(u8 *dest, u8 *src);
 
 /* Generate a relative-jump/call instruction */
-extern void synthesize_reljump(void *dest, void *from, void *to);
-extern void synthesize_relcall(void *dest, void *from, void *to);
+extern void synthesize_reljump(void *from, void *to);
+extern void synthesize_relcall(void *from, void *to);
 
 #ifdef	CONFIG_OPTPROBES
 extern int setup_detour_execution(struct kprobe *p, struct pt_regs *regs, int reenter);
@@ -105,4 +95,14 @@ static inline unsigned long __recover_optprobed_insn(kprobe_opcode_t *buf, unsig
 }
 #endif
 
+#ifdef CONFIG_KPROBES_ON_FTRACE
+extern int skip_singlestep(struct kprobe *p, struct pt_regs *regs,
+			   struct kprobe_ctlblk *kcb);
+#else
+static inline int skip_singlestep(struct kprobe *p, struct pt_regs *regs,
+				  struct kprobe_ctlblk *kcb)
+{
+	return 0;
+}
+#endif
 #endif

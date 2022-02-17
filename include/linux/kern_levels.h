@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __KERN_LEVELS_H__
 #define __KERN_LEVELS_H__
 

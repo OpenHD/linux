@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Character device driver for writing z/VM *MONITOR service records.
  *
@@ -22,7 +21,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/ebcdic.h>
 #include <asm/io.h>
 #include <asm/appldata.h>
@@ -61,7 +60,7 @@ static int monwrite_diag(struct monwrite_hdr *myhdr, char *buffer, int fcn)
 	struct appldata_product_id id;
 	int rc;
 
-	memcpy(id.prod_nr, "LNXAPPL", 7);
+	strncpy(id.prod_nr, "LNXAPPL", 7);
 	id.prod_fn = myhdr->applid;
 	id.record_nr = myhdr->record_num;
 	id.version_nr = myhdr->version;

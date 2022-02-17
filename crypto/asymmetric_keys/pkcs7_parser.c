@@ -11,18 +11,13 @@
 
 #define pr_fmt(fmt) "PKCS7: "fmt
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/oid_registry.h>
 #include <crypto/public_key.h>
 #include "pkcs7_parser.h"
-#include "pkcs7.asn1.h"
-
-MODULE_DESCRIPTION("PKCS#7 parser");
-MODULE_AUTHOR("Red Hat, Inc.");
-MODULE_LICENSE("GPL");
+#include "pkcs7-asn1.h"
 
 struct pkcs7_parse_context {
 	struct pkcs7_message	*msg;		/* Message being constructed */
@@ -148,10 +143,8 @@ struct pkcs7_message *pkcs7_parse_message(const void *data, size_t datalen)
 	}
 
 	ret = pkcs7_check_authattrs(ctx->msg);
-	if (ret < 0) {
-		msg = ERR_PTR(ret);
+	if (ret < 0)
 		goto out;
-	}
 
 	msg = ctx->msg;
 	ctx->msg = NULL;

@@ -85,4 +85,8 @@ static struct platform_driver atmel_ramc_driver = {
 	},
 };
 
-builtin_platform_driver(atmel_ramc_driver);
+static int __init atmel_ramc_init(void)
+{
+	return platform_driver_register(&atmel_ramc_driver);
+}
+device_initcall(atmel_ramc_init);

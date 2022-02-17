@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 #define _RTW_EFUSE_C_
@@ -22,55 +30,58 @@ enum{
 	};
 
 /*
- * Function:	efuse_power_switch
+ * Function:	Efuse_PowerSwitch
  *
  * Overview:	When we want to enable write operation, we should change to
  *				pwr on state. When we stop write, we should switch to 500k mode
  *				and disable LDO 2.5V.
  */
 
-void efuse_power_switch(struct adapter *pAdapter, u8 write, u8 pwrstate)
+void Efuse_PowerSwitch(
+		struct adapter *pAdapter,
+		u8 bWrite,
+		u8 PwrState)
 {
 	u8 tempval;
-	u16 tmpv16;
+	u16	tmpV16;
 
-	if (pwrstate) {
+	if (PwrState) {
 		usb_write8(pAdapter, REG_EFUSE_ACCESS, EFUSE_ACCESS_ON);
 
-		/*  1.2V Power: From VDDON with Power Cut(0x0000h[15]), default valid */
-		tmpv16 = usb_read16(pAdapter, REG_SYS_ISO_CTRL);
-		if (!(tmpv16 & PWC_EV12V)) {
-			tmpv16 |= PWC_EV12V;
-			 usb_write16(pAdapter, REG_SYS_ISO_CTRL, tmpv16);
+		/*  1.2V Power: From VDDON with Power Cut(0x0000h[15]), defualt valid */
+		tmpV16 = usb_read16(pAdapter, REG_SYS_ISO_CTRL);
+		if (!(tmpV16 & PWC_EV12V)) {
+			tmpV16 |= PWC_EV12V;
+			 usb_write16(pAdapter, REG_SYS_ISO_CTRL, tmpV16);
 		}
 		/*  Reset: 0x0000h[28], default valid */
-		tmpv16 =  usb_read16(pAdapter, REG_SYS_FUNC_EN);
-		if (!(tmpv16 & FEN_ELDR)) {
-			tmpv16 |= FEN_ELDR;
-			usb_write16(pAdapter, REG_SYS_FUNC_EN, tmpv16);
+		tmpV16 =  usb_read16(pAdapter, REG_SYS_FUNC_EN);
+		if (!(tmpV16 & FEN_ELDR)) {
+			tmpV16 |= FEN_ELDR;
+			usb_write16(pAdapter, REG_SYS_FUNC_EN, tmpV16);
 		}
 
 		/*  Clock: Gated(0x0008h[5]) 8M(0x0008h[1]) clock from ANA, default valid */
-		tmpv16 = usb_read16(pAdapter, REG_SYS_CLKR);
-		if ((!(tmpv16 & LOADER_CLK_EN))  || (!(tmpv16 & ANA8M))) {
-			tmpv16 |= (LOADER_CLK_EN | ANA8M);
-			usb_write16(pAdapter, REG_SYS_CLKR, tmpv16);
+		tmpV16 = usb_read16(pAdapter, REG_SYS_CLKR);
+		if ((!(tmpV16 & LOADER_CLK_EN))  || (!(tmpV16 & ANA8M))) {
+			tmpV16 |= (LOADER_CLK_EN | ANA8M);
+			usb_write16(pAdapter, REG_SYS_CLKR, tmpV16);
 		}
 
-		if (write) {
+		if (bWrite) {
 			/*  Enable LDO 2.5V before read/write action */
-			tempval = usb_read8(pAdapter, EFUSE_TEST + 3);
+			tempval = usb_read8(pAdapter, EFUSE_TEST+3);
 			tempval &= 0x0F;
 			tempval |= (VOLTAGE_V25 << 4);
-			usb_write8(pAdapter, EFUSE_TEST + 3, (tempval | 0x80));
+			usb_write8(pAdapter, EFUSE_TEST+3, (tempval | 0x80));
 		}
 	} else {
 		usb_write8(pAdapter, REG_EFUSE_ACCESS, EFUSE_ACCESS_OFF);
 
-		if (write) {
+		if (bWrite) {
 			/*  Disable LDO 2.5V after read/write action */
-			tempval = usb_read8(pAdapter, EFUSE_TEST + 3);
-			usb_write8(pAdapter, EFUSE_TEST + 3, (tempval & 0x7F));
+			tempval = usb_read8(pAdapter, EFUSE_TEST+3);
+			usb_write8(pAdapter, EFUSE_TEST+3, (tempval & 0x7F));
 		}
 	}
 }
@@ -242,7 +253,6 @@ static void efuse_read_phymap_from_txpktbuf(
 			u8 lenc[2];
 			u16 lenbak, aaabak;
 			u16 aaa;
-
 			lenc[0] = usb_read8(adapter, REG_PKTBUF_DBG_DATA_L);
 			lenc[1] = usb_read8(adapter, REG_PKTBUF_DBG_DATA_L+1);
 
@@ -298,7 +308,8 @@ static s32 iol_read_efuse(struct adapter *padapter, u8 txpktbuf_bndy, u16 offset
 
 void efuse_ReadEFuse(struct adapter *Adapter, u8 efuseType, u16 _offset, u16 _size_byte, u8 *pbuf)
 {
-	if (rtw_iol_applied(Adapter)) {
+
+	if (rtw_IOL_applied(Adapter)) {
 		rtw_hal_power_on(Adapter);
 		iol_mode_enable(Adapter, 1);
 		iol_read_efuse(Adapter, 0, _offset, _size_byte, pbuf);
@@ -472,6 +483,7 @@ int Efuse_PgPacketRead(struct adapter *pAdapter, u8 offset, u8 *data)
 			efuse_addr = efuse_addr + (word_cnts*2)+1;
 			ReadState = PG_STATE_HEADER;
 		}
+
 	}
 
 	if ((data[0] == 0xff) && (data[1] == 0xff) && (data[2] == 0xff)  && (data[3] == 0xff) &&
@@ -550,14 +562,13 @@ static bool hal_EfusePgPacketWrite2ByteHeader(struct adapter *pAdapter, u8 efuse
 			}
 
 			if ((tmp_header & 0x0F) == 0x0F) {	/* word_en PG fail */
-				if (repeatcnt++ > EFUSE_REPEAT_THRESHOLD_)
+				if (repeatcnt++ > EFUSE_REPEAT_THRESHOLD_) {
 					return false;
-
+				}
 				efuse_addr++;
 				continue;
 			} else if (pg_header != tmp_header) {	/* offset PG fail */
 				struct pgpkt	fixPkt;
-
 				fixPkt.offset = ((pg_header_temp & 0xE0) >> 5) | ((tmp_header & 0xF0) >> 1);
 				fixPkt.word_en = tmp_header & 0x0F;
 				fixPkt.word_cnts = Efuse_CalculateWordCnts(fixPkt.word_en);
@@ -600,7 +611,6 @@ static bool hal_EfusePgPacketWrite1ByteHeader(struct adapter *pAdapter, u8 efuse
 		bRet = true;
 	} else {
 		struct pgpkt	fixPkt;
-
 		fixPkt.offset = (tmp_header>>4) & 0x0F;
 		fixPkt.word_en = tmp_header & 0x0F;
 		fixPkt.word_cnts = Efuse_CalculateWordCnts(fixPkt.word_en);
@@ -809,7 +819,6 @@ bool Efuse_PgPacketWrite(struct adapter *pAdapter, u8 offset, u8 word_en, u8 *pD
 u8 Efuse_CalculateWordCnts(u8 word_en)
 {
 	u8 word_cnts = 0;
-
 	if (!(word_en & BIT(0)))
 		word_cnts++; /*  0 : write enable */
 	if (!(word_en & BIT(1)))
@@ -896,11 +905,11 @@ void efuse_WordEnableDataRead(u8 word_en, u8 *sourdata, u8 *targetdata)
  */
 static void Efuse_ReadAllMap(struct adapter *pAdapter, u8 efuseType, u8 *Efuse)
 {
-	efuse_power_switch(pAdapter, false, true);
+	Efuse_PowerSwitch(pAdapter, false, true);
 
 	efuse_ReadEFuse(pAdapter, efuseType, 0, EFUSE_MAP_LEN_88E, Efuse);
 
-	efuse_power_switch(pAdapter, false, false);
+	Efuse_PowerSwitch(pAdapter, false, false);
 }
 
 /*

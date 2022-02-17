@@ -395,7 +395,7 @@ static void request_sense(struct AdapterCtlBlk *acb, struct DeviceCtlBlk *dcb,
 		struct ScsiReqBlk *srb);
 static void set_xfer_rate(struct AdapterCtlBlk *acb,
 		struct DeviceCtlBlk *dcb);
-static void waiting_timeout(struct timer_list *t);
+static void waiting_timeout(unsigned long ptr);
 
 
 /*---------------------------------------------------------------------------
@@ -857,6 +857,9 @@ static void waiting_set_timer(struct AdapterCtlBlk *acb, unsigned long to)
 {
 	if (timer_pending(&acb->waiting_timer))
 		return;
+	init_timer(&acb->waiting_timer);
+	acb->waiting_timer.function = waiting_timeout;
+	acb->waiting_timer.data = (unsigned long) acb;
 	if (time_before(jiffies + to, acb->last_reset - HZ / 2))
 		acb->waiting_timer.expires =
 		    acb->last_reset - HZ / 2 + 1;
@@ -933,10 +936,10 @@ static void waiting_process_next(struct AdapterCtlBlk *acb)
 
 
 /* Wake up waiting queue */
-static void waiting_timeout(struct timer_list *t)
+static void waiting_timeout(unsigned long ptr)
 {
 	unsigned long flags;
-	struct AdapterCtlBlk *acb = from_timer(acb, t, waiting_timer);
+	struct AdapterCtlBlk *acb = (struct AdapterCtlBlk *)ptr;
 	dprintkdbg(DBG_1,
 		"waiting_timeout: Queue woken up by timer. acb=%p\n", acb);
 	DC395x_LOCK_IO(acb->scsi_host, flags);
@@ -3476,8 +3479,9 @@ static void srb_done(struct AdapterCtlBlk *acb, struct DeviceCtlBlk *dcb,
 
 	/*if( srb->cmd->cmnd[0] == INQUIRY && */
 	/*  (host_byte(cmd->result) == DID_OK || status_byte(cmd->result) & CHECK_CONDITION) ) */
-		if ((cmd->result == (DID_OK << 16) ||
-		     status_byte(cmd->result) == CHECK_CONDITION)) {
+		if ((cmd->result == (DID_OK << 16)
+		     || status_byte(cmd->result) &
+		     CHECK_CONDITION)) {
 			if (!dcb->init_tcq_flag) {
 				add_dev(acb, dcb, ptr);
 				dcb->init_tcq_flag = 1;
@@ -4364,8 +4368,8 @@ static void adapter_init_params(struct AdapterCtlBlk *acb)
 	INIT_LIST_HEAD(&acb->srb_free_list);
 	/*  temp SRB for Q tag used or abort command used  */
 	acb->tmp_srb = &acb->srb;
-	timer_setup(&acb->waiting_timer, waiting_timeout, 0);
-	timer_setup(&acb->selto_timer, NULL, 0);
+	init_timer(&acb->waiting_timer);
+	init_timer(&acb->selto_timer);
 
 	acb->srb_count = DC395x_MAX_SRB_CNT;
 

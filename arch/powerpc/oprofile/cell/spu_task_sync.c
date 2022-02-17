@@ -208,7 +208,7 @@ prepare_cached_spu_info(struct spu *spu, unsigned long objectId)
 	/* Create cached_info and set spu_info[spu->number] to point to it.
 	 * spu->number is a system-wide value, not a per-node value.
 	 */
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(struct cached_info), GFP_KERNEL);
 	if (!info) {
 		printk(KERN_ERR "SPU_PROF: "
 		       "%s, line %d: create vma_map failed\n",
@@ -295,7 +295,7 @@ out:
  * dcookie user still being registered (namely, the reader
  * of the event buffer).
  */
-static inline unsigned long fast_get_dcookie(const struct path *path)
+static inline unsigned long fast_get_dcookie(struct path *path)
 {
 	unsigned long cookie;
 

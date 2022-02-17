@@ -15,8 +15,7 @@
  */
 
 #include <drm/drm_crtc.h>
-#include <drm/drm_encoder.h>
-#include <drm/drm_device.h>
+#include <drm/drm_encoder_slave.h>
 
 #include "arcpgu.h"
 
@@ -48,7 +47,10 @@ int arcpgu_drm_hdmi_init(struct drm_device *drm, struct device_node *np)
 		return ret;
 
 	/* Link drm_bridge to encoder */
-	ret = drm_bridge_attach(encoder, bridge, NULL);
+	bridge->encoder = encoder;
+	encoder->bridge = bridge;
+
+	ret = drm_bridge_attach(drm, bridge);
 	if (ret)
 		drm_encoder_cleanup(encoder);
 

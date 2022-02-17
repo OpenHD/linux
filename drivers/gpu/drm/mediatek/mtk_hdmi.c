@@ -149,7 +149,6 @@ struct hdmi_audio_param {
 
 struct mtk_hdmi {
 	struct drm_bridge bridge;
-	struct drm_bridge *next_bridge;
 	struct drm_connector conn;
 	struct device *dev;
 	struct phy *phy;
@@ -975,7 +974,7 @@ static int mtk_hdmi_setup_avi_infoframe(struct mtk_hdmi *hdmi,
 	u8 buffer[17];
 	ssize_t err;
 
-	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode, false);
+	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode);
 	if (err < 0) {
 		dev_err(hdmi->dev,
 			"Failed to get AVI infoframe from mode: %zd\n", err);
@@ -1054,8 +1053,7 @@ static int mtk_hdmi_setup_vendor_specific_infoframe(struct mtk_hdmi *hdmi,
 	u8 buffer[10];
 	ssize_t err;
 
-	err = drm_hdmi_vendor_infoframe_from_display_mode(&frame,
-							  &hdmi->conn, mode);
+	err = drm_hdmi_vendor_infoframe_from_display_mode(&frame, mode);
 	if (err) {
 		dev_err(hdmi->dev,
 			"Failed to get vendor infoframe from mode: %zd\n", err);
@@ -1220,9 +1218,10 @@ static int mtk_hdmi_conn_get_modes(struct drm_connector *conn)
 
 	hdmi->dvi_mode = !drm_detect_monitor_audio(edid);
 
-	drm_connector_update_edid_property(conn, edid);
+	drm_mode_connector_update_edid_property(conn, edid);
 
 	ret = drm_add_edid_modes(conn, edid);
+	drm_edid_to_eld(conn, edid);
 	kfree(edid);
 	return ret;
 }
@@ -1261,6 +1260,7 @@ static struct drm_encoder *mtk_hdmi_conn_best_enc(struct drm_connector *conn)
 }
 
 static const struct drm_connector_funcs mtk_hdmi_connector_funcs = {
+	.dpms = drm_atomic_helper_connector_dpms,
 	.detect = hdmi_conn_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = hdmi_conn_destroy,
@@ -1306,7 +1306,7 @@ static int mtk_hdmi_bridge_attach(struct drm_bridge *bridge)
 	hdmi->conn.interlace_allowed = true;
 	hdmi->conn.doublescan_allowed = false;
 
-	ret = drm_connector_attach_encoder(&hdmi->conn,
+	ret = drm_mode_connector_attach_encoder(&hdmi->conn,
 						bridge->encoder);
 	if (ret) {
 		dev_err(hdmi->dev,
@@ -1314,9 +1314,9 @@ static int mtk_hdmi_bridge_attach(struct drm_bridge *bridge)
 		return ret;
 	}
 
-	if (hdmi->next_bridge) {
-		ret = drm_bridge_attach(bridge->encoder, hdmi->next_bridge,
-					bridge);
+	if (bridge->next) {
+		bridge->next->encoder = bridge->encoder;
+		ret = drm_bridge_attach(bridge->encoder->dev, bridge->next);
 		if (ret) {
 			dev_err(hdmi->dev,
 				"Failed to attach external bridge: %d\n", ret);
@@ -1433,7 +1433,7 @@ static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct device_node *cec_np, *remote, *i2c_np;
+	struct device_node *cec_np, *port, *ep, *remote, *i2c_np;
 	struct platform_device *cec_pdev;
 	struct regmap *regmap;
 	struct resource *mem;
@@ -1454,8 +1454,8 @@ static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,
 
 	cec_pdev = of_find_device_by_node(cec_np);
 	if (!cec_pdev) {
-		dev_err(hdmi->dev, "Waiting for CEC device %pOF\n",
-			cec_np);
+		dev_err(hdmi->dev, "Waiting for CEC device %s\n",
+			cec_np->full_name);
 		of_node_put(cec_np);
 		return -EPROBE_DEFER;
 	}
@@ -1485,13 +1485,33 @@ static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,
 	if (IS_ERR(hdmi->regs))
 		return PTR_ERR(hdmi->regs);
 
-	remote = of_graph_get_remote_node(np, 1, 0);
-	if (!remote)
+	port = of_graph_get_port_by_id(np, 1);
+	if (!port) {
+		dev_err(dev, "Missing output port node\n");
 		return -EINVAL;
+	}
+
+	ep = of_get_child_by_name(port, "endpoint");
+	if (!ep) {
+		dev_err(dev, "Missing endpoint node in port %s\n",
+			port->full_name);
+		of_node_put(port);
+		return -EINVAL;
+	}
+	of_node_put(port);
+
+	remote = of_graph_get_remote_port_parent(ep);
+	if (!remote) {
+		dev_err(dev, "Missing connector/bridge node for endpoint %s\n",
+			ep->full_name);
+		of_node_put(ep);
+		return -EINVAL;
+	}
+	of_node_put(ep);
 
 	if (!of_device_is_compatible(remote, "hdmi-connector")) {
-		hdmi->next_bridge = of_drm_find_bridge(remote);
-		if (!hdmi->next_bridge) {
+		hdmi->bridge.next = of_drm_find_bridge(remote);
+		if (!hdmi->bridge.next) {
 			dev_err(dev, "Waiting for external bridge\n");
 			of_node_put(remote);
 			return -EPROBE_DEFER;
@@ -1500,8 +1520,8 @@ static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,
 
 	i2c_np = of_parse_phandle(remote, "ddc-i2c-bus", 0);
 	if (!i2c_np) {
-		dev_err(dev, "Failed to find ddc-i2c-bus node in %pOF\n",
-			remote);
+		dev_err(dev, "Failed to find ddc-i2c-bus node in %s\n",
+			remote->full_name);
 		of_node_put(remote);
 		return -EINVAL;
 	}
@@ -1697,7 +1717,11 @@ static int mtk_drm_hdmi_probe(struct platform_device *pdev)
 
 	hdmi->bridge.funcs = &mtk_hdmi_bridge_funcs;
 	hdmi->bridge.of_node = pdev->dev.of_node;
-	drm_bridge_add(&hdmi->bridge);
+	ret = drm_bridge_add(&hdmi->bridge);
+	if (ret) {
+		dev_err(dev, "failed to add bridge, ret = %d\n", ret);
+		return ret;
+	}
 
 	ret = mtk_hdmi_clk_enable_audio(hdmi);
 	if (ret) {
@@ -1774,14 +1798,33 @@ static struct platform_driver * const mtk_hdmi_drivers[] = {
 
 static int __init mtk_hdmitx_init(void)
 {
-	return platform_register_drivers(mtk_hdmi_drivers,
-					 ARRAY_SIZE(mtk_hdmi_drivers));
+	int ret;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(mtk_hdmi_drivers); i++) {
+		ret = platform_driver_register(mtk_hdmi_drivers[i]);
+		if (ret < 0) {
+			pr_err("Failed to register %s driver: %d\n",
+			       mtk_hdmi_drivers[i]->driver.name, ret);
+			goto err;
+		}
+	}
+
+	return 0;
+
+err:
+	while (--i >= 0)
+		platform_driver_unregister(mtk_hdmi_drivers[i]);
+
+	return ret;
 }
 
 static void __exit mtk_hdmitx_exit(void)
 {
-	platform_unregister_drivers(mtk_hdmi_drivers,
-				    ARRAY_SIZE(mtk_hdmi_drivers));
+	int i;
+
+	for (i = ARRAY_SIZE(mtk_hdmi_drivers) - 1; i >= 0; i--)
+		platform_driver_unregister(mtk_hdmi_drivers[i]);
 }
 
 module_init(mtk_hdmitx_init);

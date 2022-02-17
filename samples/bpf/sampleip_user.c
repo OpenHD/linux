@@ -21,8 +21,6 @@
 #include <sys/ioctl.h>
 #include "libbpf.h"
 #include "bpf_load.h"
-#include "perf-sys.h"
-#include "trace_helpers.h"
 
 #define DEFAULT_FREQ	99
 #define DEFAULT_SECS	5
@@ -51,7 +49,7 @@ static int sampling_start(int *pmu_fd, int freq)
 	};
 
 	for (i = 0; i < nr_cpus; i++) {
-		pmu_fd[i] = sys_perf_event_open(&pe_sample_attr, -1 /* pid */, i,
+		pmu_fd[i] = perf_event_open(&pe_sample_attr, -1 /* pid */, i,
 					    -1 /* group_fd */, 0 /* flags */);
 		if (pmu_fd[i] < 0) {
 			fprintf(stderr, "ERROR: Initializing perf sampling\n");
@@ -97,8 +95,8 @@ static void print_ip_map(int fd)
 
 	/* fetch IPs and counts */
 	key = 0, i = 0;
-	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
-		bpf_map_lookup_elem(fd, &next_key, &value);
+	while (bpf_get_next_key(fd, &key, &next_key) == 0) {
+		bpf_lookup_elem(fd, &next_key, &value);
 		counts[i].ip = next_key;
 		counts[i++].count = value;
 		key = next_key;
@@ -181,7 +179,6 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	signal(SIGINT, int_exit);
-	signal(SIGTERM, int_exit);
 
 	/* do sampling */
 	printf("Sampling at %d Hertz for %d seconds. Ctrl-C also ends.\n",

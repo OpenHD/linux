@@ -12,7 +12,6 @@
 #include <linux/io.h>
 #include <linux/platform_data/clk-integrator.h>
 
-#include "icst.h"
 #include "clk-icst.h"
 
 #define IMPD1_OSC1	0x00

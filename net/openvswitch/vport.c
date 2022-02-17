@@ -47,7 +47,7 @@ static struct hlist_head *dev_table;
  */
 int ovs_vport_init(void)
 {
-	dev_table = kcalloc(VPORT_HASH_BUCKETS, sizeof(struct hlist_head),
+	dev_table = kzalloc(VPORT_HASH_BUCKETS * sizeof(struct hlist_head),
 			    GFP_KERNEL);
 	if (!dev_table)
 		return -ENOMEM;
@@ -463,11 +463,27 @@ int ovs_vport_receive(struct vport *vport, struct sk_buff *skb,
 	ovs_dp_process_packet(skb, &key);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(ovs_vport_receive);
 
-static int packet_length(const struct sk_buff *skb,
-			 struct net_device *dev)
+static void free_vport_rcu(struct rcu_head *rcu)
 {
-	int length = skb->len - dev->hard_header_len;
+	struct vport *vport = container_of(rcu, struct vport, rcu);
+
+	ovs_vport_free(vport);
+}
+
+void ovs_vport_deferred_free(struct vport *vport)
+{
+	if (!vport)
+		return;
+
+	call_rcu(&vport->rcu, free_vport_rcu);
+}
+EXPORT_SYMBOL_GPL(ovs_vport_deferred_free);
+
+static unsigned int packet_length(const struct sk_buff *skb)
+{
+	unsigned int length = skb->len - ETH_HLEN;
 
 	if (!skb_vlan_tag_present(skb) &&
 	    eth_type_vlan(skb->protocol))
@@ -478,37 +494,17 @@ static int packet_length(const struct sk_buff *skb,
 	 * account for 802.1ad. e.g. is_skb_forwardable().
 	 */
 
-	return length > 0 ? length : 0;
+	return length;
 }
 
-void ovs_vport_send(struct vport *vport, struct sk_buff *skb, u8 mac_proto)
+void ovs_vport_send(struct vport *vport, struct sk_buff *skb)
 {
 	int mtu = vport->dev->mtu;
 
-	switch (vport->dev->type) {
-	case ARPHRD_NONE:
-		if (mac_proto == MAC_PROTO_ETHERNET) {
-			skb_reset_network_header(skb);
-			skb_reset_mac_len(skb);
-			skb->protocol = htons(ETH_P_TEB);
-		} else if (mac_proto != MAC_PROTO_NONE) {
-			WARN_ON_ONCE(1);
-			goto drop;
-		}
-		break;
-	case ARPHRD_ETHER:
-		if (mac_proto != MAC_PROTO_ETHERNET)
-			goto drop;
-		break;
-	default:
-		goto drop;
-	}
-
-	if (unlikely(packet_length(skb, vport->dev) > mtu &&
-		     !skb_is_gso(skb))) {
+	if (unlikely(packet_length(skb) > mtu && !skb_is_gso(skb))) {
 		net_warn_ratelimited("%s: dropped over-mtu packet: %d > %d\n",
 				     vport->dev->name,
-				     packet_length(skb, vport->dev), mtu);
+				     packet_length(skb), mtu);
 		vport->dev->stats.tx_errors++;
 		goto drop;
 	}

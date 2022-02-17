@@ -34,7 +34,6 @@
 #include <asm/bug.h>
 #include <asm/ptrace.h>
 #include <asm/export.h>
-#include <asm/feature-fixups.h>
 
 	.text
 
@@ -245,7 +244,8 @@ _GLOBAL(_nmask_and_or_msr)
  */
 _GLOBAL(real_readb)
 	mfmsr	r7
-	rlwinm	r0,r7,0,~MSR_DR
+	ori	r0,r7,MSR_DR
+	xori	r0,r0,MSR_DR
 	sync
 	mtmsr	r0
 	sync
@@ -262,7 +262,8 @@ _GLOBAL(real_readb)
  */
 _GLOBAL(real_writeb)
 	mfmsr	r7
-	rlwinm	r0,r7,0,~MSR_DR
+	ori	r0,r7,MSR_DR
+	xori	r0,r0,MSR_DR
 	sync
 	mtmsr	r0
 	sync
@@ -613,7 +614,7 @@ _GLOBAL(start_secondary_resume)
 _GLOBAL(__main)
 	blr
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 	/*
 	 * Must be relocatable PIC code callable as a C function.
 	 */

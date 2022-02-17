@@ -29,7 +29,6 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
-#include <linux/of_device.h>
 #include <linux/sysfs.h>
 
 /* Addresses to scan */
@@ -70,31 +69,6 @@ static const struct i2c_device_id tmp421_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, tmp421_id);
 
-static const struct of_device_id tmp421_of_match[] = {
-	{
-		.compatible = "ti,tmp421",
-		.data = (void *)2
-	},
-	{
-		.compatible = "ti,tmp422",
-		.data = (void *)3
-	},
-	{
-		.compatible = "ti,tmp423",
-		.data = (void *)4
-	},
-	{
-		.compatible = "ti,tmp441",
-		.data = (void *)2
-	},
-	{
-		.compatible = "ti,tmp442",
-		.data = (void *)3
-	},
-	{ },
-};
-MODULE_DEVICE_TABLE(of, tmp421_of_match);
-
 struct tmp421_data {
 	struct i2c_client *client;
 	struct mutex update_lock;
@@ -104,7 +78,7 @@ struct tmp421_data {
 	struct hwmon_chip_info chip;
 	char valid;
 	unsigned long last_updated;
-	unsigned long channels;
+	int channels;
 	u8 config;
 	s16 temp[4];
 };
@@ -298,11 +272,7 @@ static int tmp421_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	mutex_init(&data->update_lock);
-	if (client->dev.of_node)
-		data->channels = (unsigned long)
-			of_device_get_match_data(&client->dev);
-	else
-		data->channels = id->driver_data;
+	data->channels = id->driver_data;
 	data->client = client;
 
 	err = tmp421_init_client(client);
@@ -331,7 +301,6 @@ static struct i2c_driver tmp421_driver = {
 	.class = I2C_CLASS_HWMON,
 	.driver = {
 		.name	= "tmp421",
-		.of_match_table = of_match_ptr(tmp421_of_match),
 	},
 	.probe = tmp421_probe,
 	.id_table = tmp421_id,

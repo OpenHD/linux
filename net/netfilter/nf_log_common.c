@@ -132,10 +132,9 @@ int nf_log_dump_tcp_header(struct nf_log_buf *m, const struct sk_buff *skb,
 }
 EXPORT_SYMBOL_GPL(nf_log_dump_tcp_header);
 
-void nf_log_dump_sk_uid_gid(struct net *net, struct nf_log_buf *m,
-			    struct sock *sk)
+void nf_log_dump_sk_uid_gid(struct nf_log_buf *m, struct sock *sk)
 {
-	if (!sk || !sk_fullsock(sk) || !net_eq(net, sock_net(sk)))
+	if (!sk || !sk_fullsock(sk))
 		return;
 
 	read_lock_bh(&sk->sk_callback_lock);
@@ -175,34 +174,6 @@ nf_log_dump_packet_common(struct nf_log_buf *m, u_int8_t pf,
 #endif
 }
 EXPORT_SYMBOL_GPL(nf_log_dump_packet_common);
-
-/* bridge and netdev logging families share this code. */
-void nf_log_l2packet(struct net *net, u_int8_t pf,
-		     __be16 protocol,
-		     unsigned int hooknum,
-		     const struct sk_buff *skb,
-		     const struct net_device *in,
-		     const struct net_device *out,
-		     const struct nf_loginfo *loginfo,
-		     const char *prefix)
-{
-	switch (protocol) {
-	case htons(ETH_P_IP):
-		nf_log_packet(net, NFPROTO_IPV4, hooknum, skb, in, out,
-			      loginfo, "%s", prefix);
-		break;
-	case htons(ETH_P_IPV6):
-		nf_log_packet(net, NFPROTO_IPV6, hooknum, skb, in, out,
-			      loginfo, "%s", prefix);
-		break;
-	case htons(ETH_P_ARP):
-	case htons(ETH_P_RARP):
-		nf_log_packet(net, NFPROTO_ARP, hooknum, skb, in, out,
-			      loginfo, "%s", prefix);
-		break;
-	}
-}
-EXPORT_SYMBOL_GPL(nf_log_l2packet);
 
 static int __init nf_log_common_init(void)
 {

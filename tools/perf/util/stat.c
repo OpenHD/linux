@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
-#include <errno.h>
-#include <inttypes.h>
 #include <math.h>
 #include "stat.h"
 #include "evlist.h"
@@ -70,7 +67,7 @@ double rel_stddev_stats(double stddev, double avg)
 bool __perf_evsel_stat__is(struct perf_evsel *evsel,
 			   enum perf_stat_evsel_id id)
 {
-	struct perf_stat_evsel *ps = evsel->stats;
+	struct perf_stat_evsel *ps = evsel->priv;
 
 	return ps->id == id;
 }
@@ -87,14 +84,12 @@ static const char *id_str[PERF_STAT_EVSEL_ID__MAX] = {
 	ID(TOPDOWN_SLOTS_RETIRED, topdown-slots-retired),
 	ID(TOPDOWN_FETCH_BUBBLES, topdown-fetch-bubbles),
 	ID(TOPDOWN_RECOVERY_BUBBLES, topdown-recovery-bubbles),
-	ID(SMI_NUM, msr/smi/),
-	ID(APERF, msr/aperf/),
 };
 #undef ID
 
-static void perf_stat_evsel_id_init(struct perf_evsel *evsel)
+void perf_stat_evsel_id_init(struct perf_evsel *evsel)
 {
-	struct perf_stat_evsel *ps = evsel->stats;
+	struct perf_stat_evsel *ps = evsel->priv;
 	int i;
 
 	/* ps->id is 0 hence PERF_STAT_EVSEL_ID__NONE by default */
@@ -110,7 +105,7 @@ static void perf_stat_evsel_id_init(struct perf_evsel *evsel)
 static void perf_evsel__reset_stat_priv(struct perf_evsel *evsel)
 {
 	int i;
-	struct perf_stat_evsel *ps = evsel->stats;
+	struct perf_stat_evsel *ps = evsel->priv;
 
 	for (i = 0; i < 3; i++)
 		init_stats(&ps->res_stats[i]);
@@ -120,8 +115,8 @@ static void perf_evsel__reset_stat_priv(struct perf_evsel *evsel)
 
 static int perf_evsel__alloc_stat_priv(struct perf_evsel *evsel)
 {
-	evsel->stats = zalloc(sizeof(struct perf_stat_evsel));
-	if (evsel->stats == NULL)
+	evsel->priv = zalloc(sizeof(struct perf_stat_evsel));
+	if (evsel->priv == NULL)
 		return -ENOMEM;
 	perf_evsel__reset_stat_priv(evsel);
 	return 0;
@@ -129,11 +124,7 @@ static int perf_evsel__alloc_stat_priv(struct perf_evsel *evsel)
 
 static void perf_evsel__free_stat_priv(struct perf_evsel *evsel)
 {
-	struct perf_stat_evsel *ps = evsel->stats;
-
-	if (ps)
-		free(ps->group_data);
-	zfree(&evsel->stats);
+	zfree(&evsel->priv);
 }
 
 static int perf_evsel__alloc_prev_raw_counts(struct perf_evsel *evsel,
@@ -295,16 +286,7 @@ process_counter_values(struct perf_stat_config *config, struct perf_evsel *evsel
 			perf_evsel__compute_deltas(evsel, cpu, thread, count);
 		perf_counts_values__scale(count, config->scale, NULL);
 		if (config->aggr_mode == AGGR_NONE)
-			perf_stat__update_shadow_stats(evsel, count->val, cpu,
-						       &rt_stat);
-		if (config->aggr_mode == AGGR_THREAD) {
-			if (config->stats)
-				perf_stat__update_shadow_stats(evsel,
-					count->val, 0, &config->stats[thread]);
-			else
-				perf_stat__update_shadow_stats(evsel,
-					count->val, 0, &rt_stat);
-		}
+			perf_stat__update_shadow_stats(evsel, count->values, cpu);
 		break;
 	case AGGR_GLOBAL:
 		aggr->val += count->val;
@@ -345,8 +327,9 @@ int perf_stat_process_counter(struct perf_stat_config *config,
 			      struct perf_evsel *counter)
 {
 	struct perf_counts_values *aggr = &counter->counts->aggr;
-	struct perf_stat_evsel *ps = counter->stats;
+	struct perf_stat_evsel *ps = counter->priv;
 	u64 *count = counter->counts->aggr.values;
+	u64 val;
 	int i, ret;
 
 	aggr->val = aggr->ena = aggr->run = 0;
@@ -358,8 +341,10 @@ int perf_stat_process_counter(struct perf_stat_config *config,
 	 * interval mode, otherwise overall avg running
 	 * averages will be shown for each interval.
 	 */
-	if (config->interval)
-		init_stats(ps->res_stats);
+	if (config->interval) {
+		for (i = 0; i < 3; i++)
+			init_stats(&ps->res_stats[i]);
+	}
 
 	if (counter->per_pkg)
 		zero_per_pkg(counter);
@@ -378,7 +363,7 @@ int perf_stat_process_counter(struct perf_stat_config *config,
 	for (i = 0; i < 3; i++)
 		update_stats(&ps->res_stats[i], count[i]);
 
-	if (verbose > 0) {
+	if (verbose) {
 		fprintf(config->output, "%s: %" PRIu64 " %" PRIu64 " %" PRIu64 "\n",
 			perf_evsel__name(counter), count[0], count[1], count[2]);
 	}
@@ -386,7 +371,8 @@ int perf_stat_process_counter(struct perf_stat_config *config,
 	/*
 	 * Save the full runtime - to allow normalization during printout:
 	 */
-	perf_stat__update_shadow_stats(counter, *count, 0, &rt_stat);
+	val = counter->scale * *count;
+	perf_stat__update_shadow_stats(counter, &val, 0);
 
 	return 0;
 }

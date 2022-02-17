@@ -1,11 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PERF_BITOPS_H
 #define _PERF_BITOPS_H
 
 #include <string.h>
 #include <linux/bitops.h>
 #include <stdlib.h>
-#include <linux/kernel.h>
 
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]
@@ -97,25 +95,8 @@ static inline int test_and_set_bit(int nr, unsigned long *addr)
 }
 
 /**
- * test_and_clear_bit - Clear a bit and return its old value
- * @nr: Bit to clear
- * @addr: Address to count from
- */
-static inline int test_and_clear_bit(int nr, unsigned long *addr)
-{
-	unsigned long mask = BIT_MASK(nr);
-	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
-	unsigned long old;
-
-	old = *p;
-	*p = old & ~mask;
-
-	return (old & mask) != 0;
-}
-
-/**
  * bitmap_alloc - Allocate bitmap
- * @nbits: Number of bits
+ * @nr: Bit to set
  */
 static inline unsigned long *bitmap_alloc(int nbits)
 {

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ld script to make ARM Linux kernel
  * taken from the i386 version by Russell King
@@ -24,6 +23,13 @@ ENTRY(_text)
 
 jiffies = jiffies_64;
 
+
+#define HYPERVISOR_EXTABLE					\
+	. = ALIGN(SZ_8);					\
+	VMLINUX_SYMBOL(__start___kvm_ex_table) = .;		\
+	*(__kvm_ex_table)					\
+	VMLINUX_SYMBOL(__stop___kvm_ex_table) = .;
+
 #define HYPERVISOR_TEXT					\
 	/*						\
 	 * Align to 4 KB so that			\
@@ -34,25 +40,26 @@ jiffies = jiffies_64;
 	 *    4 KB (see related ASSERT() below)		\
 	 */						\
 	. = ALIGN(SZ_4K);				\
-	__hyp_idmap_text_start = .;			\
+	VMLINUX_SYMBOL(__hyp_idmap_text_start) = .;	\
 	*(.hyp.idmap.text)				\
-	__hyp_idmap_text_end = .;			\
-	__hyp_text_start = .;				\
+	VMLINUX_SYMBOL(__hyp_idmap_text_end) = .;	\
+	VMLINUX_SYMBOL(__hyp_text_start) = .;		\
 	*(.hyp.text)					\
-	__hyp_text_end = .;
+	HYPERVISOR_EXTABLE				\
+	VMLINUX_SYMBOL(__hyp_text_end) = .;
 
 #define IDMAP_TEXT					\
 	. = ALIGN(SZ_4K);				\
-	__idmap_text_start = .;				\
+	VMLINUX_SYMBOL(__idmap_text_start) = .;		\
 	*(.idmap.text)					\
-	__idmap_text_end = .;
+	VMLINUX_SYMBOL(__idmap_text_end) = .;
 
 #ifdef CONFIG_HIBERNATION
 #define HIBERNATE_TEXT					\
 	. = ALIGN(SZ_4K);				\
-	__hibernate_exit_text_start = .;		\
+	VMLINUX_SYMBOL(__hibernate_exit_text_start) = .;\
 	*(.hibernate_exit.text)				\
-	__hibernate_exit_text_end = .;
+	VMLINUX_SYMBOL(__hibernate_exit_text_end) = .;
 #else
 #define HIBERNATE_TEXT
 #endif
@@ -60,10 +67,10 @@ jiffies = jiffies_64;
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 #define TRAMP_TEXT					\
 	. = ALIGN(PAGE_SIZE);				\
-	__entry_tramp_text_start = .;			\
-	*(.entry.tramp.text)				\
+	VMLINUX_SYMBOL(__entry_tramp_text_start) = .;	\
+	KEEP(*(.entry.tramp.text))			\
 	. = ALIGN(PAGE_SIZE);				\
-	__entry_tramp_text_end = .;
+	VMLINUX_SYMBOL(__entry_tramp_text_end) = .;
 #else
 #define TRAMP_TEXT
 #endif
@@ -84,6 +91,22 @@ PECOFF_FILE_ALIGNMENT = 0x200;
 #define PECOFF_EDATA_PADDING
 #endif
 
+#if defined(CONFIG_DEBUG_ALIGN_RODATA)
+/*
+ *  4 KB granule:   1 level 2 entry
+ * 16 KB granule: 128 level 3 entries, with contiguous bit
+ * 64 KB granule:  32 level 3 entries, with contiguous bit
+ */
+#define SEGMENT_ALIGN			SZ_2M
+#else
+/*
+ *  4 KB granule:  16 level 3 entries, with contiguous bit
+ * 16 KB granule:   4 level 3 entries, without contiguous bit
+ * 64 KB granule:   1 level 3 entry
+ */
+#define SEGMENT_ALIGN			SZ_64K
+#endif
+
 SECTIONS
 {
 	/*
@@ -99,8 +122,7 @@ SECTIONS
 		*(.discard)
 		*(.discard.*)
 		*(.interp .dynamic)
-		*(.dynsym .dynstr .hash .gnu.hash)
-		*(.eh_frame)
+		*(.dynsym .dynstr .hash)
 	}
 
 	. = KIMAGE_VADDR + TEXT_OFFSET;
@@ -141,26 +163,11 @@ SECTIONS
 
 	. = ALIGN(SEGMENT_ALIGN);
 	__init_begin = .;
-	__inittext_begin = .;
 
 	INIT_TEXT_SECTION(8)
 	.exit.text : {
 		ARM_EXIT_KEEP(EXIT_TEXT)
 	}
-
-	. = ALIGN(4);
-	.altinstructions : {
-		__alt_instructions = .;
-		*(.altinstructions)
-		__alt_instructions_end = .;
-	}
-	.altinstr_replacement : {
-		*(.altinstr_replacement)
-	}
-
-	. = ALIGN(PAGE_SIZE);
-	__inittext_end = .;
-	__initdata_begin = .;
 
 	.init.data : {
 		INIT_DATA
@@ -177,20 +184,28 @@ SECTIONS
 
 	PERCPU_SECTION(L1_CACHE_BYTES)
 
-	.rela.dyn : ALIGN(8) {
+	. = ALIGN(4);
+	.altinstructions : {
+		__alt_instructions = .;
+		KEEP(*(.altinstructions))
+		__alt_instructions_end = .;
+	}
+	.altinstr_replacement : {
+		KEEP(*(.altinstr_replacement))
+	}
+	.rela : ALIGN(8) {
 		*(.rela .rela*)
 	}
 
-	__rela_offset	= ABSOLUTE(ADDR(.rela.dyn) - KIMAGE_VADDR);
-	__rela_size	= SIZEOF(.rela.dyn);
+	__rela_offset	= ABSOLUTE(ADDR(.rela) - KIMAGE_VADDR);
+	__rela_size	= SIZEOF(.rela);
 
 	. = ALIGN(SEGMENT_ALIGN);
-	__initdata_end = .;
 	__init_end = .;
 
 	_data = .;
 	_sdata = .;
-	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_ALIGN)
+	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_SIZE)
 
 	/*
 	 * Data written with the MMU off but read with the MMU on requires
@@ -211,7 +226,6 @@ SECTIONS
 	}
 
 	PECOFF_EDATA_PADDING
-	__pecoff_data_rawsize = ABSOLUTE(. - __initdata_begin);
 	_edata = .;
 
 	BSS_SECTION(0, 0, 0)
@@ -219,21 +233,19 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	idmap_pg_dir = .;
 	. += IDMAP_DIR_SIZE;
+	swapper_pg_dir = .;
+	. += SWAPPER_DIR_SIZE;
+
+#ifdef CONFIG_ARM64_SW_TTBR0_PAN
+	reserved_ttbr0 = .;
+	. += RESERVED_TTBR0_SIZE;
+#endif
 
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 	tramp_pg_dir = .;
 	. += PAGE_SIZE;
 #endif
 
-#ifdef CONFIG_ARM64_SW_TTBR0_PAN
-	reserved_ttbr0 = .;
-	. += RESERVED_TTBR0_SIZE;
-#endif
-	swapper_pg_dir = .;
-	. += SWAPPER_DIR_SIZE;
-	swapper_pg_end = .;
-
-	__pecoff_data_size = ABSOLUTE(. - __initdata_begin);
 	_end = .;
 
 	STABS_DEBUG

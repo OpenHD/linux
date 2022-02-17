@@ -39,7 +39,7 @@ struct omap_hdmi_audio_ops {
 /* HDMI audio initalization data */
 struct omap_hdmi_audio_pdata {
 	struct device *dev;
-	unsigned int version;
+	enum omapdss_version dss_version;
 	phys_addr_t audio_dma_addr;
 
 	const struct omap_hdmi_audio_ops *ops;

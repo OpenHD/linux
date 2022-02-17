@@ -15,12 +15,12 @@
  *  GNU General Public License for more details.
  */
 
-#include "cx23885.h"
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
+
+#include "cx23885.h"
 
 static unsigned int vbibufs = 4;
 module_param(vbibufs, int, 0644);
@@ -32,8 +32,7 @@ MODULE_PARM_DESC(vbi_debug, "enable debug messages [vbi]");
 
 #define dprintk(level, fmt, arg...)\
 	do { if (vbi_debug >= level)\
-		printk(KERN_DEBUG pr_fmt("%s: vbi:" fmt), \
-			__func__, ##arg); \
+		printk(KERN_DEBUG "%s/0: " fmt, dev->name, ## arg);\
 	} while (0)
 
 /* ------------------------------------------------------------------ */
@@ -254,7 +253,7 @@ static void cx23885_stop_streaming(struct vb2_queue *q)
 }
 
 
-const struct vb2_ops cx23885_vbi_qops = {
+struct vb2_ops cx23885_vbi_qops = {
 	.queue_setup    = queue_setup,
 	.buf_prepare  = buffer_prepare,
 	.buf_finish = buffer_finish,

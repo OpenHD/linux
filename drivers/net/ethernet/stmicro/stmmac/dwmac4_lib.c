@@ -37,96 +37,96 @@ int dwmac4_dma_reset(void __iomem *ioaddr)
 
 void dwmac4_set_rx_tail_ptr(void __iomem *ioaddr, u32 tail_ptr, u32 chan)
 {
-	writel(tail_ptr, ioaddr + DMA_CHAN_RX_END_ADDR(chan));
+	writel(tail_ptr, ioaddr + DMA_CHAN_RX_END_ADDR(0));
 }
 
 void dwmac4_set_tx_tail_ptr(void __iomem *ioaddr, u32 tail_ptr, u32 chan)
 {
-	writel(tail_ptr, ioaddr + DMA_CHAN_TX_END_ADDR(chan));
+	writel(tail_ptr, ioaddr + DMA_CHAN_TX_END_ADDR(0));
 }
 
-void dwmac4_dma_start_tx(void __iomem *ioaddr, u32 chan)
+void dwmac4_dma_start_tx(void __iomem *ioaddr)
 {
-	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
+	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(STMMAC_CHAN0));
 
 	value |= DMA_CONTROL_ST;
-	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(STMMAC_CHAN0));
 
 	value = readl(ioaddr + GMAC_CONFIG);
 	value |= GMAC_CONFIG_TE;
 	writel(value, ioaddr + GMAC_CONFIG);
 }
 
-void dwmac4_dma_stop_tx(void __iomem *ioaddr, u32 chan)
+void dwmac4_dma_stop_tx(void __iomem *ioaddr)
 {
-	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
+	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(STMMAC_CHAN0));
 
 	value &= ~DMA_CONTROL_ST;
-	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(STMMAC_CHAN0));
 
 	value = readl(ioaddr + GMAC_CONFIG);
 	value &= ~GMAC_CONFIG_TE;
 	writel(value, ioaddr + GMAC_CONFIG);
 }
 
-void dwmac4_dma_start_rx(void __iomem *ioaddr, u32 chan)
+void dwmac4_dma_start_rx(void __iomem *ioaddr)
 {
-	u32 value = readl(ioaddr + DMA_CHAN_RX_CONTROL(chan));
+	u32 value = readl(ioaddr + DMA_CHAN_RX_CONTROL(STMMAC_CHAN0));
 
 	value |= DMA_CONTROL_SR;
 
-	writel(value, ioaddr + DMA_CHAN_RX_CONTROL(chan));
+	writel(value, ioaddr + DMA_CHAN_RX_CONTROL(STMMAC_CHAN0));
 
 	value = readl(ioaddr + GMAC_CONFIG);
 	value |= GMAC_CONFIG_RE;
 	writel(value, ioaddr + GMAC_CONFIG);
 }
 
-void dwmac4_dma_stop_rx(void __iomem *ioaddr, u32 chan)
+void dwmac4_dma_stop_rx(void __iomem *ioaddr)
 {
-	u32 value = readl(ioaddr + DMA_CHAN_RX_CONTROL(chan));
+	u32 value = readl(ioaddr + DMA_CHAN_RX_CONTROL(STMMAC_CHAN0));
 
 	value &= ~DMA_CONTROL_SR;
-	writel(value, ioaddr + DMA_CHAN_RX_CONTROL(chan));
+	writel(value, ioaddr + DMA_CHAN_RX_CONTROL(STMMAC_CHAN0));
 
 	value = readl(ioaddr + GMAC_CONFIG);
 	value &= ~GMAC_CONFIG_RE;
 	writel(value, ioaddr + GMAC_CONFIG);
 }
 
-void dwmac4_set_tx_ring_len(void __iomem *ioaddr, u32 len, u32 chan)
+void dwmac4_set_tx_ring_len(void __iomem *ioaddr, u32 len)
 {
-	writel(len, ioaddr + DMA_CHAN_TX_RING_LEN(chan));
+	writel(len, ioaddr + DMA_CHAN_TX_RING_LEN(STMMAC_CHAN0));
 }
 
-void dwmac4_set_rx_ring_len(void __iomem *ioaddr, u32 len, u32 chan)
+void dwmac4_set_rx_ring_len(void __iomem *ioaddr, u32 len)
 {
-	writel(len, ioaddr + DMA_CHAN_RX_RING_LEN(chan));
+	writel(len, ioaddr + DMA_CHAN_RX_RING_LEN(STMMAC_CHAN0));
 }
 
-void dwmac4_enable_dma_irq(void __iomem *ioaddr, u32 chan)
+void dwmac4_enable_dma_irq(void __iomem *ioaddr)
 {
 	writel(DMA_CHAN_INTR_DEFAULT_MASK, ioaddr +
-	       DMA_CHAN_INTR_ENA(chan));
+	       DMA_CHAN_INTR_ENA(STMMAC_CHAN0));
 }
 
-void dwmac410_enable_dma_irq(void __iomem *ioaddr, u32 chan)
+void dwmac410_enable_dma_irq(void __iomem *ioaddr)
 {
 	writel(DMA_CHAN_INTR_DEFAULT_MASK_4_10,
-	       ioaddr + DMA_CHAN_INTR_ENA(chan));
+	       ioaddr + DMA_CHAN_INTR_ENA(STMMAC_CHAN0));
 }
 
-void dwmac4_disable_dma_irq(void __iomem *ioaddr, u32 chan)
+void dwmac4_disable_dma_irq(void __iomem *ioaddr)
 {
-	writel(0, ioaddr + DMA_CHAN_INTR_ENA(chan));
+	writel(0, ioaddr + DMA_CHAN_INTR_ENA(STMMAC_CHAN0));
 }
 
 int dwmac4_dma_interrupt(void __iomem *ioaddr,
-			 struct stmmac_extra_stats *x, u32 chan)
+			 struct stmmac_extra_stats *x)
 {
 	int ret = 0;
 
-	u32 intr_status = readl(ioaddr + DMA_CHAN_STATUS(chan));
+	u32 intr_status = readl(ioaddr + DMA_CHAN_STATUS(0));
 
 	/* ABNORMAL interrupts */
 	if (unlikely(intr_status & DMA_CHAN_STATUS_AIS)) {
@@ -153,7 +153,7 @@ int dwmac4_dma_interrupt(void __iomem *ioaddr,
 		if (likely(intr_status & DMA_CHAN_STATUS_RI)) {
 			u32 value;
 
-			value = readl(ioaddr + DMA_CHAN_INTR_ENA(chan));
+			value = readl(ioaddr + DMA_CHAN_INTR_ENA(STMMAC_CHAN0));
 			/* to schedule NAPI on real RIE event. */
 			if (likely(value & DMA_CHAN_INTR_ENA_RIE)) {
 				x->rx_normal_irq_n++;
@@ -172,7 +172,7 @@ int dwmac4_dma_interrupt(void __iomem *ioaddr,
 	 * status [21-0] expect reserved bits [5-3]
 	 */
 	writel((intr_status & 0x3fffc7),
-	       ioaddr + DMA_CHAN_STATUS(chan));
+	       ioaddr + DMA_CHAN_STATUS(STMMAC_CHAN0));
 
 	return ret;
 }

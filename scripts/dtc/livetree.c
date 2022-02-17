@@ -134,20 +134,6 @@ struct node *name_node(struct node *node, char *name)
 	return node;
 }
 
-struct node *omit_node_if_unused(struct node *node)
-{
-	node->omit_if_unused = 1;
-
-	return node;
-}
-
-struct node *reference_node(struct node *node)
-{
-	node->is_referenced = 1;
-
-	return node;
-}
-
 struct node *merge_nodes(struct node *old_node, struct node *new_node)
 {
 	struct property *new_prop, *old_prop;
@@ -230,7 +216,7 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 	return old_node;
 }
 
-struct node * add_orphan_node(struct node *dt, struct node *new_node, char *ref)
+void add_orphan_node(struct node *dt, struct node *new_node, char *ref)
 {
 	static unsigned int next_orphan_fragment = 0;
 	struct node *node;
@@ -238,16 +224,10 @@ struct node * add_orphan_node(struct node *dt, struct node *new_node, char *ref)
 	struct data d = empty_data;
 	char *name;
 
-	if (ref[0] == '/') {
-		d = data_append_data(d, ref, strlen(ref) + 1);
+	d = data_add_marker(d, REF_PHANDLE, ref);
+	d = data_append_integer(d, 0xffffffff, 32);
 
-		p = build_property("target-path", d);
-	} else {
-		d = data_add_marker(d, REF_PHANDLE, ref);
-		d = data_append_integer(d, 0xffffffff, 32);
-
-		p = build_property("target", d);
-	}
+	p = build_property("target", d);
 
 	xasprintf(&name, "fragment@%u",
 			next_orphan_fragment++);
@@ -256,7 +236,6 @@ struct node * add_orphan_node(struct node *dt, struct node *new_node, char *ref)
 	name_node(node, name);
 
 	add_child(dt, node);
-	return dt;
 }
 
 struct node *chain_node(struct node *first, struct node *list)
@@ -285,7 +264,7 @@ void delete_property_by_name(struct node *node, char *name)
 	struct property *prop = node->proplist;
 
 	while (prop) {
-		if (streq(prop->name, name)) {
+		if (!strcmp(prop->name, name)) {
 			delete_property(prop);
 			return;
 		}
@@ -318,7 +297,7 @@ void delete_node_by_name(struct node *parent, char *name)
 	struct node *node = parent->children;
 
 	while (node) {
-		if (streq(node->name, name)) {
+		if (!strcmp(node->name, name)) {
 			delete_node(node);
 			return;
 		}
@@ -362,8 +341,8 @@ struct reserve_info *build_reserve_entry(uint64_t address, uint64_t size)
 
 	memset(new, 0, sizeof(*new));
 
-	new->address = address;
-	new->size = size;
+	new->re.address = address;
+	new->re.size = size;
 
 	return new;
 }
@@ -436,13 +415,7 @@ struct property *get_property(struct node *node, const char *propname)
 cell_t propval_cell(struct property *prop)
 {
 	assert(prop->val.len == sizeof(cell_t));
-	return fdt32_to_cpu(*((fdt32_t *)prop->val.val));
-}
-
-cell_t propval_cell_n(struct property *prop, int n)
-{
-	assert(prop->val.len / sizeof(cell_t) >= n);
-	return fdt32_to_cpu(*((fdt32_t *)prop->val.val + n));
+	return fdt32_to_cpu(*((cell_t *)prop->val.val));
 }
 
 struct property *get_property_by_label(struct node *tree, const char *label,
@@ -527,8 +500,9 @@ struct node *get_node_by_path(struct node *tree, const char *path)
 	p = strchr(path, '/');
 
 	for_each_child(tree, child) {
-		if (p && (strlen(child->name) == p-path) &&
-		    strprefixeq(path, p - path, child->name))
+		if (p &&
+		    (strlen(child->name) == (p - path)) &&
+		    strneq(path, child->name, p-path))
 			return get_node_by_path(child, p+1);
 		else if (!p && streq(path, child->name))
 			return child;
@@ -561,10 +535,7 @@ struct node *get_node_by_phandle(struct node *tree, cell_t phandle)
 {
 	struct node *child, *node;
 
-	if ((phandle == 0) || (phandle == -1)) {
-		assert(generate_fixups);
-		return NULL;
-	}
+	assert((phandle != 0) && (phandle != -1));
 
 	if (tree->phandle == phandle) {
 		if (tree->deleted)
@@ -652,13 +623,13 @@ static int cmp_reserve_info(const void *ax, const void *bx)
 	a = *((const struct reserve_info * const *)ax);
 	b = *((const struct reserve_info * const *)bx);
 
-	if (a->address < b->address)
+	if (a->re.address < b->re.address)
 		return -1;
-	else if (a->address > b->address)
+	else if (a->re.address > b->re.address)
 		return 1;
-	else if (a->size < b->size)
+	else if (a->re.size < b->re.size)
 		return -1;
-	else if (a->size > b->size)
+	else if (a->re.size > b->re.size)
 		return 1;
 	else
 		return 0;
@@ -900,8 +871,6 @@ static void add_fixup_entry(struct dt_info *dti, struct node *fn,
 	xasprintf(&entry, "%s:%s:%u",
 			node->fullpath, prop->name, m->offset);
 	append_to_property(fn, m->ref, entry, strlen(entry) + 1);
-
-	free(entry);
 }
 
 static void generate_fixups_tree_internal(struct dt_info *dti,
@@ -955,7 +924,7 @@ static void add_local_fixup_entry(struct dt_info *dti,
 		struct node *refnode)
 {
 	struct node *wn, *nwn;	/* local fixup node, walk node, new */
-	fdt32_t value_32;
+	uint32_t value_32;
 	char **compp;
 	int i, depth;
 

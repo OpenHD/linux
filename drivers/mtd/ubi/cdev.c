@@ -367,10 +367,6 @@ static ssize_t vol_cdev_write(struct file *file, const char __user *buf,
 			return count;
 		}
 
-		/*
-		 * We voluntarily do not take into account the skip_check flag
-		 * as we want to make sure what we wrote was correctly written.
-		 */
 		err = ubi_check_volume(ubi, vol->vol_id);
 		if (err < 0)
 			return err;
@@ -626,13 +622,6 @@ static int verify_mkvol_req(const struct ubi_device *ubi,
 	    req->vol_type != UBI_STATIC_VOLUME)
 		goto bad;
 
-	if (req->flags & ~UBI_VOL_VALID_FLGS)
-		goto bad;
-
-	if (req->flags & UBI_VOL_SKIP_CRC_CHECK_FLG &&
-	    req->vol_type != UBI_STATIC_VOLUME)
-		goto bad;
-
 	if (req->alignment > ubi->leb_size)
 		goto bad;
 
@@ -868,7 +857,14 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
 			err = -EFAULT;
 			break;
 		}
-
+		if ((req.vol_id > 128) || (req.vol_id < 0)) {
+			pr_err("Invalid value of volume id %d\n", req.vol_id);
+			return -EINVAL;
+		}
+		if (req.name_len < 0) {
+			pr_err("Invalid value of name len %d\n", req.name_len);
+			return -EINVAL;
+		}
 		err = verify_mkvol_req(ubi, &req);
 		if (err)
 			break;

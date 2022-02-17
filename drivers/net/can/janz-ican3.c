@@ -1475,7 +1475,7 @@ static int ican3_napi(struct napi_struct *napi, int budget)
 	/* We have processed all packets that the adapter had, but it
 	 * was less than our budget, stop polling */
 	if (received < budget)
-		napi_complete_done(napi, received);
+		napi_complete(napi);
 
 	spin_lock_irqsave(&mod->lock, flags);
 
@@ -1684,7 +1684,7 @@ static int ican3_stop(struct net_device *ndev)
 	return 0;
 }
 
-static netdev_tx_t ican3_xmit(struct sk_buff *skb, struct net_device *ndev)
+static int ican3_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct ican3_dev *mod = netdev_priv(ndev);
 	struct can_frame *cf = (struct can_frame *)skb->data;
@@ -1865,9 +1865,9 @@ static ssize_t ican3_sysfs_show_fwinfo(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%s\n", mod->fwinfo);
 }
 
-static DEVICE_ATTR(termination, 0644, ican3_sysfs_show_term,
-		   ican3_sysfs_set_term);
-static DEVICE_ATTR(fwinfo, 0444, ican3_sysfs_show_fwinfo, NULL);
+static DEVICE_ATTR(termination, S_IWUSR | S_IRUGO, ican3_sysfs_show_term,
+						   ican3_sysfs_set_term);
+static DEVICE_ATTR(fwinfo, S_IRUSR | S_IRUGO, ican3_sysfs_show_fwinfo, NULL);
 
 static struct attribute *ican3_sysfs_attrs[] = {
 	&dev_attr_termination.attr,
@@ -1875,7 +1875,7 @@ static struct attribute *ican3_sysfs_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group ican3_sysfs_attr_group = {
+static struct attribute_group ican3_sysfs_attr_group = {
 	.attrs = ican3_sysfs_attrs,
 };
 

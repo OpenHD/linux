@@ -1,8 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vivid-core.c - A Virtual Video Test Driver, core initialization
  *
  * Copyright 2014 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *
+ * This program is free software; you may redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2 of the License.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #include <linux/module.h>
@@ -18,7 +30,6 @@
 #include <linux/videodev2.h>
 #include <linux/v4l2-dv-timings.h>
 #include <media/videobuf2-vmalloc.h>
-#include <media/videobuf2-dma-contig.h>
 #include <media/v4l2-dv-timings.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-fh.h>
@@ -91,12 +102,14 @@ MODULE_PARM_DESC(ccs_out_mode, " output crop/compose/scale mode:\n"
 			   "\t\t    bit 0=crop, 1=compose, 2=scale,\n"
 			   "\t\t    -1=user-controlled (default)");
 
-static unsigned multiplanar[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 1 };
+static unsigned
+multiplanar[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 2 };
 module_param_array(multiplanar, uint, NULL, 0444);
 MODULE_PARM_DESC(multiplanar, " 1 (default) creates a single planar device, 2 creates a multiplanar device.");
 
 /* Default: video + vbi-cap (raw and sliced) + radio rx + radio tx + sdr + vbi-out + vid-out */
-static unsigned node_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0x1d3d };
+/* Expose only video capture and video output nodes for the current test pipeline */
+static unsigned node_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0x0101 };
 module_param_array(node_types, uint, NULL, 0444);
 MODULE_PARM_DESC(node_types, " node types, default is 0x1d3d. Bitmask with the following meaning:\n"
 			     "\t\t    bit 0: Video Capture node\n"
@@ -109,24 +122,28 @@ MODULE_PARM_DESC(node_types, " node types, default is 0x1d3d. Bitmask with the f
 			     "\t\t    bit 16: Framebuffer for testing overlays");
 
 /* Default: 4 inputs */
-static unsigned num_inputs[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 4 };
+/* Force to have only one input for current test pipeline */
+static unsigned num_inputs[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 1 };
 module_param_array(num_inputs, uint, NULL, 0444);
 MODULE_PARM_DESC(num_inputs, " number of inputs, default is 4");
 
 /* Default: input 0 = WEBCAM, 1 = TV, 2 = SVID, 3 = HDMI */
-static unsigned input_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0xe4 };
+/* support only HDMI input type for current test pipeline */
+static unsigned input_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0x03 };
 module_param_array(input_types, uint, NULL, 0444);
 MODULE_PARM_DESC(input_types, " input types, default is 0xe4. Two bits per input,\n"
 			      "\t\t    bits 0-1 == input 0, bits 31-30 == input 15.\n"
 			      "\t\t    Type 0 == webcam, 1 == TV, 2 == S-Video, 3 == HDMI");
 
 /* Default: 2 outputs */
-static unsigned num_outputs[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 2 };
+/* Force to have only one output for current test pipeline */
+static unsigned num_outputs[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 1 };
 module_param_array(num_outputs, uint, NULL, 0444);
 MODULE_PARM_DESC(num_outputs, " number of outputs, default is 2");
 
 /* Default: output 0 = SVID, 1 = HDMI */
-static unsigned output_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 2 };
+/* support only HDMI output type for current test pipeline */
+static unsigned output_types[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0x01 };
 module_param_array(output_types, uint, NULL, 0444);
 MODULE_PARM_DESC(output_types, " output types, default is 0x02. One bit per output,\n"
 			      "\t\t    bit 0 == output 0, bit 15 == output 15.\n"
@@ -139,12 +156,6 @@ MODULE_PARM_DESC(vivid_debug, " activates debug info");
 static bool no_error_inj;
 module_param(no_error_inj, bool, 0444);
 MODULE_PARM_DESC(no_error_inj, " if set disable the error injecting controls");
-
-static unsigned int allocators[VIVID_MAX_DEVS] = { [0 ... (VIVID_MAX_DEVS - 1)] = 0 };
-module_param_array(allocators, uint, NULL, 0444);
-MODULE_PARM_DESC(allocators, " memory allocator selection, default is 0.\n"
-			     "\t\t    0 == vmalloc\n"
-			     "\t\t    1 == dma-contig");
 
 static struct vivid_dev *vivid_devs[VIVID_MAX_DEVS];
 
@@ -178,7 +189,7 @@ static const u8 vivid_hdmi_edid[256] = {
 	0x5e, 0x5d, 0x10, 0x1f, 0x04, 0x13, 0x22, 0x21,
 	0x20, 0x05, 0x14, 0x02, 0x11, 0x01, 0x23, 0x09,
 	0x07, 0x07, 0x83, 0x01, 0x00, 0x00, 0x6d, 0x03,
-	0x0c, 0x00, 0x10, 0x00, 0x00, 0x3c, 0x21, 0x00,
+	0x0c, 0x00, 0x10, 0x00, 0x00, 0x78, 0x21, 0x00,
 	0x60, 0x01, 0x02, 0x03, 0x67, 0xd8, 0x5d, 0xc4,
 	0x01, 0x78, 0x00, 0x00, 0xe2, 0x00, 0xea, 0xe3,
 	0x05, 0x00, 0x00, 0xe3, 0x06, 0x01, 0x00, 0x4d,
@@ -189,7 +200,7 @@ static const u8 vivid_hdmi_edid[256] = {
 	0x00, 0x00, 0x1a, 0x1a, 0x1d, 0x00, 0x80, 0x51,
 	0xd0, 0x1c, 0x20, 0x40, 0x80, 0x35, 0x00, 0xc0,
 	0x1c, 0x32, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x27,
 };
 
 static int vidioc_querycap(struct file *file, void  *priv,
@@ -198,7 +209,8 @@ static int vidioc_querycap(struct file *file, void  *priv,
 	struct vivid_dev *dev = video_drvdata(file);
 
 	strcpy(cap->driver, "vivid");
-	strcpy(cap->card, "vivid");
+	snprintf(cap->card, sizeof(cap->card),
+			"%s", dev->v4l2_dev.name);
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 			"platform:%s", dev->v4l2_dev.name);
 
@@ -404,7 +416,7 @@ static ssize_t vivid_radio_write(struct file *file, const char __user *buf,
 	return vivid_radio_tx_write(file, buf, size, offset);
 }
 
-static __poll_t vivid_radio_poll(struct file *file, struct poll_table_struct *wait)
+static unsigned int vivid_radio_poll(struct file *file, struct poll_table_struct *wait)
 {
 	struct video_device *vdev = video_devdata(file);
 
@@ -627,14 +639,39 @@ static void vivid_dev_release(struct v4l2_device *v4l2_dev)
 	kfree(dev);
 }
 
+static int vivid_parse_dt(struct video_device *vfd, struct vivid_dev *dev)
+{
+	struct device_node *vivid_node = NULL;
+	struct device_node *node = NULL;
+	char temp_str[OF_MAX_STR_LEN];
+
+	vivid_node = of_find_node_by_name(NULL, "vivid-driver");
+	if (!vivid_node) {
+		dev_err(&vfd->dev, "%s:cannot find vivid node\n", __func__);
+		return -ENODATA;
+	}
+
+	snprintf(temp_str, sizeof(temp_str), "%s%d", "instance", dev->inst);
+	node = of_find_node_by_name(vivid_node, temp_str);
+	if (!node) {
+		dev_err(&vfd->dev, "%s:cannot find instance node\n", __func__);
+		return -ENODATA;
+	}
+
+	sensor_common_init_sensor_properties(&vfd->dev,
+		node, &dev->sensor_props);
+
+	v4l2_ctrl_s_ctrl(dev->ctrl_sensormodes, dev->sensor_props.num_modes);
+
+	vivid_update_sensorprops(dev);
+
+	return 0;
+}
+
 static int vivid_create_instance(struct platform_device *pdev, int inst)
 {
 	static const struct v4l2_dv_timings def_dv_timings =
 					V4L2_DV_BT_CEA_1280X720P60;
-	static const struct vb2_mem_ops * const vivid_mem_ops[2] = {
-		&vb2_vmalloc_memops,
-		&vb2_dma_contig_memops,
-	};
 	unsigned in_type_counter[4] = { 0, 0, 0, 0 };
 	unsigned out_type_counter[4] = { 0, 0, 0, 0 };
 	int ccs_cap = ccs_cap_mode[inst];
@@ -645,7 +682,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 	struct video_device *vfd;
 	struct vb2_queue *q;
 	unsigned node_type = node_types[inst];
-	unsigned int allocator = allocators[inst];
 	v4l2_std_id tvnorms_cap = 0, tvnorms_out = 0;
 	int ret;
 	int i;
@@ -844,10 +880,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 	tpg_init(&dev->tpg, 640, 360);
 	if (tpg_alloc(&dev->tpg, MAX_ZOOM * MAX_WIDTH))
 		goto free_dev;
-	dev->scaled_line = vzalloc(array_size(MAX_WIDTH, MAX_ZOOM));
+	dev->scaled_line = vzalloc(MAX_ZOOM * MAX_WIDTH);
 	if (!dev->scaled_line)
 		goto free_dev;
-	dev->blended_line = vzalloc(array_size(MAX_WIDTH, MAX_ZOOM));
+	dev->blended_line = vzalloc(MAX_ZOOM * MAX_WIDTH);
 	if (!dev->blended_line)
 		goto free_dev;
 
@@ -859,9 +895,8 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 	/* create a string array containing the names of all the preset timings */
 	while (v4l2_dv_timings_presets[dev->query_dv_timings_size].bt.width)
 		dev->query_dv_timings_size++;
-	dev->query_dv_timings_qmenu = kmalloc_array(dev->query_dv_timings_size,
-						    (sizeof(void *) + 32),
-						    GFP_KERNEL);
+	dev->query_dv_timings_qmenu = kmalloc(dev->query_dv_timings_size *
+					   (sizeof(void *) + 32), GFP_KERNEL);
 	if (dev->query_dv_timings_qmenu == NULL)
 		goto free_dev;
 	for (i = 0; i < dev->query_dv_timings_size; i++) {
@@ -955,9 +990,11 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 	dev->fmt_out = &vivid_formats[0];
 	if (!dev->multiplanar)
 		vivid_formats[0].data_offset[0] = 0;
+	dev->embedded_data_height = DEF_METADATA_HEIGHT;
+	dev->fmt_out_metadata_height = DEF_METADATA_HEIGHT;
 	dev->webcam_size_idx = 1;
 	dev->webcam_ival_idx = 3;
-	tpg_s_fourcc(&dev->tpg, dev->fmt_cap->fourcc);
+	tpg_s_fourcc(&dev->tpg, dev->fmt_cap->fourcc, DEF_METADATA_HEIGHT);
 	dev->std_cap = V4L2_STD_PAL;
 	dev->std_out = V4L2_STD_PAL;
 	if (dev->input_type[0] == TV || dev->input_type[0] == SVID)
@@ -984,7 +1021,12 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 
 	dev->edid_max_blocks = dev->edid_blocks = 2;
 	memcpy(dev->edid, vivid_hdmi_edid, sizeof(vivid_hdmi_edid));
-	dev->radio_rds_init_time = ktime_get();
+	ktime_get_ts(&dev->radio_rds_init_ts);
+
+	/* initialize locks */
+	spin_lock_init(&dev->slock);
+	mutex_init(&dev->mutex);
+	mutex_init(&dev->mutex_framerate);
 
 	/* create all controls */
 	ret = vivid_create_controls(dev, ccs_cap == -1, ccs_out == -1, no_error_inj,
@@ -1016,10 +1058,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 	dev->fb_cap.fmt.bytesperline = dev->src_rect.width * tpg_g_twopixelsize(&dev->tpg, 0) / 2;
 	dev->fb_cap.fmt.sizeimage = dev->src_rect.height * dev->fb_cap.fmt.bytesperline;
 
-	/* initialize locks */
-	spin_lock_init(&dev->slock);
-	mutex_init(&dev->mutex);
-
 	/* init dma queues */
 	INIT_LIST_HEAD(&dev->vid_cap_active);
 	INIT_LIST_HEAD(&dev->vid_out_active);
@@ -1040,11 +1078,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		goto unreg_dev;
 	}
 
-	if (allocator == 1)
-		dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-	else if (allocator >= ARRAY_SIZE(vivid_mem_ops))
-		allocator = 0;
-
 	/* start creating the vb2 queues */
 	if (dev->has_vid_cap) {
 		/* initialize vid_cap queue */
@@ -1055,12 +1088,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		q->drv_priv = dev;
 		q->buf_struct_size = sizeof(struct vivid_buffer);
 		q->ops = &vivid_vid_cap_qops;
-		q->mem_ops = vivid_mem_ops[allocator];
+		q->mem_ops = &vb2_vmalloc_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->min_buffers_needed = 2;
 		q->lock = &dev->mutex;
-		q->dev = dev->v4l2_dev.dev;
-		q->supports_requests = true;
 
 		ret = vb2_queue_init(q);
 		if (ret)
@@ -1076,12 +1107,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		q->drv_priv = dev;
 		q->buf_struct_size = sizeof(struct vivid_buffer);
 		q->ops = &vivid_vid_out_qops;
-		q->mem_ops = vivid_mem_ops[allocator];
+		q->mem_ops = &vb2_vmalloc_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->min_buffers_needed = 2;
 		q->lock = &dev->mutex;
-		q->dev = dev->v4l2_dev.dev;
-		q->supports_requests = true;
 
 		ret = vb2_queue_init(q);
 		if (ret)
@@ -1097,12 +1126,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		q->drv_priv = dev;
 		q->buf_struct_size = sizeof(struct vivid_buffer);
 		q->ops = &vivid_vbi_cap_qops;
-		q->mem_ops = vivid_mem_ops[allocator];
+		q->mem_ops = &vb2_vmalloc_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->min_buffers_needed = 2;
 		q->lock = &dev->mutex;
-		q->dev = dev->v4l2_dev.dev;
-		q->supports_requests = true;
 
 		ret = vb2_queue_init(q);
 		if (ret)
@@ -1118,12 +1145,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		q->drv_priv = dev;
 		q->buf_struct_size = sizeof(struct vivid_buffer);
 		q->ops = &vivid_vbi_out_qops;
-		q->mem_ops = vivid_mem_ops[allocator];
+		q->mem_ops = &vb2_vmalloc_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->min_buffers_needed = 2;
 		q->lock = &dev->mutex;
-		q->dev = dev->v4l2_dev.dev;
-		q->supports_requests = true;
 
 		ret = vb2_queue_init(q);
 		if (ret)
@@ -1138,12 +1163,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		q->drv_priv = dev;
 		q->buf_struct_size = sizeof(struct vivid_buffer);
 		q->ops = &vivid_sdr_cap_qops;
-		q->mem_ops = vivid_mem_ops[allocator];
+		q->mem_ops = &vb2_vmalloc_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->min_buffers_needed = 8;
 		q->lock = &dev->mutex;
-		q->dev = dev->v4l2_dev.dev;
-		q->supports_requests = true;
 
 		ret = vb2_queue_init(q);
 		if (ret)
@@ -1183,20 +1206,20 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		if (in_type_counter[HDMI]) {
 			struct cec_adapter *adap;
 
-			adap = vivid_cec_alloc_adap(dev, 0, false);
+			adap = vivid_cec_alloc_adap(dev, 0, &pdev->dev, false);
 			ret = PTR_ERR_OR_ZERO(adap);
 			if (ret < 0)
 				goto unreg_dev;
 			dev->cec_rx_adap = adap;
-			ret = cec_register_adapter(adap, &pdev->dev);
+			ret = cec_register_adapter(adap);
 			if (ret < 0) {
 				cec_delete_adapter(adap);
 				dev->cec_rx_adap = NULL;
 				goto unreg_dev;
 			}
 			cec_s_phys_addr(adap, 0, false);
-			v4l2_info(&dev->v4l2_dev, "CEC adapter %s registered for HDMI input 0\n",
-				  dev_name(&adap->devnode.dev));
+			v4l2_info(&dev->v4l2_dev, "CEC adapter %s registered for HDMI input %d\n",
+				  dev_name(&adap->devnode.dev), i);
 		}
 #endif
 
@@ -1205,6 +1228,10 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 			goto unreg_dev;
 		v4l2_info(&dev->v4l2_dev, "V4L2 capture device registered as %s\n",
 					  video_device_node_name(vfd));
+
+		ret = vivid_parse_dt(vfd, dev);
+		if (ret < 0)
+			goto unreg_dev;
 	}
 
 	if (dev->has_vid_out) {
@@ -1238,24 +1265,25 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 			if (dev->output_type[i] != HDMI)
 				continue;
 			dev->cec_output2bus_map[i] = bus_cnt;
-			adap = vivid_cec_alloc_adap(dev, bus_cnt, true);
+			adap = vivid_cec_alloc_adap(dev, bus_cnt,
+						     &pdev->dev, true);
 			ret = PTR_ERR_OR_ZERO(adap);
 			if (ret < 0)
 				goto unreg_dev;
 			dev->cec_tx_adap[bus_cnt] = adap;
-			ret = cec_register_adapter(adap, &pdev->dev);
+			ret = cec_register_adapter(adap);
 			if (ret < 0) {
 				cec_delete_adapter(adap);
 				dev->cec_tx_adap[bus_cnt] = NULL;
 				goto unreg_dev;
 			}
-			v4l2_info(&dev->v4l2_dev, "CEC adapter %s registered for HDMI output %d\n",
-				  dev_name(&adap->devnode.dev), bus_cnt);
 			bus_cnt++;
 			if (bus_cnt <= out_type_counter[HDMI])
 				cec_s_phys_addr(adap, bus_cnt << 12, false);
 			else
 				cec_s_phys_addr(adap, 0x1000, false);
+			v4l2_info(&dev->v4l2_dev, "CEC adapter %s registered for HDMI output %d\n",
+				  dev_name(&adap->devnode.dev), i);
 		}
 #endif
 

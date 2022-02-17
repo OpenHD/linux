@@ -33,7 +33,7 @@
 #include "smsc95xx.h"
 
 #define SMSC_CHIPNAME			"smsc95xx"
-#define SMSC_DRIVER_VERSION		"1.0.6"
+#define SMSC_DRIVER_VERSION		"1.0.5"
 #define HS_USB_PKT_SIZE			(512)
 #define FS_USB_PKT_SIZE			(64)
 #define DEFAULT_HS_BURST_CAP_SIZE	(16 * 1024 + 5 * HS_USB_PKT_SIZE)
@@ -60,7 +60,6 @@
 #define SUSPEND_SUSPEND3		(0x08)
 #define SUSPEND_ALLMODES		(SUSPEND_SUSPEND0 | SUSPEND_SUSPEND1 | \
 					 SUSPEND_SUSPEND2 | SUSPEND_SUSPEND3)
-#define MAC_ADDR_LEN                    (6)
 
 #define CARRIER_CHECK_DELAY (2 * HZ)
 
@@ -82,18 +81,6 @@ struct smsc95xx_priv {
 static bool turbo_mode = true;
 module_param(turbo_mode, bool, 0644);
 MODULE_PARM_DESC(turbo_mode, "Enable multiple frames per Rx transaction");
-
-static bool truesize_mode = false;
-module_param(truesize_mode, bool, 0644);
-MODULE_PARM_DESC(truesize_mode, "Report larger truesize value");
-
-static int packetsize = 2560;
-module_param(packetsize, int, 0644);
-MODULE_PARM_DESC(packetsize, "Override the RX URB packet size");
-
-static char *macaddr = ":";
-module_param(macaddr, charp, 0);
-MODULE_PARM_DESC(macaddr, "MAC address");
 
 static int __must_check __smsc95xx_read_reg(struct usbnet *dev, u32 index,
 					    u32 *data, int in_pm)
@@ -539,7 +526,7 @@ static void smsc95xx_set_multicast(struct net_device *netdev)
 static int smsc95xx_phy_update_flowcontrol(struct usbnet *dev, u8 duplex,
 					   u16 lcladv, u16 rmtadv)
 {
-	u32 flow = 0, afc_cfg;
+	u32 flow, afc_cfg = 0;
 
 	int ret = smsc95xx_read_reg(dev, AFC_CFG, &afc_cfg);
 	if (ret < 0)
@@ -550,19 +537,20 @@ static int smsc95xx_phy_update_flowcontrol(struct usbnet *dev, u8 duplex,
 
 		if (cap & FLOW_CTRL_RX)
 			flow = 0xFFFF0002;
+		else
+			flow = 0;
 
-		if (cap & FLOW_CTRL_TX) {
+		if (cap & FLOW_CTRL_TX)
 			afc_cfg |= 0xF;
-			flow |= 0xFFFF0000;
-		} else {
+		else
 			afc_cfg &= ~0xF;
-		}
 
 		netif_dbg(dev, link, dev->net, "rx pause %s, tx pause %s\n",
 				   cap & FLOW_CTRL_RX ? "enabled" : "disabled",
 				   cap & FLOW_CTRL_TX ? "enabled" : "disabled");
 	} else {
 		netif_dbg(dev, link, dev->net, "half duplex\n");
+		flow = 0;
 		afc_cfg |= 0xF;
 	}
 
@@ -693,7 +681,7 @@ static int smsc95xx_set_features(struct net_device *netdev,
 	if (ret < 0)
 		return ret;
 
-	if (features & NETIF_F_IP_CSUM)
+	if (features & NETIF_F_HW_CSUM)
 		read_buf |= Tx_COE_EN_;
 	else
 		read_buf &= ~Tx_COE_EN_;
@@ -868,32 +856,32 @@ static void set_mdix_status(struct net_device *net, __u8 mdix_ctrl)
 	pdata->mdix_ctrl = mdix_ctrl;
 }
 
-static int smsc95xx_get_link_ksettings(struct net_device *net,
-				       struct ethtool_link_ksettings *cmd)
+static int smsc95xx_get_settings(struct net_device *net,
+				 struct ethtool_cmd *cmd)
 {
 	struct usbnet *dev = netdev_priv(net);
 	struct smsc95xx_priv *pdata = (struct smsc95xx_priv *)(dev->data[0]);
 	int retval;
 
-	retval = usbnet_get_link_ksettings(net, cmd);
+	retval = usbnet_get_settings(net, cmd);
 
-	cmd->base.eth_tp_mdix = pdata->mdix_ctrl;
-	cmd->base.eth_tp_mdix_ctrl = pdata->mdix_ctrl;
+	cmd->eth_tp_mdix = pdata->mdix_ctrl;
+	cmd->eth_tp_mdix_ctrl = pdata->mdix_ctrl;
 
 	return retval;
 }
 
-static int smsc95xx_set_link_ksettings(struct net_device *net,
-				       const struct ethtool_link_ksettings *cmd)
+static int smsc95xx_set_settings(struct net_device *net,
+				 struct ethtool_cmd *cmd)
 {
 	struct usbnet *dev = netdev_priv(net);
 	struct smsc95xx_priv *pdata = (struct smsc95xx_priv *)(dev->data[0]);
 	int retval;
 
-	if (pdata->mdix_ctrl != cmd->base.eth_tp_mdix_ctrl)
-		set_mdix_status(net, cmd->base.eth_tp_mdix_ctrl);
+	if (pdata->mdix_ctrl != cmd->eth_tp_mdix_ctrl)
+		set_mdix_status(net, cmd->eth_tp_mdix_ctrl);
 
-	retval = usbnet_set_link_ksettings(net, cmd);
+	retval = usbnet_set_settings(net, cmd);
 
 	return retval;
 }
@@ -904,6 +892,8 @@ static const struct ethtool_ops smsc95xx_ethtool_ops = {
 	.get_drvinfo	= usbnet_get_drvinfo,
 	.get_msglevel	= usbnet_get_msglevel,
 	.set_msglevel	= usbnet_set_msglevel,
+	.get_settings	= smsc95xx_get_settings,
+	.set_settings	= smsc95xx_set_settings,
 	.get_eeprom_len	= smsc95xx_ethtool_get_eeprom_len,
 	.get_eeprom	= smsc95xx_ethtool_get_eeprom,
 	.set_eeprom	= smsc95xx_ethtool_set_eeprom,
@@ -911,9 +901,6 @@ static const struct ethtool_ops smsc95xx_ethtool_ops = {
 	.get_regs	= smsc95xx_ethtool_getregs,
 	.get_wol	= smsc95xx_ethtool_get_wol,
 	.set_wol	= smsc95xx_ethtool_set_wol,
-	.get_link_ksettings	= smsc95xx_get_link_ksettings,
-	.set_link_ksettings	= smsc95xx_set_link_ksettings,
-	.get_ts_info	= ethtool_op_get_ts_info,
 };
 
 static int smsc95xx_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
@@ -924,53 +911,6 @@ static int smsc95xx_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 		return -EINVAL;
 
 	return generic_mii_ioctl(&dev->mii, if_mii(rq), cmd, NULL);
-}
-
-/* Check the macaddr module parameter for a MAC address */
-static int smsc95xx_is_macaddr_param(struct usbnet *dev, u8 *dev_mac)
-{
-       int i, j, got_num, num;
-       u8 mtbl[MAC_ADDR_LEN];
-
-       if (macaddr[0] == ':')
-               return 0;
-
-       i = 0;
-       j = 0;
-       num = 0;
-       got_num = 0;
-       while (j < MAC_ADDR_LEN) {
-               if (macaddr[i] && macaddr[i] != ':') {
-                       got_num++;
-                       if ('0' <= macaddr[i] && macaddr[i] <= '9')
-                               num = num * 16 + macaddr[i] - '0';
-                       else if ('A' <= macaddr[i] && macaddr[i] <= 'F')
-                               num = num * 16 + 10 + macaddr[i] - 'A';
-                       else if ('a' <= macaddr[i] && macaddr[i] <= 'f')
-                               num = num * 16 + 10 + macaddr[i] - 'a';
-                       else
-                               break;
-                       i++;
-               } else if (got_num == 2) {
-                       mtbl[j++] = (u8) num;
-                       num = 0;
-                       got_num = 0;
-                       i++;
-               } else {
-                       break;
-               }
-       }
-
-       if (j == MAC_ADDR_LEN) {
-               netif_dbg(dev, ifup, dev->net, "Overriding MAC address with: "
-               "%02x:%02x:%02x:%02x:%02x:%02x\n", mtbl[0], mtbl[1], mtbl[2],
-                                               mtbl[3], mtbl[4], mtbl[5]);
-               for (i = 0; i < MAC_ADDR_LEN; i++)
-                       dev_mac[i] = mtbl[i];
-               return 1;
-       } else {
-               return 0;
-       }
 }
 
 static void smsc95xx_init_mac_address(struct usbnet *dev)
@@ -993,10 +933,6 @@ static void smsc95xx_init_mac_address(struct usbnet *dev)
 			return;
 		}
 	}
-
-	/* Check module parameters */
-	if (smsc95xx_is_macaddr_param(dev, dev->net->dev_addr))
-		return;
 
 	/* no useful static MAC address found. generate a random one */
 	eth_hw_addr_random(dev->net);
@@ -1169,13 +1105,13 @@ static int smsc95xx_reset(struct usbnet *dev)
 
 	if (!turbo_mode) {
 		burst_cap = 0;
-		dev->rx_urb_size = packetsize ? packetsize : MAX_SINGLE_PACKET_SIZE;
+		dev->rx_urb_size = MAX_SINGLE_PACKET_SIZE;
 	} else if (dev->udev->speed == USB_SPEED_HIGH) {
-		dev->rx_urb_size = packetsize ? packetsize : DEFAULT_HS_BURST_CAP_SIZE;
-		burst_cap = dev->rx_urb_size / HS_USB_PKT_SIZE;
+		burst_cap = DEFAULT_HS_BURST_CAP_SIZE / HS_USB_PKT_SIZE;
+		dev->rx_urb_size = DEFAULT_HS_BURST_CAP_SIZE;
 	} else {
-		dev->rx_urb_size = packetsize ? packetsize : DEFAULT_FS_BURST_CAP_SIZE;
-		burst_cap = dev->rx_urb_size / FS_USB_PKT_SIZE;
+		burst_cap = DEFAULT_FS_BURST_CAP_SIZE / FS_USB_PKT_SIZE;
+		dev->rx_urb_size = DEFAULT_FS_BURST_CAP_SIZE;
 	}
 
 	netif_dbg(dev, ifup, dev->net, "rx_urb_size=%ld\n",
@@ -1315,7 +1251,6 @@ static const struct net_device_ops smsc95xx_netdev_ops = {
 	.ndo_start_xmit		= usbnet_start_xmit,
 	.ndo_tx_timeout		= usbnet_tx_timeout,
 	.ndo_change_mtu		= usbnet_change_mtu,
-	.ndo_get_stats64	= usbnet_get_stats64,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl 		= smsc95xx_ioctl,
@@ -1346,30 +1281,25 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 
 	spin_lock_init(&pdata->mac_cr_lock);
 
-	/* LAN95xx devices do not alter the computed checksum of 0 to 0xffff.
-	 * RFC 2460, ipv6 UDP calculated checksum yields a result of zero must
-	 * be changed to 0xffff. RFC 768, ipv4 UDP computed checksum is zero,
-	 * it is transmitted as all ones. The zero transmitted checksum means
-	 * transmitter generated no checksum. Hence, enable csum offload only
-	 * for ipv4 packets.
-	 */
 	if (DEFAULT_TX_CSUM_ENABLE)
-		dev->net->features |= NETIF_F_IP_CSUM;
+		dev->net->features |= NETIF_F_HW_CSUM;
 	if (DEFAULT_RX_CSUM_ENABLE)
 		dev->net->features |= NETIF_F_RXCSUM;
 
-	dev->net->hw_features = NETIF_F_IP_CSUM | NETIF_F_RXCSUM;
-	set_bit(EVENT_NO_IP_ALIGN, &dev->flags);
+	dev->net->hw_features = NETIF_F_HW_CSUM | NETIF_F_RXCSUM;
 
 	smsc95xx_init_mac_address(dev);
 
 	/* Init all registers */
 	ret = smsc95xx_reset(dev);
+	if (ret)
+		goto free_pdata;
 
 	/* detect device revision as different features may be available */
 	ret = smsc95xx_read_reg(dev, ID_REV, &val);
 	if (ret < 0)
-		return ret;
+		goto free_pdata;
+
 	val >>= 16;
 	pdata->chip_id = val;
 	pdata->mdix_ctrl = get_mdix_status(dev->net);
@@ -1386,8 +1316,6 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->net->ethtool_ops = &smsc95xx_ethtool_ops;
 	dev->net->flags |= IFF_MULTICAST;
 	dev->net->hard_header_len += SMSC95XX_TX_OVERHEAD_CSUM;
-	dev->net->min_mtu = ETH_MIN_MTU;
-	dev->net->max_mtu = ETH_DATA_LEN;
 	dev->hard_mtu = dev->net->mtu + dev->net->hard_header_len;
 
 	pdata->dev = dev;
@@ -1395,6 +1323,10 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	schedule_delayed_work(&pdata->carrier_check, CARRIER_CHECK_DELAY);
 
 	return 0;
+
+free_pdata:
+	kfree(pdata);
+	return ret;
 }
 
 static void smsc95xx_unbind(struct usbnet *dev, struct usb_interface *intf)
@@ -1402,7 +1334,7 @@ static void smsc95xx_unbind(struct usbnet *dev, struct usb_interface *intf)
 	struct smsc95xx_priv *pdata = (struct smsc95xx_priv *)(dev->data[0]);
 
 	if (pdata) {
-		cancel_delayed_work(&pdata->carrier_check);
+		cancel_delayed_work_sync(&pdata->carrier_check);
 		netif_dbg(dev, ifdown, dev->net, "free pdata\n");
 		kfree(pdata);
 		pdata = NULL;
@@ -1576,7 +1508,7 @@ static int smsc95xx_enter_suspend3(struct usbnet *dev)
 	if (ret < 0)
 		return ret;
 
-	if (val & RX_FIFO_INF_USED_) {
+	if (val & 0xFFFF) {
 		netdev_info(dev->net, "rx fifo not empty in autosuspend\n");
 		return -EBUSY;
 	}
@@ -1733,7 +1665,7 @@ static int smsc95xx_suspend(struct usb_interface *intf, pm_message_t message)
 	}
 
 	if (pdata->wolopts & (WAKE_BCAST | WAKE_MCAST | WAKE_ARP | WAKE_UCAST)) {
-		u32 *filter_mask = kcalloc(32, sizeof(u32), GFP_KERNEL);
+		u32 *filter_mask = kzalloc(sizeof(u32) * 32, GFP_KERNEL);
 		u32 command[2];
 		u32 offset[2];
 		u32 crc[4];
@@ -2036,8 +1968,7 @@ static int smsc95xx_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 				if (dev->net->features & NETIF_F_RXCSUM)
 					smsc95xx_rx_csum_offload(skb);
 				skb_trim(skb, skb->len - 4); /* remove fcs */
-				if (truesize_mode)
-					skb->truesize = size + sizeof(struct sk_buff);
+				skb->truesize = size + sizeof(struct sk_buff);
 
 				return 1;
 			}
@@ -2055,8 +1986,7 @@ static int smsc95xx_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 			if (dev->net->features & NETIF_F_RXCSUM)
 				smsc95xx_rx_csum_offload(ax_skb);
 			skb_trim(ax_skb, ax_skb->len - 4); /* remove fcs */
-			if (truesize_mode)
-				ax_skb->truesize = size + sizeof(struct sk_buff);
+			ax_skb->truesize = size + sizeof(struct sk_buff);
 
 			usbnet_skb_return(dev, ax_skb);
 		}

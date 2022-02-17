@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Written by Dave Hansen <dave.hansen@intel.com>
  */

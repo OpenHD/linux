@@ -15,7 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/poll.h>
 #include <linux/mutex.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "platform.h"
 #include "di_defs.h"
@@ -98,14 +98,14 @@ void diva_os_get_time(dword *sec, dword *usec)
 /*
  * device node operations
  */
-static __poll_t maint_poll(struct file *file, poll_table *wait)
+static unsigned int maint_poll(struct file *file, poll_table *wait)
 {
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 
 	poll_wait(file, &msgwaitq, wait);
-	mask = EPOLLOUT | EPOLLWRNORM;
+	mask = POLLOUT | POLLWRNORM;
 	if (file->private_data || diva_dbg_q_length()) {
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	}
 	return (mask);
 }

@@ -28,10 +28,13 @@ static const struct of_device_id omap_dt_match_table[] __initconst = {
 	{ }
 };
 
-static void __init __maybe_unused omap_generic_init(void)
+static void __init omap_generic_init(void)
 {
+	omapdss_early_init_of();
+
 	pdata_quirks_init(omap_dt_match_table);
-	omap_soc_device_init();
+
+	omapdss_init_of();
 }
 
 #ifdef CONFIG_SOC_OMAP2420
@@ -311,7 +314,6 @@ MACHINE_END
 
 #ifdef CONFIG_SOC_DRA7XX
 static const char *const dra74x_boards_compat[] __initconst = {
-	"ti,dra762",
 	"ti,am5728",
 	"ti,am5726",
 	"ti,dra742",
@@ -339,7 +341,6 @@ static const char *const dra72x_boards_compat[] __initconst = {
 	"ti,am5718",
 	"ti,am5716",
 	"ti,dra722",
-	"ti,dra718",
 	NULL,
 };
 

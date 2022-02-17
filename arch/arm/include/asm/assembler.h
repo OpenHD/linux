@@ -87,8 +87,6 @@
 #define CALGN(code...)
 #endif
 
-#define IMM12_MASK 0xfff
-
 /*
  * Enable and disable interrupts
  */

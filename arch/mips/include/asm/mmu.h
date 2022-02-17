@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_MMU_H
 #define __ASM_MMU_H
 
@@ -7,7 +6,7 @@
 #include <linux/wait.h>
 
 typedef struct {
-	u64 asid[NR_CPUS];
+	unsigned long asid[NR_CPUS];
 	void *vdso;
 	atomic_t fp_mode_switching;
 

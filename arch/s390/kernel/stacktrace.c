@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Stack trace management functions
  *
@@ -7,10 +6,9 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
 #include <linux/stacktrace.h>
 #include <linux/kallsyms.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 static int __save_address(void *data, unsigned long address, int nosched)
 {

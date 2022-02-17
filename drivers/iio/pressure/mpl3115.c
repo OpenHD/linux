@@ -82,9 +82,8 @@ static int mpl3115_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (iio_buffer_enabled(indio_dev))
+			return -EBUSY;
 
 		switch (chan->type) {
 		case IIO_PRESSURE: /* in 0.25 pascal / LSB */
@@ -92,39 +91,32 @@ static int mpl3115_read_raw(struct iio_dev *indio_dev,
 			ret = mpl3115_request(data);
 			if (ret < 0) {
 				mutex_unlock(&data->lock);
-				break;
+				return ret;
 			}
 			ret = i2c_smbus_read_i2c_block_data(data->client,
 				MPL3115_OUT_PRESS, 3, (u8 *) &tmp);
 			mutex_unlock(&data->lock);
 			if (ret < 0)
-				break;
+				return ret;
 			*val = be32_to_cpu(tmp) >> 12;
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		case IIO_TEMP: /* in 0.0625 celsius / LSB */
 			mutex_lock(&data->lock);
 			ret = mpl3115_request(data);
 			if (ret < 0) {
 				mutex_unlock(&data->lock);
-				break;
+				return ret;
 			}
 			ret = i2c_smbus_read_i2c_block_data(data->client,
 				MPL3115_OUT_TEMP, 2, (u8 *) &tmp);
 			mutex_unlock(&data->lock);
 			if (ret < 0)
-				break;
+				return ret;
 			*val = sign_extend32(be32_to_cpu(tmp) >> 20, 11);
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		default:
-			ret = -EINVAL;
-			break;
+			return -EINVAL;
 		}
-
-		iio_device_release_direct_mode(indio_dev);
-		return ret;
-
 	case IIO_CHAN_INFO_SCALE:
 		switch (chan->type) {
 		case IIO_PRESSURE:
@@ -147,7 +139,14 @@ static irqreturn_t mpl3115_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct mpl3115_data *data = iio_priv(indio_dev);
-	u8 buffer[16]; /* 32-bit channel + 16-bit channel + padding + ts */
+	/*
+	 * 32-bit channel + 16-bit channel + padding + ts
+	 * Note that it is possible for only one of the first 2
+	 * channels to be enabled. If that happens, the first element
+	 * of the buffer may be either 16 or 32-bits.  As such we cannot
+	 * use a simple structure definition to express this data layout.
+	 */
+	u8 buffer[16] __aligned(8);
 	int ret, pos = 0;
 
 	mutex_lock(&data->lock);
@@ -218,6 +217,7 @@ static const struct iio_chan_spec mpl3115_channels[] = {
 
 static const struct iio_info mpl3115_info = {
 	.read_raw = &mpl3115_read_raw,
+	.driver_module = THIS_MODULE,
 };
 
 static int mpl3115_probe(struct i2c_client *client,
@@ -320,16 +320,9 @@ static const struct i2c_device_id mpl3115_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, mpl3115_id);
 
-static const struct of_device_id mpl3115_of_match[] = {
-	{ .compatible = "fsl,mpl3115" },
-	{ }
-};
-MODULE_DEVICE_TABLE(of, mpl3115_of_match);
-
 static struct i2c_driver mpl3115_driver = {
 	.driver = {
 		.name	= "mpl3115",
-		.of_match_table = mpl3115_of_match,
 		.pm	= MPL3115_PM_OPS,
 	},
 	.probe = mpl3115_probe,

@@ -4,11 +4,10 @@
 
 #include <asm/alternative-asm.h>
 #include <asm/asm-offsets.h>
-#include <asm/dwarf.h>
 
 #ifdef __ASSEMBLY__
 
-#ifdef CC_USING_EXPOLINE
+#ifdef CONFIG_EXPOLINE
 
 _LC_BR_R1 = __LC_BR_R1
 
@@ -23,11 +22,11 @@ _LC_BR_R1 = __LC_BR_R1
 	.hidden \name
 	.type \name,@function
 \name:
-	CFI_STARTPROC
+	.cfi_startproc
 	.endm
 
 	.macro __THUNK_EPILOG
-	CFI_ENDPROC
+	.cfi_endproc
 	.popsection
 	.endm
 
@@ -189,7 +188,7 @@ _LC_BR_R1 = __LC_BR_R1
 	.macro BASR_EX rsave,rtarget,ruse=%r1
 	basr	\rsave,\rtarget
 	.endm
-#endif /* CC_USING_EXPOLINE */
+#endif
 
 #endif /* __ASSEMBLY__ */
 

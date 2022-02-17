@@ -1,9 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Copyright (c) 2006-2009 Victor Chukhantsev, Denis Grigoriev,
-// Copyright (c) 2007-2010 Vasily Khoruzhick
-//
-// based on smdk2440 written by Ben Dooks
+/*
+ * Copyright (c) 2006-2009 Victor Chukhantsev, Denis Grigoriev,
+ * Copyright (c) 2007-2010 Vasily Khoruzhick
+ *
+ * based on smdk2440 written by Ben Dooks
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+*/
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -606,7 +611,6 @@ static struct s3c2410_platform_nand rx1950_nand_info = {
 	.twrph1 = 15,
 	.nr_sets = ARRAY_SIZE(rx1950_nand_sets),
 	.sets = rx1950_nand_sets,
-	.ecc_mode = NAND_ECC_SOFT,
 };
 
 static struct s3c2410_udc_mach_info rx1950_udc_cfg __initdata = {

@@ -282,21 +282,8 @@ int mc13xxx_adc_do_conversion(struct mc13xxx *mc13xxx, unsigned int mode,
 	       MC13XXX_ADC0_CHRGRAWDIV;
 	adc1 = MC13XXX_ADC1_ADEN | MC13XXX_ADC1_ADTRIGIGN | MC13XXX_ADC1_ASC;
 
-	/*
-	 * Channels mapped through ADIN7:
-	 * 7  - General purpose ADIN7
-	 * 16 - UID
-	 * 17 - Die temperature
-	 */
-	if (channel > 7 && channel < 16) {
+	if (channel > 7)
 		adc1 |= MC13XXX_ADC1_ADSEL;
-	} else if (channel == 16) {
-		adc0 |= MC13XXX_ADC0_ADIN7SEL_UID;
-		channel = 7;
-	} else if (channel == 17) {
-		adc0 |= MC13XXX_ADC0_ADIN7SEL_DIE;
-		channel = 7;
-	}
 
 	switch (mode) {
 	case MC13XXX_ADC_MODE_TS:

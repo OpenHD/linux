@@ -270,8 +270,8 @@ static ssize_t get_fan(struct device *dev, struct device_attribute *devattr,
  * controlled.
  */
 
-static ssize_t fan1_target_show(struct device *dev,
-				struct device_attribute *devattr, char *buf)
+static ssize_t get_target(struct device *dev, struct device_attribute *devattr,
+			 char *buf)
 {
 	struct max6650_data *data = max6650_update_device(dev);
 	int kscale, ktach, rpm;
@@ -318,9 +318,8 @@ static int max6650_set_target(struct max6650_data *data, unsigned long rpm)
 					 data->speed);
 }
 
-static ssize_t fan1_target_store(struct device *dev,
-				 struct device_attribute *devattr,
-				 const char *buf, size_t count)
+static ssize_t set_target(struct device *dev, struct device_attribute *devattr,
+			 const char *buf, size_t count)
 {
 	struct max6650_data *data = dev_get_drvdata(dev);
 	unsigned long rpm;
@@ -351,8 +350,8 @@ static ssize_t fan1_target_store(struct device *dev,
  * back exactly the value you have set.
  */
 
-static ssize_t pwm1_show(struct device *dev, struct device_attribute *devattr,
-			 char *buf)
+static ssize_t get_pwm(struct device *dev, struct device_attribute *devattr,
+		       char *buf)
 {
 	int pwm;
 	struct max6650_data *data = max6650_update_device(dev);
@@ -372,9 +371,8 @@ static ssize_t pwm1_show(struct device *dev, struct device_attribute *devattr,
 	return sprintf(buf, "%d\n", pwm);
 }
 
-static ssize_t pwm1_store(struct device *dev,
-			  struct device_attribute *devattr, const char *buf,
-			  size_t count)
+static ssize_t set_pwm(struct device *dev, struct device_attribute *devattr,
+			const char *buf, size_t count)
 {
 	struct max6650_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
@@ -408,8 +406,8 @@ static ssize_t pwm1_store(struct device *dev,
  * 2 = Closed loop, RPM for all fans regulated by fan1 tachometer
  * 3 = Fan off
  */
-static ssize_t pwm1_enable_show(struct device *dev,
-				struct device_attribute *devattr, char *buf)
+static ssize_t get_enable(struct device *dev, struct device_attribute *devattr,
+			  char *buf)
 {
 	struct max6650_data *data = max6650_update_device(dev);
 	int mode = (data->config & MAX6650_CFG_MODE_MASK) >> 4;
@@ -418,9 +416,8 @@ static ssize_t pwm1_enable_show(struct device *dev,
 	return sprintf(buf, "%d\n", sysfs_modes[mode]);
 }
 
-static ssize_t pwm1_enable_store(struct device *dev,
-				 struct device_attribute *devattr,
-				 const char *buf, size_t count)
+static ssize_t set_enable(struct device *dev, struct device_attribute *devattr,
+			  const char *buf, size_t count)
 {
 	struct max6650_data *data = dev_get_drvdata(dev);
 	unsigned long mode;
@@ -461,17 +458,16 @@ static ssize_t pwm1_enable_store(struct device *dev,
  * defined for that. See the data sheet for details.
  */
 
-static ssize_t fan1_div_show(struct device *dev,
-			     struct device_attribute *devattr, char *buf)
+static ssize_t get_div(struct device *dev, struct device_attribute *devattr,
+		       char *buf)
 {
 	struct max6650_data *data = max6650_update_device(dev);
 
 	return sprintf(buf, "%d\n", DIV_FROM_REG(data->count));
 }
 
-static ssize_t fan1_div_store(struct device *dev,
-			      struct device_attribute *devattr,
-			      const char *buf, size_t count)
+static ssize_t set_div(struct device *dev, struct device_attribute *devattr,
+		       const char *buf, size_t count)
 {
 	struct max6650_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
@@ -538,10 +534,10 @@ static SENSOR_DEVICE_ATTR(fan1_input, S_IRUGO, get_fan, NULL, 0);
 static SENSOR_DEVICE_ATTR(fan2_input, S_IRUGO, get_fan, NULL, 1);
 static SENSOR_DEVICE_ATTR(fan3_input, S_IRUGO, get_fan, NULL, 2);
 static SENSOR_DEVICE_ATTR(fan4_input, S_IRUGO, get_fan, NULL, 3);
-static DEVICE_ATTR_RW(fan1_target);
-static DEVICE_ATTR_RW(fan1_div);
-static DEVICE_ATTR_RW(pwm1_enable);
-static DEVICE_ATTR_RW(pwm1);
+static DEVICE_ATTR(fan1_target, S_IWUSR | S_IRUGO, get_target, set_target);
+static DEVICE_ATTR(fan1_div, S_IWUSR | S_IRUGO, get_div, set_div);
+static DEVICE_ATTR(pwm1_enable, S_IWUSR | S_IRUGO, get_enable, set_enable);
+static DEVICE_ATTR(pwm1, S_IWUSR | S_IRUGO, get_pwm, set_pwm);
 static SENSOR_DEVICE_ATTR(fan1_max_alarm, S_IRUGO, get_alarm, NULL,
 			  MAX6650_ALRM_MAX);
 static SENSOR_DEVICE_ATTR(fan1_min_alarm, S_IRUGO, get_alarm, NULL,

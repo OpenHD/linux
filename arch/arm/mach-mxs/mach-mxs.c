@@ -419,8 +419,7 @@ static void __init mxs_machine_init(void)
 		crystalfontz_init();
 	else if (of_machine_is_compatible("eukrea,mbmx283lc"))
 		eukrea_mbmx283lc_init();
-	else if (of_machine_is_compatible("i2se,duckbill") ||
-		 of_machine_is_compatible("i2se,duckbill-2"))
+	else if (of_machine_is_compatible("i2se,duckbill"))
 		duckbill_init();
 	else if (of_machine_is_compatible("msr,m28cu3"))
 		m28cu3_init();

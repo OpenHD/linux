@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 menu "Device Drivers"
 
 source "drivers/amba/Kconfig"
@@ -8,8 +7,6 @@ source "drivers/base/Kconfig"
 source "drivers/bus/Kconfig"
 
 source "drivers/connector/Kconfig"
-
-source "drivers/gnss/Kconfig"
 
 source "drivers/mtd/Kconfig"
 
@@ -71,6 +68,8 @@ source "drivers/pinctrl/Kconfig"
 
 source "drivers/gpio/Kconfig"
 
+source "drivers/padctrl/Kconfig"
+
 source "drivers/w1/Kconfig"
 
 source "drivers/power/Kconfig"
@@ -106,6 +105,8 @@ source "drivers/mmc/Kconfig"
 source "drivers/memstick/Kconfig"
 
 source "drivers/leds/Kconfig"
+
+source "drivers/switch/Kconfig"
 
 source "drivers/accessibility/Kconfig"
 
@@ -155,8 +156,6 @@ source "drivers/remoteproc/Kconfig"
 
 source "drivers/rpmsg/Kconfig"
 
-source "drivers/soundwire/Kconfig"
-
 source "drivers/soc/Kconfig"
 
 source "drivers/devfreq/Kconfig"
@@ -201,22 +200,12 @@ source "drivers/dax/Kconfig"
 
 source "drivers/nvmem/Kconfig"
 
-source "drivers/hwtracing/Kconfig"
+source "drivers/hwtracing/stm/Kconfig"
+
+source "drivers/hwtracing/intel_th/Kconfig"
 
 source "drivers/fpga/Kconfig"
 
-source "drivers/fsi/Kconfig"
-
 source "drivers/tee/Kconfig"
-
-source "drivers/mux/Kconfig"
-
-source "drivers/opp/Kconfig"
-
-source "drivers/visorbus/Kconfig"
-
-source "drivers/siox/Kconfig"
-
-source "drivers/slimbus/Kconfig"
 
 endmenu

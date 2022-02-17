@@ -23,7 +23,7 @@
 #define _H_CIFS_DEBUG
 
 void cifs_dump_mem(char *label, void *data, int length);
-void cifs_dump_detail(void *buf, struct TCP_Server_Info *ptcp_info);
+void cifs_dump_detail(void *);
 void cifs_dump_mids(struct TCP_Server_Info *);
 extern bool traceSMB;		/* flag which enables the function below */
 void dump_smb(void *, int);
@@ -39,7 +39,6 @@ extern int cifsFYI;
 #else
 #define NOISY 0
 #endif
-#define ONCE 8
 
 /*
  *	debug ON
@@ -47,28 +46,19 @@ extern int cifsFYI;
  */
 #ifdef CONFIG_CIFS_DEBUG
 
-/* information message: e.g., configuration, major event */
-#define cifs_dbg_func(ratefunc, type, fmt, ...)			\
-do {								\
-	if ((type) & FYI && cifsFYI & CIFS_INFO) {		\
-		pr_debug_ ## ratefunc("%s: "			\
-				fmt, __FILE__, ##__VA_ARGS__);	\
-	} else if ((type) & VFS) {				\
-		pr_err_ ## ratefunc("CIFS VFS: "		\
-				 fmt, ##__VA_ARGS__);		\
-	} else if ((type) & NOISY && (NOISY != 0)) {		\
-		pr_debug_ ## ratefunc(fmt, ##__VA_ARGS__);	\
-	}							\
-} while (0)
+__printf(1, 2) void cifs_vfs_err(const char *fmt, ...);
 
-#define cifs_dbg(type, fmt, ...) \
-do {							\
-	if ((type) & ONCE)				\
-		cifs_dbg_func(once,			\
-			 type, fmt, ##__VA_ARGS__);	\
-	else						\
-		cifs_dbg_func(ratelimited,		\
-			type, fmt, ##__VA_ARGS__);	\
+/* information message: e.g., configuration, major event */
+#define cifs_dbg(type, fmt, ...)					\
+do {									\
+	if (type == FYI && cifsFYI & CIFS_INFO) {			\
+		printk(KERN_DEBUG "%s: "				\
+			    fmt, __FILE__, ##__VA_ARGS__);		\
+	} else if (type == VFS) {					\
+		cifs_vfs_err(fmt, ##__VA_ARGS__);			\
+	} else if (type == NOISY && type != 0) {			\
+		printk(KERN_DEBUG fmt, ##__VA_ARGS__);		\
+	}								\
 } while (0)
 
 /*
@@ -79,7 +69,7 @@ do {							\
 #define cifs_dbg(type, fmt, ...)					\
 do {									\
 	if (0)								\
-		pr_debug(fmt, ##__VA_ARGS__);				\
+		printk(KERN_DEBUG fmt, ##__VA_ARGS__);				\
 } while (0)
 #endif
 

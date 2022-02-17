@@ -1,8 +1,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
-#include <asm/cpu.h>
-
 #include "mce_amd.h"
 
 static struct amd_decoder_ops *fam_ops;
@@ -10,7 +8,7 @@ static struct amd_decoder_ops *fam_ops;
 static u8 xec_mask	 = 0xf;
 
 static bool report_gart_errors;
-static void (*decode_dram_ecc)(int node_id, struct mce *m);
+static void (*nb_bus_decoder)(int node_id, struct mce *m);
 
 void amd_report_gart_errors(bool v)
 {
@@ -20,16 +18,16 @@ EXPORT_SYMBOL_GPL(amd_report_gart_errors);
 
 void amd_register_ecc_decoder(void (*f)(int, struct mce *))
 {
-	decode_dram_ecc = f;
+	nb_bus_decoder = f;
 }
 EXPORT_SYMBOL_GPL(amd_register_ecc_decoder);
 
 void amd_unregister_ecc_decoder(void (*f)(int, struct mce *))
 {
-	if (decode_dram_ecc) {
-		WARN_ON(decode_dram_ecc != f);
+	if (nb_bus_decoder) {
+		WARN_ON(nb_bus_decoder != f);
 
-		decode_dram_ecc = NULL;
+		nb_bus_decoder = NULL;
 	}
 }
 EXPORT_SYMBOL_GPL(amd_unregister_ecc_decoder);
@@ -163,7 +161,7 @@ static const char * const smca_ls_mce_desc[] = {
 	"Sys Read data error thread 0",
 	"Sys read data error thread 1",
 	"DC tag error type 2",
-	"DC data error type 1 (poison consumption)",
+	"DC data error type 1 (poison comsumption)",
 	"DC data error type 2",
 	"DC data error type 3",
 	"DC tag error type 4",
@@ -746,7 +744,7 @@ static void decode_mc3_mce(struct mce *m)
 
 static void decode_mc4_mce(struct mce *m)
 {
-	unsigned int fam = x86_family(m->cpuid);
+	struct cpuinfo_x86 *c = &boot_cpu_data;
 	int node_id = amd_get_nb_id(m->extcpu);
 	u16 ec = EC(m->status);
 	u8 xec = XEC(m->status, 0x1f);
@@ -760,13 +758,13 @@ static void decode_mc4_mce(struct mce *m)
 		/* special handling for DRAM ECCs */
 		if (xec == 0x0 || xec == 0x8) {
 			/* no ECCs on F11h */
-			if (fam == 0x11)
+			if (c->x86 == 0x11)
 				goto wrong_mc4_mce;
 
 			pr_cont("%s.\n", mc4_mce_desc[xec]);
 
-			if (decode_dram_ecc)
-				decode_dram_ecc(node_id, m);
+			if (nb_bus_decoder)
+				nb_bus_decoder(node_id, m);
 			return;
 		}
 		break;
@@ -781,7 +779,7 @@ static void decode_mc4_mce(struct mce *m)
 		return;
 
 	case 0x19:
-		if (fam == 0x15 || fam == 0x16)
+		if (boot_cpu_data.x86 == 0x15 || boot_cpu_data.x86 == 0x16)
 			pr_cont("Compute Unit Data Error.\n");
 		else
 			goto wrong_mc4_mce;
@@ -804,11 +802,11 @@ static void decode_mc4_mce(struct mce *m)
 
 static void decode_mc5_mce(struct mce *m)
 {
-	unsigned int fam = x86_family(m->cpuid);
+	struct cpuinfo_x86 *c = &boot_cpu_data;
 	u16 ec = EC(m->status);
 	u8 xec = XEC(m->status, xec_mask);
 
-	if (fam == 0xf || fam == 0x11)
+	if (c->x86 == 0xf || c->x86 == 0x11)
 		goto wrong_mc5_mce;
 
 	pr_emerg(HW_ERR "MC5 Error: ");
@@ -851,40 +849,34 @@ static void decode_mc6_mce(struct mce *m)
 }
 
 /* Decode errors according to Scalable MCA specification */
-static void decode_smca_error(struct mce *m)
+static void decode_smca_errors(struct mce *m)
 {
-	struct smca_hwid *hwid;
-	enum smca_bank_types bank_type;
+	struct smca_hwid_mcatype *type;
+	unsigned int bank_type;
 	const char *ip_name;
 	u8 xec = XEC(m->status, xec_mask);
 
 	if (m->bank >= ARRAY_SIZE(smca_banks))
 		return;
 
-	hwid = smca_banks[m->bank].hwid;
-	if (!hwid)
+	if (boot_cpu_data.x86 >= 0x17 && m->bank == 4)
+		pr_emerg(HW_ERR "Bank 4 is reserved on Fam17h.\n");
+
+	type = smca_banks[m->bank].type;
+	if (!type)
 		return;
 
-	bank_type = hwid->bank_type;
-
-	if (bank_type == SMCA_RESERVED) {
-		pr_emerg(HW_ERR "Bank %d is reserved.\n", m->bank);
-		return;
-	}
-
-	ip_name = smca_get_long_name(bank_type);
+	bank_type = type->bank_type;
+	ip_name = smca_bank_names[bank_type].long_name;
 
 	pr_emerg(HW_ERR "%s Extended Error Code: %d\n", ip_name, xec);
 
 	/* Only print the decode of valid error codes */
 	if (xec < smca_mce_descs[bank_type].num_descs &&
-			(hwid->xec_bitmap & BIT_ULL(xec))) {
+			(type->xec_bitmap & BIT_ULL(xec))) {
 		pr_emerg(HW_ERR "%s Error: ", ip_name);
 		pr_cont("%s.\n", smca_mce_descs[bank_type].descs[xec]);
 	}
-
-	if (bank_type == SMCA_UMC && xec == 0 && decode_dram_ecc)
-		decode_dram_ecc(cpu_to_node(m->extcpu), m);
 }
 
 static inline void amd_decode_err_code(u16 ec)
@@ -916,10 +908,12 @@ static inline void amd_decode_err_code(u16 ec)
  */
 static bool amd_filter_mce(struct mce *m)
 {
+	u8 xec = (m->status >> 16) & 0x1f;
+
 	/*
 	 * NB GART TLB error reporting is disabled by default.
 	 */
-	if (m->bank == 4 && XEC(m->status, 0x1f) == 0x5 && !report_gart_errors)
+	if (m->bank == 4 && xec == 0x5 && !report_gart_errors)
 		return true;
 
 	return false;
@@ -936,16 +930,15 @@ static const char *decode_error_status(struct mce *m)
 	}
 
 	if (m->status & MCI_STATUS_DEFERRED)
-		return "Deferred error, no action required.";
+		return "Deferred error.";
 
 	return "Corrected error, no action required.";
 }
 
-static int
-amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
+int amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
 {
 	struct mce *m = (struct mce *)data;
-	unsigned int fam = x86_family(m->cpuid);
+	struct cpuinfo_x86 *c = &cpu_data(m->extcpu);
 	int ecc;
 
 	if (amd_filter_mce(m))
@@ -955,7 +948,7 @@ amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
 
 	pr_emerg(HW_ERR "CPU:%d (%x:%x:%x) MC%d_STATUS[%s|%s|%s|%s|%s",
 		m->extcpu,
-		fam, x86_model(m->cpuid), x86_stepping(m->cpuid),
+		c->x86, c->x86_model, c->x86_stepping,
 		m->bank,
 		((m->status & MCI_STATUS_OVER)	? "Over"  : "-"),
 		((m->status & MCI_STATUS_UC)	? "UE"	  :
@@ -964,13 +957,10 @@ amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
 		((m->status & MCI_STATUS_PCC)	? "PCC"	  : "-"),
 		((m->status & MCI_STATUS_ADDRV)	? "AddrV" : "-"));
 
-	if (fam >= 0x15) {
-		pr_cont("|%s", (m->status & MCI_STATUS_DEFERRED ? "Deferred" : "-"));
-
-		/* F15h, bank4, bit 43 is part of McaStatSubCache. */
-		if (fam != 0x15 || m->bank != 4)
-			pr_cont("|%s", (m->status & MCI_STATUS_POISON ? "Poison" : "-"));
-	}
+	if (c->x86 >= 0x15)
+		pr_cont("|%s|%s",
+			((m->status & MCI_STATUS_DEFERRED) ? "Deferred" : "-"),
+			((m->status & MCI_STATUS_POISON)   ? "Poison"   : "-"));
 
 	if (boot_cpu_has(X86_FEATURE_SMCA)) {
 		u32 low, high;
@@ -1001,12 +991,9 @@ amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
 
 		pr_cont("\n");
 
-		decode_smca_error(m);
+		decode_smca_errors(m);
 		goto err_code;
 	}
-
-	if (m->tsc)
-		pr_emerg(HW_ERR "TSC: %llu\n", m->tsc);
 
 	if (!fam_ops)
 		goto err_code;
@@ -1049,10 +1036,10 @@ amd_decode_mce(struct notifier_block *nb, unsigned long val, void *data)
 
 	return NOTIFY_STOP;
 }
+EXPORT_SYMBOL_GPL(amd_decode_mce);
 
 static struct notifier_block amd_mce_dec_nb = {
 	.notifier_call	= amd_decode_mce,
-	.priority	= MCE_PRIO_EDAC,
 };
 
 static int __init mce_amd_init(void)

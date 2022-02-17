@@ -7,6 +7,13 @@
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License.
+ *
+ *
+ * TODO
+ *  1. DMA
+ *  2. Power management
+ *  3. Handle MMC errors better
+ *
  */
 
 /*
@@ -60,6 +67,7 @@
 #include <linux/module.h>
 
 #define DRIVER_NAME	"sh_mmcif"
+#define DRIVER_VERSION	"2010-04-28"
 
 /* CE_CMD_SET */
 #define CMD_MASK		0x3f000000
@@ -908,7 +916,7 @@ static void sh_mmcif_start_cmd(struct sh_mmcif_host *host,
 			       struct mmc_request *mrq)
 {
 	struct mmc_command *cmd = mrq->cmd;
-	u32 opc;
+	u32 opc = cmd->opcode;
 	u32 mask = 0;
 	unsigned long flags;
 
@@ -1071,10 +1079,26 @@ static void sh_mmcif_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	host->state = STATE_IDLE;
 }
 
-static const struct mmc_host_ops sh_mmcif_ops = {
+static int sh_mmcif_get_cd(struct mmc_host *mmc)
+{
+	struct sh_mmcif_host *host = mmc_priv(mmc);
+	struct device *dev = sh_mmcif_host_to_dev(host);
+	struct sh_mmcif_plat_data *p = dev->platform_data;
+	int ret = mmc_gpio_get_cd(mmc);
+
+	if (ret >= 0)
+		return ret;
+
+	if (!p || !p->get_cd)
+		return -ENOSYS;
+	else
+		return p->get_cd(host->pd);
+}
+
+static struct mmc_host_ops sh_mmcif_ops = {
 	.request	= sh_mmcif_request,
 	.set_ios	= sh_mmcif_set_ios,
-	.get_cd		= mmc_gpio_get_cd,
+	.get_cd		= sh_mmcif_get_cd,
 };
 
 static bool sh_mmcif_end_cmd(struct sh_mmcif_host *host)
@@ -1419,8 +1443,8 @@ static int sh_mmcif_probe(struct platform_device *pdev)
 	host->mmc	= mmc;
 	host->addr	= reg;
 	host->timeout	= msecs_to_jiffies(10000);
-	host->ccs_enable = true;
-	host->clk_ctrl2_enable = false;
+	host->ccs_enable = !pd || !pd->ccs_unsupported;
+	host->clk_ctrl2_enable = pd && pd->clk_ctrl2_present;
 
 	host->pd = pdev;
 
@@ -1483,6 +1507,12 @@ static int sh_mmcif_probe(struct platform_device *pdev)
 			dev_err(dev, "request_irq error (sh_mmc:int)\n");
 			goto err_clk;
 		}
+	}
+
+	if (pd && pd->use_cd_gpio) {
+		ret = mmc_gpio_request_cd(mmc, pd->cd_gpio, 0);
+		if (ret < 0)
+			goto err_clk;
 	}
 
 	mutex_init(&host->thread_lock);

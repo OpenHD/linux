@@ -61,7 +61,7 @@ struct replay_entry {
 	struct list_head list;
 	union ubifs_key key;
 	union {
-		struct fscrypt_name nm;
+		struct qstr nm;
 		struct {
 			loff_t old_size;
 			loff_t new_size;
@@ -223,21 +223,21 @@ static bool inode_still_linked(struct ubifs_info *c, struct replay_entry *rino)
 {
 	struct replay_entry *r;
 
-	ubifs_assert(c, rino->deletion);
-	ubifs_assert(c, key_type(c, &rino->key) == UBIFS_INO_KEY);
+	ubifs_assert(rino->deletion);
+	ubifs_assert(key_type(c, &rino->key) == UBIFS_INO_KEY);
 
 	/*
 	 * Find the most recent entry for the inode behind @rino and check
 	 * whether it is a deletion.
 	 */
 	list_for_each_entry_reverse(r, &c->replay_list, list) {
-		ubifs_assert(c, r->sqnum >= rino->sqnum);
+		ubifs_assert(r->sqnum >= rino->sqnum);
 		if (key_inum(c, &r->key) == key_inum(c, &rino->key))
 			return r->deletion == 0;
 
 	}
 
-	ubifs_assert(c, 0);
+	ubifs_assert(0);
 	return false;
 }
 
@@ -254,6 +254,9 @@ static int apply_replay_entry(struct ubifs_info *c, struct replay_entry *r)
 
 	dbg_mntk(&r->key, "LEB %d:%d len %d deletion %d sqnum %llu key ",
 		 r->lnum, r->offs, r->len, r->deletion, r->sqnum);
+
+	/* Set c->replay_sqnum to help deal with dangling branches. */
+	c->replay_sqnum = r->sqnum;
 
 	if (is_hash_key(c, &r->key)) {
 		if (r->deletion)
@@ -310,7 +313,6 @@ static int apply_replay_entry(struct ubifs_info *c, struct replay_entry *r)
 static int replay_entries_cmp(void *priv, struct list_head *a,
 			      struct list_head *b)
 {
-	struct ubifs_info *c = priv;
 	struct replay_entry *ra, *rb;
 
 	cond_resched();
@@ -319,7 +321,7 @@ static int replay_entries_cmp(void *priv, struct list_head *a,
 
 	ra = list_entry(a, struct replay_entry, list);
 	rb = list_entry(b, struct replay_entry, list);
-	ubifs_assert(c, ra->sqnum != rb->sqnum);
+	ubifs_assert(ra->sqnum != rb->sqnum);
 	if (ra->sqnum > rb->sqnum)
 		return 1;
 	return -1;
@@ -362,7 +364,7 @@ static void destroy_replay_list(struct ubifs_info *c)
 
 	list_for_each_entry_safe(r, tmp, &c->replay_list, list) {
 		if (is_hash_key(c, &r->key))
-			kfree(fname_name(&r->nm));
+			kfree(r->nm.name);
 		list_del(&r->list);
 		kfree(r);
 	}
@@ -465,10 +467,10 @@ static int insert_dent(struct ubifs_info *c, int lnum, int offs, int len,
 	r->deletion = !!deletion;
 	r->sqnum = sqnum;
 	key_copy(c, key, &r->key);
-	fname_len(&r->nm) = nlen;
+	r->nm.len = nlen;
 	memcpy(nbuf, name, nlen);
 	nbuf[nlen] = '\0';
-	fname_name(&r->nm) = nbuf;
+	r->nm.name = nbuf;
 
 	list_add_tail(&r->list, &c->replay_list);
 	return 0;
@@ -491,7 +493,7 @@ int ubifs_validate_entry(struct ubifs_info *c,
 	if (le32_to_cpu(dent->ch.len) != nlen + UBIFS_DENT_NODE_SZ + 1 ||
 	    dent->type >= UBIFS_ITYPES_CNT ||
 	    nlen > UBIFS_MAX_NLEN || dent->name[nlen] != 0 ||
-	    (key_type == UBIFS_XENT_KEY && strnlen(dent->name, nlen) != nlen) ||
+	    strnlen(dent->name, nlen) != nlen ||
 	    le64_to_cpu(dent->inum) > MAX_INUM) {
 		ubifs_err(c, "bad %s node", key_type == UBIFS_DENT_KEY ?
 			  "directory entry" : "extended attribute entry");
@@ -706,9 +708,9 @@ static int replay_bud(struct ubifs_info *c, struct bud_entry *b)
 			goto out;
 	}
 
-	ubifs_assert(c, ubifs_search_bud(c, lnum));
-	ubifs_assert(c, sleb->endpt - offs >= used);
-	ubifs_assert(c, sleb->endpt % c->min_io_size == 0);
+	ubifs_assert(ubifs_search_bud(c, lnum));
+	ubifs_assert(sleb->endpt - offs >= used);
+	ubifs_assert(sleb->endpt % c->min_io_size == 0);
 
 	b->dirty = sleb->endpt - offs - used;
 	b->free = c->leb_size - sleb->endpt;
@@ -744,7 +746,7 @@ static int replay_buds(struct ubifs_info *c)
 		if (err)
 			return err;
 
-		ubifs_assert(c, b->sqnum > prev_sqnum);
+		ubifs_assert(b->sqnum > prev_sqnum);
 		prev_sqnum = b->sqnum;
 	}
 
@@ -1072,7 +1074,7 @@ int ubifs_replay_journal(struct ubifs_info *c)
 			 * The head of the log must always start with the
 			 * "commit start" node on a properly formatted UBIFS.
 			 * But we found no nodes at all, which means that
-			 * something went wrong and we cannot proceed mounting
+			 * someting went wrong and we cannot proceed mounting
 			 * the file-system.
 			 */
 			ubifs_err(c, "no UBIFS nodes found at the log head LEB %d:%d, possibly corrupted",
@@ -1105,7 +1107,7 @@ int ubifs_replay_journal(struct ubifs_info *c)
 	c->bi.uncommitted_idx = atomic_long_read(&c->dirty_zn_cnt);
 	c->bi.uncommitted_idx *= c->max_idx_node_sz;
 
-	ubifs_assert(c, c->bud_bytes <= c->max_bud_bytes || c->need_recovery);
+	ubifs_assert(c->bud_bytes <= c->max_bud_bytes || c->need_recovery);
 	dbg_mnt("finished, log head LEB %d:%d, max_sqnum %llu, highest_inum %lu",
 		c->lhead_lnum, c->lhead_offs, c->max_sqnum,
 		(unsigned long)c->highest_inum);

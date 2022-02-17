@@ -365,7 +365,7 @@ static void w5300_tx_timeout(struct net_device *ndev)
 	netif_wake_queue(ndev);
 }
 
-static netdev_tx_t w5300_start_tx(struct sk_buff *skb, struct net_device *ndev)
+static int w5300_start_tx(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct w5300_priv *priv = netdev_priv(ndev);
 
@@ -417,7 +417,7 @@ static int w5300_napi_poll(struct napi_struct *napi, int budget)
 	}
 
 	if (rx_count < budget) {
-		napi_complete_done(napi, rx_count);
+		napi_complete(napi);
 		w5300_write(priv, W5300_IMR, IR_S0);
 		mmiowb();
 	}
@@ -536,6 +536,7 @@ static const struct net_device_ops w5300_netdev_ops = {
 	.ndo_set_rx_mode	= w5300_set_rx_mode,
 	.ndo_set_mac_address	= w5300_set_macaddr,
 	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_change_mtu		= eth_change_mtu,
 };
 
 static int w5300_hw_probe(struct platform_device *pdev)

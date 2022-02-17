@@ -16,7 +16,6 @@
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/seq_file.h>
 
 #include <video/omapfb_dss.h>
@@ -129,7 +128,7 @@ static struct device_node *omapdss_of_get_remote_port(const struct device_node *
 {
 	struct device_node *np;
 
-	np = of_graph_get_remote_endpoint(node);
+	np = of_parse_phandle(node, "remote-endpoint", 0);
 	if (!np)
 		return NULL;
 

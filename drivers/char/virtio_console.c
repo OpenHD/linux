@@ -152,8 +152,8 @@ struct ports_device {
 	spinlock_t c_ivq_lock;
 	spinlock_t c_ovq_lock;
 
-	/* max. number of ports this device can hold */
-	u32 max_nr_ports;
+	/* The current config space is stored here */
+	struct virtio_console_config config;
 
 	/* The virtio device we're associated with */
 	struct virtio_device *vdev;
@@ -433,7 +433,8 @@ static struct port_buffer *alloc_buf(struct virtio_device *vdev, size_t buf_size
 	 * Allocate buffer and the sg list. The sg list array is allocated
 	 * directly after the port_buffer struct.
 	 */
-	buf = kmalloc(struct_size(buf, sg, pages), GFP_KERNEL);
+	buf = kmalloc(sizeof(*buf) + sizeof(struct scatterlist) * pages,
+		      GFP_KERNEL);
 	if (!buf)
 		goto fail;
 
@@ -450,6 +451,9 @@ static struct port_buffer *alloc_buf(struct virtio_device *vdev, size_t buf_size
 		 * device is created by remoteproc, the DMA memory is
 		 * associated with the grandparent device:
 		 * vdev => rproc => platform-dev.
+		 * The code here would have been less quirky if
+		 * DMA_MEMORY_INCLUDES_CHILDREN had been supported
+		 * in dma-coherent.c
 		 */
 		if (!vdev->dev.parent || !vdev->dev.parent->parent)
 			goto free_buf;
@@ -981,25 +985,25 @@ error_out:
 	return ret;
 }
 
-static __poll_t port_fops_poll(struct file *filp, poll_table *wait)
+static unsigned int port_fops_poll(struct file *filp, poll_table *wait)
 {
 	struct port *port;
-	__poll_t ret;
+	unsigned int ret;
 
 	port = filp->private_data;
 	poll_wait(filp, &port->waitqueue, wait);
 
 	if (!port->guest_connected) {
 		/* Port got unplugged */
-		return EPOLLHUP;
+		return POLLHUP;
 	}
 	ret = 0;
 	if (!will_read_block(port))
-		ret |= EPOLLIN | EPOLLRDNORM;
+		ret |= POLLIN | POLLRDNORM;
 	if (!will_write_block(port))
-		ret |= EPOLLOUT;
+		ret |= POLLOUT;
 	if (!port->host_connected)
-		ret |= EPOLLHUP;
+		ret |= POLLHUP;
 
 	return ret;
 }
@@ -1126,7 +1130,7 @@ static const struct file_operations port_fops = {
  * We turn the characters into a scatter-gather list, add it to the
  * output queue and then kick the Host.  Then we sit here waiting for
  * it to finish: inefficient in theory, but in practice
- * implementations will do it immediately.
+ * implementations will do it immediately (lguest's Launcher does).
  */
 static int put_chars(u32 vtermno, const char *buf, int count)
 {
@@ -1304,40 +1308,56 @@ static struct attribute *port_sysfs_entries[] = {
 	NULL
 };
 
-static const struct attribute_group port_attribute_group = {
+static struct attribute_group port_attribute_group = {
 	.name = NULL,		/* put in device directory */
 	.attrs = port_sysfs_entries,
 };
 
-static int debugfs_show(struct seq_file *s, void *data)
+static ssize_t debugfs_read(struct file *filp, char __user *ubuf,
+			    size_t count, loff_t *offp)
 {
-	struct port *port = s->private;
+	struct port *port;
+	char *buf;
+	ssize_t ret, out_offset, out_count;
 
-	seq_printf(s, "name: %s\n", port->name ? port->name : "");
-	seq_printf(s, "guest_connected: %d\n", port->guest_connected);
-	seq_printf(s, "host_connected: %d\n", port->host_connected);
-	seq_printf(s, "outvq_full: %d\n", port->outvq_full);
-	seq_printf(s, "bytes_sent: %lu\n", port->stats.bytes_sent);
-	seq_printf(s, "bytes_received: %lu\n", port->stats.bytes_received);
-	seq_printf(s, "bytes_discarded: %lu\n", port->stats.bytes_discarded);
-	seq_printf(s, "is_console: %s\n",
-		   is_console_port(port) ? "yes" : "no");
-	seq_printf(s, "console_vtermno: %u\n", port->cons.vtermno);
+	out_count = 1024;
+	buf = kmalloc(out_count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
-	return 0;
-}
+	port = filp->private_data;
+	out_offset = 0;
+	out_offset += snprintf(buf + out_offset, out_count,
+			       "name: %s\n", port->name ? port->name : "");
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "guest_connected: %d\n", port->guest_connected);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "host_connected: %d\n", port->host_connected);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "outvq_full: %d\n", port->outvq_full);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_sent: %lu\n", port->stats.bytes_sent);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_received: %lu\n",
+			       port->stats.bytes_received);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_discarded: %lu\n",
+			       port->stats.bytes_discarded);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "is_console: %s\n",
+			       is_console_port(port) ? "yes" : "no");
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "console_vtermno: %u\n", port->cons.vtermno);
 
-static int debugfs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, debugfs_show, inode->i_private);
+	ret = simple_read_from_buffer(ubuf, count, offp, buf, out_offset);
+	kfree(buf);
+	return ret;
 }
 
 static const struct file_operations port_debugfs_ops = {
 	.owner = THIS_MODULE,
-	.open = debugfs_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
+	.open  = simple_open,
+	.read  = debugfs_read,
 };
 
 static void set_console_size(struct port *port, u16 rows, u16 cols)
@@ -1616,11 +1636,11 @@ static void handle_control_message(struct virtio_device *vdev,
 			break;
 		}
 		if (virtio32_to_cpu(vdev, cpkt->id) >=
-		    portdev->max_nr_ports) {
+		    portdev->config.max_nr_ports) {
 			dev_warn(&portdev->vdev->dev,
 				"Request for adding port with "
 				"out-of-bound id %u, max. supported id: %u\n",
-				cpkt->id, portdev->max_nr_ports - 1);
+				cpkt->id, portdev->config.max_nr_ports - 1);
 			break;
 		}
 		add_port(portdev, virtio32_to_cpu(vdev, cpkt->id));
@@ -1874,17 +1894,16 @@ static int init_vqs(struct ports_device *portdev)
 	u32 i, j, nr_ports, nr_queues;
 	int err;
 
-	nr_ports = portdev->max_nr_ports;
+	nr_ports = portdev->config.max_nr_ports;
 	nr_queues = use_multiport(portdev) ? (nr_ports + 1) * 2 : 2;
 
-	vqs = kmalloc_array(nr_queues, sizeof(struct virtqueue *), GFP_KERNEL);
-	io_callbacks = kmalloc_array(nr_queues, sizeof(vq_callback_t *),
-				     GFP_KERNEL);
-	io_names = kmalloc_array(nr_queues, sizeof(char *), GFP_KERNEL);
-	portdev->in_vqs = kmalloc_array(nr_ports, sizeof(struct virtqueue *),
-					GFP_KERNEL);
-	portdev->out_vqs = kmalloc_array(nr_ports, sizeof(struct virtqueue *),
-					 GFP_KERNEL);
+	vqs = kmalloc(nr_queues * sizeof(struct virtqueue *), GFP_KERNEL);
+	io_callbacks = kmalloc(nr_queues * sizeof(vq_callback_t *), GFP_KERNEL);
+	io_names = kmalloc(nr_queues * sizeof(char *), GFP_KERNEL);
+	portdev->in_vqs = kmalloc(nr_ports * sizeof(struct virtqueue *),
+				  GFP_KERNEL);
+	portdev->out_vqs = kmalloc(nr_ports * sizeof(struct virtqueue *),
+				   GFP_KERNEL);
 	if (!vqs || !io_callbacks || !io_names || !portdev->in_vqs ||
 	    !portdev->out_vqs) {
 		err = -ENOMEM;
@@ -1918,9 +1937,9 @@ static int init_vqs(struct ports_device *portdev)
 		}
 	}
 	/* Find the queues. */
-	err = virtio_find_vqs(portdev->vdev, nr_queues, vqs,
-			      io_callbacks,
-			      (const char **)io_names, NULL);
+	err = portdev->vdev->config->find_vqs(portdev->vdev, nr_queues, vqs,
+					      io_callbacks,
+					      (const char **)io_names);
 	if (err)
 		goto free;
 
@@ -2058,13 +2077,13 @@ static int virtcons_probe(struct virtio_device *vdev)
 	}
 
 	multiport = false;
-	portdev->max_nr_ports = 1;
+	portdev->config.max_nr_ports = 1;
 
 	/* Don't test MULTIPORT at all if we're rproc: not a valid feature! */
 	if (!is_rproc_serial(vdev) &&
 	    virtio_cread_feature(vdev, VIRTIO_CONSOLE_F_MULTIPORT,
 				 struct virtio_console_config, max_nr_ports,
-				 &portdev->max_nr_ports) == 0) {
+				 &portdev->config.max_nr_ports) == 0) {
 		multiport = true;
 	}
 
@@ -2142,6 +2161,7 @@ static struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_CONSOLE, VIRTIO_DEV_ANY_ID },
 	{ 0 },
 };
+MODULE_DEVICE_TABLE(virtio, id_table);
 
 static unsigned int features[] = {
 	VIRTIO_CONSOLE_F_SIZE,
@@ -2154,6 +2174,7 @@ static struct virtio_device_id rproc_serial_id_table[] = {
 #endif
 	{ 0 },
 };
+MODULE_DEVICE_TABLE(virtio, rproc_serial_id_table);
 
 static unsigned int rproc_serial_features[] = {
 };
@@ -2269,7 +2290,7 @@ static int __init init(void)
 
 	pdrvdata.debugfs_dir = debugfs_create_dir("virtio-ports", NULL);
 	if (!pdrvdata.debugfs_dir)
-		pr_warn("Error creating debugfs dir for virtio-ports\n");
+		pr_warning("Error creating debugfs dir for virtio-ports\n");
 	INIT_LIST_HEAD(&pdrvdata.consoles);
 	INIT_LIST_HEAD(&pdrvdata.portdevs);
 
@@ -2306,6 +2327,5 @@ static void __exit fini(void)
 module_init(init);
 module_exit(fini);
 
-MODULE_DEVICE_TABLE(virtio, id_table);
 MODULE_DESCRIPTION("Virtio console driver");
 MODULE_LICENSE("GPL");

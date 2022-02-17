@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
@@ -10,8 +9,6 @@
 #include <asm/pci-direct.h>
 #include <asm/tsc.h>
 #include <asm/cpufeature.h>
-#include <linux/sched.h>
-#include <linux/sched/clock.h>
 
 #include "cpu.h"
 

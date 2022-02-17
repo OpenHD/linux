@@ -1,5 +1,4 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
 # (c) 2014, Sasha Levin <sasha.levin@oracle.com>
 #set -x
 
@@ -77,8 +76,8 @@ parse_symbol() {
 		return
 	fi
 
-	# Strip out the base of the path
-	code=${code#$basepath/}
+	# Strip out the base of the path on each line
+	code=$(while read -r line; do echo "${line#$basepath/}"; done <<< "$code")
 
 	# In the case of inlines, move everything to same line
 	code=${code//$'\n'/' '}
@@ -140,8 +139,7 @@ handle_line() {
 
 while read line; do
 	# Let's see if we have an address in the line
-	if [[ $line =~ \[\<([^]]+)\>\] ]] ||
-	   [[ $line =~ [^+\ ]+\+0x[0-9a-f]+/0x[0-9a-f]+ ]]; then
+	if [[ $line =~ \[\<([^]]+)\>\]  ]]; then
 		# Translate address to line numbers
 		handle_line "$line"
 	# Is it a code line?

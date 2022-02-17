@@ -30,7 +30,8 @@
  *			Must not be NULL.    *OBSOLETE*
  * @read:		New API. drivers can fill up to max bytes of data
  *			into the buffer. The buffer is aligned for any type
- *			and max is a multiple of 4 and >= 32 bytes.
+ *			and max is guaranteed to be >= to that alignment
+ *			(either 4 or 8 depending on architecture).
  * @priv:		Private data, for use by the RNG driver.
  * @quality:		Estimation of true entropy in RNG's bitstream
  *			(per mill).

@@ -16,11 +16,8 @@
 #ifndef __ASM_PERCPU_H
 #define __ASM_PERCPU_H
 
-#include <linux/preempt.h>
-
-#include <asm/alternative.h>
-#include <asm/cmpxchg.h>
 #include <asm/stack_pointer.h>
+#include <asm/alternative.h>
 
 static inline void set_my_cpu_offset(unsigned long off)
 {
@@ -114,16 +111,16 @@ static inline unsigned long __percpu_read(void *ptr, int size)
 
 	switch (size) {
 	case 1:
-		ret = READ_ONCE(*(u8 *)ptr);
+		ret = ACCESS_ONCE(*(u8 *)ptr);
 		break;
 	case 2:
-		ret = READ_ONCE(*(u16 *)ptr);
+		ret = ACCESS_ONCE(*(u16 *)ptr);
 		break;
 	case 4:
-		ret = READ_ONCE(*(u32 *)ptr);
+		ret = ACCESS_ONCE(*(u32 *)ptr);
 		break;
 	case 8:
-		ret = READ_ONCE(*(u64 *)ptr);
+		ret = ACCESS_ONCE(*(u64 *)ptr);
 		break;
 	default:
 		ret = 0;
@@ -137,16 +134,16 @@ static inline void __percpu_write(void *ptr, unsigned long val, int size)
 {
 	switch (size) {
 	case 1:
-		WRITE_ONCE(*(u8 *)ptr, (u8)val);
+		ACCESS_ONCE(*(u8 *)ptr) = (u8)val;
 		break;
 	case 2:
-		WRITE_ONCE(*(u16 *)ptr, (u16)val);
+		ACCESS_ONCE(*(u16 *)ptr) = (u16)val;
 		break;
 	case 4:
-		WRITE_ONCE(*(u32 *)ptr, (u32)val);
+		ACCESS_ONCE(*(u32 *)ptr) = (u32)val;
 		break;
 	case 8:
-		WRITE_ONCE(*(u64 *)ptr, (u64)val);
+		ACCESS_ONCE(*(u64 *)ptr) = (u64)val;
 		break;
 	default:
 		BUILD_BUG();
@@ -202,32 +199,6 @@ static inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
 
 	return ret;
 }
-
-/* this_cpu_cmpxchg */
-#define _protect_cmpxchg_local(pcp, o, n)			\
-({								\
-	typeof(*raw_cpu_ptr(&(pcp))) __ret;			\
-	preempt_disable();					\
-	__ret = cmpxchg_local(raw_cpu_ptr(&(pcp)), o, n);	\
-	preempt_enable();					\
-	__ret;							\
-})
-
-#define this_cpu_cmpxchg_1(ptr, o, n) _protect_cmpxchg_local(ptr, o, n)
-#define this_cpu_cmpxchg_2(ptr, o, n) _protect_cmpxchg_local(ptr, o, n)
-#define this_cpu_cmpxchg_4(ptr, o, n) _protect_cmpxchg_local(ptr, o, n)
-#define this_cpu_cmpxchg_8(ptr, o, n) _protect_cmpxchg_local(ptr, o, n)
-
-#define this_cpu_cmpxchg_double_8(ptr1, ptr2, o1, o2, n1, n2)		\
-({									\
-	int __ret;							\
-	preempt_disable();						\
-	__ret = cmpxchg_double_local(	raw_cpu_ptr(&(ptr1)),		\
-					raw_cpu_ptr(&(ptr2)),		\
-					o1, o2, n1, n2);		\
-	preempt_enable();						\
-	__ret;								\
-})
 
 #define _percpu_read(pcp)						\
 ({									\

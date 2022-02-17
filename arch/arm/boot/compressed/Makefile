@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # linux/arch/arm/boot/compressed/Makefile
 #
@@ -24,9 +23,6 @@ OBJS		+= hyp-stub.o
 endif
 
 GCOV_PROFILE		:= n
-
-# Prevents link failures: __sanitizer_cov_trace_pc() is not linked in.
-KCOV_INSTRUMENT		:= n
 
 #
 # Architecture dependencies
@@ -120,9 +116,8 @@ ccflags-y := -fpic $(call cc-option,-mno-single-pic-base,) -fno-builtin -I$(obj)
 asflags-y := -DZIMAGE
 
 # Supply kernel BSS size to the decompressor via a linker symbol.
-KBSS_SZ = $(shell echo $$(($$($(CROSS_COMPILE)nm $(obj)/../../../../vmlinux | \
-		sed -n -e 's/^\([^ ]*\) [AB] __bss_start$$/-0x\1/p' \
-		       -e 's/^\([^ ]*\) [AB] __bss_stop$$/+0x\1/p') )) )
+KBSS_SZ = $(shell $(CROSS_COMPILE)size $(obj)/../../../../vmlinux | \
+		awk 'END{print $$3}')
 LDFLAGS_vmlinux = --defsym _kernel_bss_size=$(KBSS_SZ)
 # Supply ZRELADDR to the decompressor via a linker symbol.
 ifneq ($(CONFIG_AUTO_ZRELADDR),y)

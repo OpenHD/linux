@@ -12,7 +12,6 @@
 
 #include <linux/stddef.h>
 #include <linux/kernel.h>
-#include <linux/sched/hotplug.h>
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/of.h>
@@ -147,7 +146,7 @@ static void qoriq_cpu_kill(unsigned int cpu)
 	for (i = 0; i < 500; i++) {
 		if (is_cpu_dead(cpu)) {
 #ifdef CONFIG_PPC64
-			paca_ptrs[cpu]->cpu_start = 0;
+			paca[cpu].cpu_start = 0;
 #endif
 			return;
 		}
@@ -328,7 +327,7 @@ static int smp_85xx_kick_cpu(int nr)
 		return ret;
 
 done:
-	paca_ptrs[nr]->cpu_start = 1;
+	paca[nr].cpu_start = 1;
 	generic_set_cpu_up(nr);
 
 	return ret;
@@ -344,20 +343,19 @@ done:
 }
 
 struct smp_ops_t smp_85xx_ops = {
-	.cause_nmi_ipi = NULL,
 	.kick_cpu = smp_85xx_kick_cpu,
 	.cpu_bootable = smp_generic_cpu_bootable,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable	= generic_cpu_disable,
 	.cpu_die	= generic_cpu_die,
 #endif
-#if defined(CONFIG_KEXEC_CORE) && !defined(CONFIG_PPC64)
+#if defined(CONFIG_KEXEC) && !defined(CONFIG_PPC64)
 	.give_timebase	= smp_generic_give_timebase,
 	.take_timebase	= smp_generic_take_timebase,
 #endif
 };
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 #ifdef CONFIG_PPC32
 atomic_t kexec_down_cpus = ATOMIC_INIT(0);
 
@@ -409,14 +407,14 @@ void mpc85xx_smp_kexec_cpu_down(int crash_shutdown, int secondary)
 	}
 
 	if (disable_threadbit) {
-		while (paca_ptrs[disable_cpu]->kexec_state < KEXEC_STATE_REAL_MODE) {
+		while (paca[disable_cpu].kexec_state < KEXEC_STATE_REAL_MODE) {
 			barrier();
 			now = mftb();
 			if (!notified && now - start > 1000000) {
 				pr_info("%s/%d: waiting for cpu %d to enter KEXEC_STATE_REAL_MODE (%d)\n",
 					__func__, smp_processor_id(),
 					disable_cpu,
-					paca_ptrs[disable_cpu]->kexec_state);
+					paca[disable_cpu].kexec_state);
 				notified = true;
 			}
 		}
@@ -460,11 +458,18 @@ static void mpc85xx_smp_machine_kexec(struct kimage *image)
 
 	default_machine_kexec(image);
 }
-#endif /* CONFIG_KEXEC_CORE */
+#endif /* CONFIG_KEXEC */
+
+static void smp_85xx_basic_setup(int cpu_nr)
+{
+	if (cpu_has_feature(CPU_FTR_DBELL))
+		doorbell_setup_this_cpu();
+}
 
 static void smp_85xx_setup_cpu(int cpu_nr)
 {
 	mpic_setup_this_cpu();
+	smp_85xx_basic_setup(cpu_nr);
 }
 
 void __init mpc85xx_smp_init(void)
@@ -478,7 +483,7 @@ void __init mpc85xx_smp_init(void)
 		smp_85xx_ops.setup_cpu = smp_85xx_setup_cpu;
 		smp_85xx_ops.message_pass = smp_mpic_message_pass;
 	} else
-		smp_85xx_ops.setup_cpu = NULL;
+		smp_85xx_ops.setup_cpu = smp_85xx_basic_setup;
 
 	if (cpu_has_feature(CPU_FTR_DBELL)) {
 		/*
@@ -486,7 +491,7 @@ void __init mpc85xx_smp_init(void)
 		 * smp_muxed_ipi_message_pass
 		 */
 		smp_85xx_ops.message_pass = NULL;
-		smp_85xx_ops.cause_ipi = doorbell_global_ipi;
+		smp_85xx_ops.cause_ipi = doorbell_cause_ipi;
 		smp_85xx_ops.probe = NULL;
 	}
 
@@ -507,7 +512,7 @@ void __init mpc85xx_smp_init(void)
 #endif
 	smp_ops = &smp_85xx_ops;
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 	ppc_md.kexec_cpu_down = mpc85xx_smp_kexec_cpu_down;
 	ppc_md.machine_kexec = mpc85xx_smp_machine_kexec;
 #endif

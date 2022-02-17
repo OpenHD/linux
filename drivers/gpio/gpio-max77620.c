@@ -1,7 +1,7 @@
 /*
  * MAXIM MAX77620 GPIO driver
  *
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2016-2019, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -21,6 +21,7 @@ struct max77620_gpio {
 	struct gpio_chip	gpio_chip;
 	struct regmap		*rmap;
 	struct device		*dev;
+	int			gpio_irq;
 };
 
 static const struct regmap_irq max77620_gpio_irqs[] = {
@@ -82,7 +83,7 @@ static const struct regmap_irq max77620_gpio_irqs[] = {
 	},
 };
 
-static const struct regmap_irq_chip max77620_gpio_irq_chip = {
+static struct regmap_irq_chip max77620_gpio_irq_chip = {
 	.name = "max77620-gpio",
 	.irqs = max77620_gpio_irqs,
 	.num_irqs = ARRAY_SIZE(max77620_gpio_irqs),
@@ -152,10 +153,11 @@ static int max77620_gpio_dir_output(struct gpio_chip *gc, unsigned int offset,
 	return ret;
 }
 
-static int max77620_gpio_set_debounce(struct max77620_gpio *mgpio,
+static int max77620_gpio_set_debounce(struct gpio_chip *gc,
 				      unsigned int offset,
 				      unsigned int debounce)
 {
+	struct max77620_gpio *mgpio = gpiochip_get_data(gc);
 	u8 val;
 	int ret;
 
@@ -201,23 +203,21 @@ static void max77620_gpio_set(struct gpio_chip *gc, unsigned int offset,
 		dev_err(mgpio->dev, "CNFG_GPIO_OUT update failed: %d\n", ret);
 }
 
-static int max77620_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
-				    unsigned long config)
+static int max77620_gpio_set_single_ended(struct gpio_chip *gc,
+					  unsigned int offset,
+					  enum single_ended_mode mode)
 {
 	struct max77620_gpio *mgpio = gpiochip_get_data(gc);
 
-	switch (pinconf_to_config_param(config)) {
-	case PIN_CONFIG_DRIVE_OPEN_DRAIN:
+	switch (mode) {
+	case LINE_MODE_OPEN_DRAIN:
 		return regmap_update_bits(mgpio->rmap, GPIO_REG_ADDR(offset),
 					  MAX77620_CNFG_GPIO_DRV_MASK,
 					  MAX77620_CNFG_GPIO_DRV_OPENDRAIN);
-	case PIN_CONFIG_DRIVE_PUSH_PULL:
+	case LINE_MODE_PUSH_PULL:
 		return regmap_update_bits(mgpio->rmap, GPIO_REG_ADDR(offset),
 					  MAX77620_CNFG_GPIO_DRV_MASK,
 					  MAX77620_CNFG_GPIO_DRV_PUSHPULL);
-	case PIN_CONFIG_INPUT_DEBOUNCE:
-		return max77620_gpio_set_debounce(mgpio, offset,
-			pinconf_to_config_argument(config));
 	default:
 		break;
 	}
@@ -252,14 +252,16 @@ static int max77620_gpio_probe(struct platform_device *pdev)
 
 	mgpio->rmap = chip->rmap;
 	mgpio->dev = &pdev->dev;
+	mgpio->gpio_irq = gpio_irq;
 
 	mgpio->gpio_chip.label = pdev->name;
 	mgpio->gpio_chip.parent = &pdev->dev;
 	mgpio->gpio_chip.direction_input = max77620_gpio_dir_input;
 	mgpio->gpio_chip.get = max77620_gpio_get;
 	mgpio->gpio_chip.direction_output = max77620_gpio_dir_output;
+	mgpio->gpio_chip.set_debounce = max77620_gpio_set_debounce;
 	mgpio->gpio_chip.set = max77620_gpio_set;
-	mgpio->gpio_chip.set_config = max77620_gpio_set_config;
+	mgpio->gpio_chip.set_single_ended = max77620_gpio_set_single_ended;
 	mgpio->gpio_chip.to_irq = max77620_gpio_to_irq;
 	mgpio->gpio_chip.ngpio = MAX77620_GPIO_NR;
 	mgpio->gpio_chip.can_sleep = 1;
@@ -269,28 +271,29 @@ static int max77620_gpio_probe(struct platform_device *pdev)
 #endif
 
 	platform_set_drvdata(pdev, mgpio);
-
-	ret = devm_gpiochip_add_data(&pdev->dev, &mgpio->gpio_chip, mgpio);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "gpio_init: Failed to add max77620_gpio\n");
-		return ret;
-	}
-
-	ret = devm_regmap_add_irq_chip(&pdev->dev, chip->rmap, gpio_irq,
+	ret = devm_regmap_add_irq_chip(&pdev->dev, chip->rmap, mgpio->gpio_irq,
 				       IRQF_ONESHOT, -1,
 				       &max77620_gpio_irq_chip,
 				       &chip->gpio_irq_data);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to add gpio irq_chip %d\n", ret);
-		return ret;
+		goto out;
 	}
 
-	return 0;
+	ret = devm_gpiochip_add_data(&pdev->dev, &mgpio->gpio_chip, mgpio);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "gpio_init: Failed to add max77620_gpio\n");
+		goto out;
+	}
+
+
+	ret = 0;
+out:
+	return ret;
 }
 
 static const struct platform_device_id max77620_gpio_devtype[] = {
 	{ .name = "max77620-gpio", },
-	{ .name = "max20024-gpio", },
 	{},
 };
 MODULE_DEVICE_TABLE(platform, max77620_gpio_devtype);
@@ -301,7 +304,17 @@ static struct platform_driver max77620_gpio_driver = {
 	.id_table	= max77620_gpio_devtype,
 };
 
-module_platform_driver(max77620_gpio_driver);
+static int __init max77620_gpio_init(void)
+{
+	return platform_driver_register(&max77620_gpio_driver);
+}
+subsys_initcall(max77620_gpio_init);
+
+static void __exit max77620_gpio_exit(void)
+{
+	return platform_driver_unregister(&max77620_gpio_driver);
+}
+module_exit(max77620_gpio_exit);
 
 MODULE_DESCRIPTION("GPIO interface for MAX77620 and MAX20024 PMIC");
 MODULE_AUTHOR("Laxman Dewangan <ldewangan@nvidia.com>");

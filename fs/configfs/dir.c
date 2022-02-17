@@ -613,7 +613,7 @@ static void detach_attrs(struct config_item * item)
 
 static int populate_attrs(struct config_item *item)
 {
-	const struct config_item_type *t = item->ci_type;
+	struct config_item_type *t = item->ci_type;
 	struct configfs_attribute *attr;
 	struct configfs_bin_attribute *bin_attr;
 	int error = 0;
@@ -935,7 +935,7 @@ static void configfs_detach_group(struct config_item *item)
 static void client_disconnect_notify(struct config_item *parent_item,
 				     struct config_item *item)
 {
-	const struct config_item_type *type;
+	struct config_item_type *type;
 
 	type = parent_item->ci_type;
 	BUG_ON(!type);
@@ -954,7 +954,7 @@ static void client_disconnect_notify(struct config_item *parent_item,
 static void client_drop_item(struct config_item *parent_item,
 			     struct config_item *item)
 {
-	const struct config_item_type *type;
+	struct config_item_type *type;
 
 	type = parent_item->ci_type;
 	BUG_ON(!type);
@@ -1294,7 +1294,7 @@ static int configfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 	struct config_item *parent_item;
 	struct configfs_subsystem *subsys;
 	struct configfs_dirent *sd;
-	const struct config_item_type *type;
+	struct config_item_type *type;
 	struct module *subsys_owner = NULL, *new_item_owner = NULL;
 	struct configfs_fragment *frag;
 	char *name;
@@ -1537,6 +1537,7 @@ static int configfs_rmdir(struct inode *dir, struct dentry *dentry)
 		spin_lock(&configfs_dirent_lock);
 		configfs_detach_rollback(dentry);
 		spin_unlock(&configfs_dirent_lock);
+		config_item_put(parent_item);
 		return -EINTR;
 	}
 	frag->frag_dead = true;
@@ -1883,7 +1884,7 @@ EXPORT_SYMBOL(configfs_unregister_group);
 struct config_group *
 configfs_register_default_group(struct config_group *parent_group,
 				const char *name,
-				const struct config_item_type *item_type)
+				struct config_item_type *item_type)
 {
 	int ret;
 	struct config_group *group;

@@ -1,10 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/comedi_fops.c
  * comedi kernel module
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1997-2000 David A. Schleef <ds@schleef.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -14,16 +23,20 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/fcntl.h>
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/kmod.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 #include <linux/device.h>
+#include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include "comedidev.h"
 #include <linux/cdev.h>
+#include <linux/stat.h>
 
 #include <linux/io.h>
 #include <linux/uaccess.h>
@@ -60,15 +73,15 @@ struct comedi_file {
 	struct comedi_subdevice *read_subdev;
 	struct comedi_subdevice *write_subdev;
 	unsigned int last_detach_count;
-	unsigned int last_attached:1;
+	bool last_attached:1;
 };
 
 #define COMEDI_NUM_MINORS 0x100
 #define COMEDI_NUM_SUBDEVICE_MINORS	\
 	(COMEDI_NUM_MINORS - COMEDI_NUM_BOARD_MINORS)
 
-static unsigned short comedi_num_legacy_minors;
-module_param(comedi_num_legacy_minors, ushort, 0444);
+static int comedi_num_legacy_minors;
+module_param(comedi_num_legacy_minors, int, 0444);
 MODULE_PARM_DESC(comedi_num_legacy_minors,
 		 "number of comedi minor devices to reserve for non-auto-configured devices (default 0)"
 		);
@@ -79,8 +92,8 @@ MODULE_PARM_DESC(comedi_default_buf_size_kb,
 		 "default asynchronous buffer size in KiB (default "
 		 __MODULE_STRING(CONFIG_COMEDI_DEFAULT_BUF_SIZE_KB) ")");
 
-unsigned int comedi_default_buf_maxsize_kb =
-	CONFIG_COMEDI_DEFAULT_BUF_MAXSIZE_KB;
+unsigned int comedi_default_buf_maxsize_kb
+	= CONFIG_COMEDI_DEFAULT_BUF_MAXSIZE_KB;
 module_param(comedi_default_buf_maxsize_kb, uint, 0644);
 MODULE_PARM_DESC(comedi_default_buf_maxsize_kb,
 		 "default maximum size of asynchronous buffer in KiB (default "
@@ -736,7 +749,7 @@ static void do_become_nonbusy(struct comedi_device *dev,
 		wake_up_interruptible_all(&async->wait_head);
 	} else {
 		dev_err(dev->class_dev,
-			"BUG: (?) %s called with async=NULL\n", __func__);
+			"BUG: (?) do_become_nonbusy called with async=NULL\n");
 		s->busy = NULL;
 	}
 }
@@ -2156,24 +2169,9 @@ static void comedi_vm_close(struct vm_area_struct *area)
 	comedi_buf_map_put(bm);
 }
 
-static int comedi_vm_access(struct vm_area_struct *vma, unsigned long addr,
-			    void *buf, int len, int write)
-{
-	struct comedi_buf_map *bm = vma->vm_private_data;
-	unsigned long offset =
-	    addr - vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT);
-
-	if (len < 0)
-		return -EINVAL;
-	if (len > vma->vm_end - addr)
-		len = vma->vm_end - addr;
-	return comedi_buf_map_access(bm, offset, buf, len, write);
-}
-
 static const struct vm_operations_struct comedi_vm_ops = {
 	.open = comedi_vm_open,
 	.close = comedi_vm_close,
-	.access = comedi_vm_access,
 };
 
 static int comedi_mmap(struct file *file, struct vm_area_struct *vma)
@@ -2267,9 +2265,9 @@ done:
 	return retval;
 }
 
-static __poll_t comedi_poll(struct file *file, poll_table *wait)
+static unsigned int comedi_poll(struct file *file, poll_table *wait)
 {
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 	struct comedi_file *cfp = file->private_data;
 	struct comedi_device *dev = cfp->dev;
 	struct comedi_subdevice *s, *s_read;
@@ -2288,7 +2286,7 @@ static __poll_t comedi_poll(struct file *file, poll_table *wait)
 		if (s->busy != file || !comedi_is_subdevice_running(s) ||
 		    (s->async->cmd.flags & CMDF_WRITE) ||
 		    comedi_buf_read_n_available(s) > 0)
-			mask |= EPOLLIN | EPOLLRDNORM;
+			mask |= POLLIN | POLLRDNORM;
 	}
 
 	s = comedi_file_write_subdevice(file);
@@ -2300,7 +2298,7 @@ static __poll_t comedi_poll(struct file *file, poll_table *wait)
 		if (s->busy != file || !comedi_is_subdevice_running(s) ||
 		    !(s->async->cmd.flags & CMDF_WRITE) ||
 		    comedi_buf_write_n_available(s) >= bps)
-			mask |= EPOLLOUT | EPOLLWRNORM;
+			mask |= POLLOUT | POLLWRNORM;
 	}
 
 done:
@@ -2594,8 +2592,10 @@ static int comedi_open(struct inode *inode, struct file *file)
 	}
 
 	cfp = kzalloc(sizeof(*cfp), GFP_KERNEL);
-	if (!cfp)
+	if (!cfp) {
+		comedi_dev_put(dev);
 		return -ENOMEM;
+	}
 
 	cfp->dev = dev;
 
@@ -2866,7 +2866,8 @@ static int __init comedi_init(void)
 
 	pr_info("version " COMEDI_RELEASE " - http://www.comedi.org\n");
 
-	if (comedi_num_legacy_minors > COMEDI_NUM_BOARD_MINORS) {
+	if (comedi_num_legacy_minors < 0 ||
+	    comedi_num_legacy_minors > COMEDI_NUM_BOARD_MINORS) {
 		pr_err("invalid value for module parameter \"comedi_num_legacy_minors\".  Valid values are 0 through %i.\n",
 		       COMEDI_NUM_BOARD_MINORS);
 		return -EINVAL;
@@ -2875,25 +2876,29 @@ static int __init comedi_init(void)
 	retval = register_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
 					COMEDI_NUM_MINORS, "comedi");
 	if (retval)
-		return retval;
-
+		return -EIO;
 	cdev_init(&comedi_cdev, &comedi_fops);
 	comedi_cdev.owner = THIS_MODULE;
 
 	retval = kobject_set_name(&comedi_cdev.kobj, "comedi");
-	if (retval)
-		goto out_unregister_chrdev_region;
+	if (retval) {
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return retval;
+	}
 
-	retval = cdev_add(&comedi_cdev, MKDEV(COMEDI_MAJOR, 0),
-			  COMEDI_NUM_MINORS);
-	if (retval)
-		goto out_unregister_chrdev_region;
-
+	if (cdev_add(&comedi_cdev, MKDEV(COMEDI_MAJOR, 0), COMEDI_NUM_MINORS)) {
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return -EIO;
+	}
 	comedi_class = class_create(THIS_MODULE, "comedi");
 	if (IS_ERR(comedi_class)) {
-		retval = PTR_ERR(comedi_class);
 		pr_err("failed to create class\n");
-		goto out_cdev_del;
+		cdev_del(&comedi_cdev);
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return PTR_ERR(comedi_class);
 	}
 
 	comedi_class->dev_groups = comedi_dev_groups;
@@ -2904,8 +2909,12 @@ static int __init comedi_init(void)
 
 		dev = comedi_alloc_board_minor(NULL);
 		if (IS_ERR(dev)) {
-			retval = PTR_ERR(dev);
-			goto out_cleanup_board_minors;
+			comedi_cleanup_board_minors();
+			class_destroy(comedi_class);
+			cdev_del(&comedi_cdev);
+			unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+						 COMEDI_NUM_MINORS);
+			return PTR_ERR(dev);
 		}
 		/* comedi_alloc_board_minor() locked the mutex */
 		mutex_unlock(&dev->mutex);
@@ -2915,15 +2924,6 @@ static int __init comedi_init(void)
 	comedi_proc_init();
 
 	return 0;
-
-out_cleanup_board_minors:
-	comedi_cleanup_board_minors();
-	class_destroy(comedi_class);
-out_cdev_del:
-	cdev_del(&comedi_cdev);
-out_unregister_chrdev_region:
-	unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0), COMEDI_NUM_MINORS);
-	return retval;
 }
 module_init(comedi_init);
 

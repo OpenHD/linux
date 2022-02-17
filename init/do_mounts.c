@@ -1,3 +1,13 @@
+/*
+ * Many of the syscalls used in this file expect some of the arguments
+ * to be __user pointers not __kernel pointers.  To limit the sparse
+ * noise, turn off sparse checking for this file.
+ */
+#ifdef __CHECKER__
+#undef __CHECKER__
+#warning "Sparse checking disabled for this file"
+#endif
+
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/ctype.h>
@@ -353,24 +363,25 @@ static void __init get_fs_names(char *page)
 static int __init do_mount_root(char *name, char *fs, int flags, void *data)
 {
 	struct super_block *s;
-	int err = ksys_mount(name, "/root", fs, flags, data);
+	int err = sys_mount(name, "/root", fs, flags, data);
 	if (err)
 		return err;
 
-	ksys_chdir("/root");
+	sys_chdir("/root");
 	s = current->fs->pwd.dentry->d_sb;
 	ROOT_DEV = s->s_dev;
 	printk(KERN_INFO
 	       "VFS: Mounted root (%s filesystem)%s on device %u:%u.\n",
 	       s->s_type->name,
-	       sb_rdonly(s) ? " readonly" : "",
+	       s->s_flags & MS_RDONLY ?  " readonly" : "",
 	       MAJOR(ROOT_DEV), MINOR(ROOT_DEV));
 	return 0;
 }
 
 void __init mount_block_root(char *name, int flags)
 {
-	struct page *page = alloc_page(GFP_KERNEL);
+	struct page *page = alloc_page(GFP_KERNEL |
+					__GFP_NOTRACK_FALSE_POSITIVE);
 	char *fs_names = page_address(page);
 	char *p;
 #ifdef CONFIG_BLOCK
@@ -409,8 +420,8 @@ retry:
 #endif
 		panic("VFS: Unable to mount root fs on %s", b);
 	}
-	if (!(flags & SB_RDONLY)) {
-		flags |= SB_RDONLY;
+	if (!(flags & MS_RDONLY)) {
+		flags |= MS_RDONLY;
 		goto retry;
 	}
 
@@ -479,21 +490,21 @@ void __init change_floppy(char *fmt, ...)
 	va_start(args, fmt);
 	vsprintf(buf, fmt, args);
 	va_end(args);
-	fd = ksys_open("/dev/root", O_RDWR | O_NDELAY, 0);
+	fd = sys_open("/dev/root", O_RDWR | O_NDELAY, 0);
 	if (fd >= 0) {
-		ksys_ioctl(fd, FDEJECT, 0);
-		ksys_close(fd);
+		sys_ioctl(fd, FDEJECT, 0);
+		sys_close(fd);
 	}
 	printk(KERN_NOTICE "VFS: Insert %s and press ENTER\n", buf);
-	fd = ksys_open("/dev/console", O_RDWR, 0);
+	fd = sys_open("/dev/console", O_RDWR, 0);
 	if (fd >= 0) {
-		ksys_ioctl(fd, TCGETS, (long)&termios);
+		sys_ioctl(fd, TCGETS, (long)&termios);
 		termios.c_lflag &= ~ICANON;
-		ksys_ioctl(fd, TCSETSF, (long)&termios);
-		ksys_read(fd, &c, 1);
+		sys_ioctl(fd, TCSETSF, (long)&termios);
+		sys_read(fd, &c, 1);
 		termios.c_lflag |= ICANON;
-		ksys_ioctl(fd, TCSETSF, (long)&termios);
-		ksys_close(fd);
+		sys_ioctl(fd, TCSETSF, (long)&termios);
+		sys_close(fd);
 	}
 }
 #endif
@@ -538,6 +549,9 @@ void __init mount_root(void)
 void __init prepare_namespace(void)
 {
 	int is_floppy;
+#ifdef CONFIG_DIAG_KERNEL
+	int err;
+#endif
 
 	if (root_delay) {
 		printk(KERN_INFO "Waiting %d sec before mounting root device...\n",
@@ -555,6 +569,7 @@ void __init prepare_namespace(void)
 	wait_for_device_probe();
 
 	md_run_setup();
+	dm_run_setup();
 
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
@@ -577,7 +592,7 @@ void __init prepare_namespace(void)
 			saved_root_name);
 		while (driver_probe_done() != 0 ||
 			(ROOT_DEV = name_to_dev_t(saved_root_name)) == 0)
-			msleep(5);
+			msleep(100);
 		async_synchronize_full();
 	}
 
@@ -589,8 +604,17 @@ void __init prepare_namespace(void)
 	mount_root();
 out:
 	devtmpfs_mount("dev");
-	ksys_mount(".", "/", NULL, MS_MOVE, NULL);
-	ksys_chroot(".");
+#ifndef CONFIG_DIAG_KERNEL
+	sys_mount(".", "/", NULL, MS_MOVE, NULL);
+	sys_chroot(".");
+#else
+	/* Mount root to /system_root for Diag image */
+	sys_mount(".", "/system_root", NULL, MS_MOVE, NULL);
+	err = sys_mount("/system_root/system", "/system", NULL, MS_BIND, NULL);
+	pr_info("Diag: bind mount /system, err=%d\n", err);
+	sys_chroot("/");
+	sys_chdir("/");
+#endif
 }
 
 static bool is_tmpfs;

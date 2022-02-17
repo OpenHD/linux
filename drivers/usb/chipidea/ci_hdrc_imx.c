@@ -1,8 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright 2012 Freescale Semiconductor, Inc.
  * Copyright (C) 2012 Marek Vasut <marex@denx.de>
  * on behalf of DENX Software Engineering GmbH
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/module.h>
@@ -12,7 +18,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/dma-mapping.h>
 #include <linux/usb/chipidea.h>
-#include <linux/usb/of.h>
 #include <linux/clk.h>
 
 #include "ci.h"
@@ -20,6 +25,7 @@
 
 struct ci_hdrc_imx_platform_flag {
 	unsigned int flags;
+	bool runtime_pm;
 };
 
 static const struct ci_hdrc_imx_platform_flag imx23_usb_data = {
@@ -28,7 +34,7 @@ static const struct ci_hdrc_imx_platform_flag imx23_usb_data = {
 };
 
 static const struct ci_hdrc_imx_platform_flag imx27_usb_data = {
-	.flags = CI_HDRC_DISABLE_STREAMING,
+		CI_HDRC_DISABLE_STREAMING,
 };
 
 static const struct ci_hdrc_imx_platform_flag imx28_usb_data = {
@@ -57,7 +63,8 @@ static const struct ci_hdrc_imx_platform_flag imx6sx_usb_data = {
 
 static const struct ci_hdrc_imx_platform_flag imx6ul_usb_data = {
 	.flags = CI_HDRC_SUPPORTS_RUNTIME_PM |
-		CI_HDRC_TURN_VBUS_EARLY_ON,
+		CI_HDRC_TURN_VBUS_EARLY_ON |
+		CI_HDRC_DISABLE_DEVICE_STREAMING,
 };
 
 static const struct ci_hdrc_imx_platform_flag imx7d_usb_data = {
@@ -83,7 +90,6 @@ struct ci_hdrc_imx_data {
 	struct clk *clk;
 	struct imx_usbmisc_data *usbmisc_data;
 	bool supports_runtime_pm;
-	bool override_phy_control;
 	bool in_lpm;
 	/* SoC before i.mx6 (except imx23/imx28) needs three clks */
 	bool need_three_clks;
@@ -127,9 +133,13 @@ static struct imx_usbmisc_data *usbmisc_get_init_data(struct device *dev)
 	misc_pdev = of_find_device_by_node(args.np);
 	of_node_put(args.np);
 
-	if (!misc_pdev || !platform_get_drvdata(misc_pdev))
+	if (!misc_pdev)
 		return ERR_PTR(-EPROBE_DEFER);
 
+	if (!platform_get_drvdata(misc_pdev)) {
+		put_device(&misc_pdev->dev);
+		return ERR_PTR(-EPROBE_DEFER);
+	}
 	data->dev = &misc_pdev->dev;
 
 	if (of_find_property(np, "disable-over-current", NULL))
@@ -140,9 +150,6 @@ static struct imx_usbmisc_data *usbmisc_get_init_data(struct device *dev)
 
 	if (of_find_property(np, "external-vbus-divider", NULL))
 		data->evdo = 1;
-
-	if (of_usb_get_phy_mode(np) == USBPHY_INTERFACE_MODE_ULPI)
-		data->ulpi = 1;
 
 	return data;
 }
@@ -255,7 +262,6 @@ static int ci_hdrc_imx_probe(struct platform_device *pdev)
 	int ret;
 	const struct of_device_id *of_id;
 	const struct ci_hdrc_imx_platform_flag *imx_platform_flag;
-	struct device_node *np = pdev->dev.of_node;
 
 	of_id = of_match_device(ci_hdrc_imx_dt_ids, &pdev->dev);
 	if (!of_id)
@@ -290,15 +296,6 @@ static int ci_hdrc_imx_probe(struct platform_device *pdev)
 	}
 
 	pdata.usb_phy = data->phy;
-
-	if ((of_device_is_compatible(np, "fsl,imx53-usb") ||
-	     of_device_is_compatible(np, "fsl,imx51-usb")) && pdata.usb_phy &&
-	    of_usb_get_phy_mode(np) == USBPHY_INTERFACE_MODE_ULPI) {
-		pdata.flags |= CI_HDRC_OVERRIDE_PHY_CONTROL;
-		data->override_phy_control = true;
-		usb_phy_init(pdata.usb_phy);
-	}
-
 	pdata.flags |= imx_platform_flag->flags;
 	if (pdata.flags & CI_HDRC_SUPPORTS_RUNTIME_PM)
 		data->supports_runtime_pm = true;
@@ -352,8 +349,6 @@ static int ci_hdrc_imx_remove(struct platform_device *pdev)
 		pm_runtime_put_noidle(&pdev->dev);
 	}
 	ci_hdrc_remove_device(data->ci_pdev);
-	if (data->override_phy_control)
-		usb_phy_shutdown(data->phy);
 	imx_disable_unprepare_clks(&pdev->dev);
 
 	return 0;

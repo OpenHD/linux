@@ -19,7 +19,7 @@
 #include "be.h"
 #include "be_cmds.h"
 
-const char * const be_misconfig_evt_port_state[] = {
+char *be_misconfig_evt_port_state[] = {
 	"Physical Link is functional",
 	"Optics faulted/incorrectly installed/not installed - Reseat optics. If issue not resolved, replace.",
 	"Optics of two types installed – Remove one optic or install matching pair of optics.",
@@ -103,7 +103,7 @@ static struct be_cmd_priv_map cmd_priv_map[] = {
 static bool be_cmd_allowed(struct be_adapter *adapter, u8 opcode, u8 subsystem)
 {
 	int i;
-	int num_entries = ARRAY_SIZE(cmd_priv_map);
+	int num_entries = sizeof(cmd_priv_map)/sizeof(struct be_cmd_priv_map);
 	u32 cmd_privileges = adapter->cmd_privileges;
 
 	for (i = 0; i < num_entries; i++)
@@ -4939,9 +4939,8 @@ static int
 __be_cmd_set_logical_link_config(struct be_adapter *adapter,
 				 int link_state, int version, u8 domain)
 {
-	struct be_cmd_req_set_ll_link *req;
 	struct be_mcc_wrb *wrb;
-	u32 link_config = 0;
+	struct be_cmd_req_set_ll_link *req;
 	int status;
 
 	mutex_lock(&adapter->mcc_lock);
@@ -4963,12 +4962,10 @@ __be_cmd_set_logical_link_config(struct be_adapter *adapter,
 
 	if (link_state == IFLA_VF_LINK_STATE_ENABLE ||
 	    link_state == IFLA_VF_LINK_STATE_AUTO)
-		link_config |= PLINK_ENABLE;
+		req->link_config |= PLINK_ENABLE;
 
 	if (link_state == IFLA_VF_LINK_STATE_AUTO)
-		link_config |= PLINK_TRACK;
-
-	req->link_config = cpu_to_le32(link_config);
+		req->link_config |= PLINK_TRACK;
 
 	status = be_mcc_notify_wait(adapter);
 err:

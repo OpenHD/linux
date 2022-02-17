@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
  *	V 4 L 2   D R I V E R   H E L P E R   A P I
@@ -13,7 +12,6 @@
 #include <linux/poll.h>
 #include <linux/fs.h>
 #include <linux/mutex.h>
-#include <linux/sched/signal.h>
 #include <linux/compiler.h> /* need __user */
 #include <linux/videodev2.h>
 
@@ -45,9 +43,6 @@ struct v4l2_fh;
  * @vidioc_enum_fmt_sdr_out: pointer to the function that implements
  *	:ref:`VIDIOC_ENUM_FMT <vidioc_enum_fmt>` ioctl logic
  *	for Software Defined Radio output
- * @vidioc_enum_fmt_meta_cap: pointer to the function that implements
- *	:ref:`VIDIOC_ENUM_FMT <vidioc_enum_fmt>` ioctl logic
- *	for metadata capture
  * @vidioc_g_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
@@ -78,8 +73,6 @@ struct v4l2_fh;
  * @vidioc_g_fmt_sdr_out: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for Software Defined
  *	Radio output
- * @vidioc_g_fmt_meta_cap: pointer to the function that implements
- *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for metadata capture
  * @vidioc_s_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
@@ -110,8 +103,6 @@ struct v4l2_fh;
  * @vidioc_s_fmt_sdr_out: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for Software Defined
  *	Radio output
- * @vidioc_s_fmt_meta_cap: pointer to the function that implements
- *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for metadata capture
  * @vidioc_try_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
@@ -144,8 +135,6 @@ struct v4l2_fh;
  * @vidioc_try_fmt_sdr_out: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for Software Defined
  *	Radio output
- * @vidioc_try_fmt_meta_cap: pointer to the function that implements
- *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for metadata capture
  * @vidioc_reqbufs: pointer to the function that implements
  *	:ref:`VIDIOC_REQBUFS <vidioc_reqbufs>` ioctl
  * @vidioc_querybuf: pointer to the function that implements
@@ -316,8 +305,6 @@ struct v4l2_ioctl_ops {
 				       struct v4l2_fmtdesc *f);
 	int (*vidioc_enum_fmt_sdr_out)(struct file *file, void *fh,
 				       struct v4l2_fmtdesc *f);
-	int (*vidioc_enum_fmt_meta_cap)(struct file *file, void *fh,
-					struct v4l2_fmtdesc *f);
 
 	/* VIDIOC_G_FMT handlers */
 	int (*vidioc_g_fmt_vid_cap)(struct file *file, void *fh,
@@ -344,8 +331,6 @@ struct v4l2_ioctl_ops {
 				    struct v4l2_format *f);
 	int (*vidioc_g_fmt_sdr_out)(struct file *file, void *fh,
 				    struct v4l2_format *f);
-	int (*vidioc_g_fmt_meta_cap)(struct file *file, void *fh,
-				     struct v4l2_format *f);
 
 	/* VIDIOC_S_FMT handlers */
 	int (*vidioc_s_fmt_vid_cap)(struct file *file, void *fh,
@@ -372,8 +357,6 @@ struct v4l2_ioctl_ops {
 				    struct v4l2_format *f);
 	int (*vidioc_s_fmt_sdr_out)(struct file *file, void *fh,
 				    struct v4l2_format *f);
-	int (*vidioc_s_fmt_meta_cap)(struct file *file, void *fh,
-				     struct v4l2_format *f);
 
 	/* VIDIOC_TRY_FMT handlers */
 	int (*vidioc_try_fmt_vid_cap)(struct file *file, void *fh,
@@ -400,8 +383,6 @@ struct v4l2_ioctl_ops {
 				      struct v4l2_format *f);
 	int (*vidioc_try_fmt_sdr_out)(struct file *file, void *fh,
 				      struct v4l2_format *f);
-	int (*vidioc_try_fmt_meta_cap)(struct file *file, void *fh,
-				       struct v4l2_format *f);
 
 	/* Buffer handlers */
 	int (*vidioc_reqbufs)(struct file *file, void *fh,
@@ -621,7 +602,7 @@ const char *v4l2_norm_to_name(v4l2_std_id id);
  * v4l2_video_std_frame_period - Ancillary routine that fills a
  *	struct &v4l2_fract pointer with the default framerate fraction.
  *
- * @id: analog TV standard ID.
+ * @id: analog TV sdandard ID.
  * @frameperiod: struct &v4l2_fract pointer to be filled
  *
  */
@@ -632,7 +613,7 @@ void v4l2_video_std_frame_period(int id, struct v4l2_fract *frameperiod);
  *	a &v4l2_standard structure according to the @id parameter.
  *
  * @vs: struct &v4l2_standard pointer to be filled
- * @id: analog TV standard ID.
+ * @id: analog TV sdandard ID.
  * @name: name of the standard to be used
  *
  * .. note::
@@ -641,17 +622,6 @@ void v4l2_video_std_frame_period(int id, struct v4l2_fract *frameperiod);
  */
 int v4l2_video_std_construct(struct v4l2_standard *vs,
 				    int id, const char *name);
-
-/**
- * v4l_video_std_enumstd - Ancillary routine that fills in the fields of
- *	a &v4l2_standard structure according to the @id and @vs->index
- *	parameters.
- *
- * @vs: struct &v4l2_standard pointer to be filled.
- * @id: analog TV standard ID.
- *
- */
-int v4l_video_std_enumstd(struct v4l2_standard *vs, v4l2_std_id id);
 
 /**
  * v4l_printk_ioctl - Ancillary routine that prints the ioctl in a
@@ -668,6 +638,18 @@ int v4l_video_std_enumstd(struct v4l2_standard *vs, v4l2_std_id id);
 void v4l_printk_ioctl(const char *prefix, unsigned int cmd);
 
 struct video_device;
+
+
+/**
+ * v4l2_ioctl_get_lock - get the mutex (if any) that it is need to lock for
+ *	a given command.
+ *
+ * @vdev: Pointer to struct &video_device.
+ * @cmd: Ioctl name.
+ *
+ * .. note:: Internal use only. Should not be used outside V4L2 core.
+ */
+struct mutex *v4l2_ioctl_get_lock(struct video_device *vdev, unsigned int cmd);
 
 /* names for fancy debug output */
 extern const char *v4l2_field_names[];

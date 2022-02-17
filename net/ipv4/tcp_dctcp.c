@@ -131,7 +131,7 @@ static void dctcp_ce_state_0_to_1(struct sock *sk)
 		 */
 		if (inet_csk(sk)->icsk_ack.pending & ICSK_ACK_TIMER)
 			__tcp_send_ack(sk, ca->prior_rcv_nxt);
-		inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+		tcp_enter_quickack_mode(sk, 1);
 	}
 
 	ca->prior_rcv_nxt = tp->rcv_nxt;
@@ -152,7 +152,7 @@ static void dctcp_ce_state_1_to_0(struct sock *sk)
 		 */
 		if (inet_csk(sk)->icsk_ack.pending & ICSK_ACK_TIMER)
 			__tcp_send_ack(sk, ca->prior_rcv_nxt);
-		inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+		tcp_enter_quickack_mode(sk, 1);
 	}
 
 	ca->prior_rcv_nxt = tp->rcv_nxt;
@@ -292,7 +292,6 @@ static struct tcp_congestion_ops dctcp __read_mostly = {
 static struct tcp_congestion_ops dctcp_reno __read_mostly = {
 	.ssthresh	= tcp_reno_ssthresh,
 	.cong_avoid	= tcp_reno_cong_avoid,
-	.undo_cwnd	= tcp_reno_undo_cwnd,
 	.get_info	= dctcp_get_info,
 	.owner		= THIS_MODULE,
 	.name		= "dctcp-reno",

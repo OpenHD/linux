@@ -38,8 +38,19 @@
 
 #include "../dmaengine.h"
 
+int completion_timeout = 200;
+module_param(completion_timeout, int, 0644);
+MODULE_PARM_DESC(completion_timeout,
+		"set ioat completion timeout [msec] (default 200 [msec])");
+int idle_timeout = 2000;
+module_param(idle_timeout, int, 0644);
+MODULE_PARM_DESC(idle_timeout,
+		"set ioat idel timeout [msec] (default 2000 [msec])");
+
+#define IDLE_TIMEOUT msecs_to_jiffies(idle_timeout)
+#define COMPLETION_TIMEOUT msecs_to_jiffies(completion_timeout)
+
 static char *chanerr_str[] = {
-	"DMA Transfer Source Address Error",
 	"DMA Transfer Destination Address Error",
 	"Next Descriptor Address Error",
 	"Descriptor Error",
@@ -67,6 +78,7 @@ static char *chanerr_str[] = {
 	"Result Guard Tag verification Error",
 	"Result Application Tag verification Error",
 	"Result Reference Tag verification Error",
+	NULL
 };
 
 static void ioat_eh(struct ioatdma_chan *ioat_chan);
@@ -75,10 +87,13 @@ static void ioat_print_chanerrs(struct ioatdma_chan *ioat_chan, u32 chanerr)
 {
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(chanerr_str); i++) {
+	for (i = 0; i < 32; i++) {
 		if ((chanerr >> i) & 1) {
-			dev_err(to_dev(ioat_chan), "Err(%d): %s\n",
-				i, chanerr_str[i]);
+			if (chanerr_str[i]) {
+				dev_err(to_dev(ioat_chan), "Err(%d): %s\n",
+					i, chanerr_str[i]);
+			} else
+				break;
 		}
 	}
 }
@@ -338,11 +353,14 @@ ioat_alloc_ring_ent(struct dma_chan *chan, int idx, gfp_t flags)
 {
 	struct ioat_dma_descriptor *hw;
 	struct ioat_ring_ent *desc;
+	struct ioatdma_device *ioat_dma;
 	struct ioatdma_chan *ioat_chan = to_ioat_chan(chan);
 	int chunk;
 	dma_addr_t phys;
 	u8 *pos;
 	off_t offs;
+
+	ioat_dma = to_ioatdma_device(chan->device);
 
 	chunk = idx / IOAT_DESCS_PER_2M;
 	idx &= (IOAT_DESCS_PER_2M - 1);
@@ -475,7 +493,7 @@ int ioat_check_space_lock(struct ioatdma_chan *ioat_chan, int num_descs)
 	if (time_is_before_jiffies(ioat_chan->timer.expires)
 	    && timer_pending(&ioat_chan->timer)) {
 		mod_timer(&ioat_chan->timer, jiffies + COMPLETION_TIMEOUT);
-		ioat_timer_event(&ioat_chan->timer);
+		ioat_timer_event((unsigned long)ioat_chan);
 	}
 
 	return -ENOMEM;
@@ -598,6 +616,7 @@ static void __cleanup(struct ioatdma_chan *ioat_chan, dma_addr_t phys_complete)
 	for (i = 0; i < active && !seen_current; i++) {
 		struct dma_async_tx_descriptor *tx;
 
+		smp_read_barrier_depends();
 		prefetch(ioat_get_ring_ent(ioat_chan, idx + i + 1));
 		desc = ioat_get_ring_ent(ioat_chan, idx + i);
 		dump_desc_dbg(ioat_chan, desc);
@@ -608,8 +627,11 @@ static void __cleanup(struct ioatdma_chan *ioat_chan, dma_addr_t phys_complete)
 
 		tx = &desc->txd;
 		if (tx->cookie) {
+			struct dmaengine_result res;
+
 			dma_cookie_complete(tx);
 			dma_descriptor_unmap(tx);
+			res.result = DMA_TRANS_NOERROR;
 			dmaengine_desc_get_callback_invoke(tx, NULL);
 			tx->callback = NULL;
 			tx->callback_result = NULL;
@@ -644,13 +666,9 @@ static void __cleanup(struct ioatdma_chan *ioat_chan, dma_addr_t phys_complete)
 		mod_timer(&ioat_chan->timer, jiffies + IDLE_TIMEOUT);
 	}
 
-	/* microsecond delay by sysfs variable  per pending descriptor */
-	if (ioat_chan->intr_coalesce != ioat_chan->prev_intr_coalesce) {
-		writew(min((ioat_chan->intr_coalesce * (active - i)),
-		       IOAT_INTRDELAY_MASK),
-		       ioat_chan->ioat_dma->reg_base + IOAT_INTRDELAY_OFFSET);
-		ioat_chan->prev_intr_coalesce = ioat_chan->intr_coalesce;
-	}
+	/* 5 microsecond delay per pending descriptor */
+	writew(min((5 * (active - i)), IOAT_INTRDELAY_MASK),
+	       ioat_chan->ioat_dma->reg_base + IOAT_INTRDELAY_OFFSET);
 }
 
 static void ioat_cleanup(struct ioatdma_chan *ioat_chan)
@@ -689,12 +707,6 @@ static void ioat_restart_channel(struct ioatdma_chan *ioat_chan)
 {
 	u64 phys_complete;
 
-	/* set the completion address register again */
-	writel(lower_32_bits(ioat_chan->completion_dma),
-	       ioat_chan->reg_base + IOAT_CHANCMP_OFFSET_LOW);
-	writel(upper_32_bits(ioat_chan->completion_dma),
-	       ioat_chan->reg_base + IOAT_CHANCMP_OFFSET_HIGH);
-
 	ioat_quiesce(ioat_chan, 0);
 	if (ioat_cleanup_preamble(ioat_chan, &phys_complete))
 		__cleanup(ioat_chan, phys_complete);
@@ -721,6 +733,7 @@ static void ioat_abort_descs(struct ioatdma_chan *ioat_chan)
 	for (i = 1; i < active; i++) {
 		struct dma_async_tx_descriptor *tx;
 
+		smp_read_barrier_depends();
 		prefetch(ioat_get_ring_ent(ioat_chan, idx + i + 1));
 		desc = ioat_get_ring_ent(ioat_chan, idx + i);
 
@@ -867,9 +880,9 @@ static void check_active(struct ioatdma_chan *ioat_chan)
 		mod_timer(&ioat_chan->timer, jiffies + IDLE_TIMEOUT);
 }
 
-void ioat_timer_event(struct timer_list *t)
+void ioat_timer_event(unsigned long data)
 {
-	struct ioatdma_chan *ioat_chan = from_timer(ioat_chan, t, timer);
+	struct ioatdma_chan *ioat_chan = to_ioat_chan((void *)data);
 	dma_addr_t phys_complete;
 	u64 status;
 

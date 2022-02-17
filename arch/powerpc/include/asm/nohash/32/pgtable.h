@@ -1,15 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_NOHASH_32_PGTABLE_H
 #define _ASM_POWERPC_NOHASH_32_PGTABLE_H
 
-#define __ARCH_USE_5LEVEL_HACK
 #include <asm-generic/pgtable-nopmd.h>
 
 #ifndef __ASSEMBLY__
 #include <linux/sched.h>
 #include <linux/threads.h>
-#include <asm/mmu.h>			/* For sub-arch specific PPC_PIN_SIZE */
-#include <asm/asm-405.h>
+#include <asm/io.h>			/* For sub-arch specific PPC_PIN_SIZE */
 
 extern unsigned long ioremap_bot;
 
@@ -18,24 +15,6 @@ extern int icache_44x_need_flush;
 #endif
 
 #endif /* __ASSEMBLY__ */
-
-#define PTE_INDEX_SIZE	PTE_SHIFT
-#define PMD_INDEX_SIZE	0
-#define PUD_INDEX_SIZE	0
-#define PGD_INDEX_SIZE	(32 - PGDIR_SHIFT)
-
-#define PMD_CACHE_INDEX	PMD_INDEX_SIZE
-#define PUD_CACHE_INDEX	PUD_INDEX_SIZE
-
-#ifndef __ASSEMBLY__
-#define PTE_TABLE_SIZE	(sizeof(pte_t) << PTE_INDEX_SIZE)
-#define PMD_TABLE_SIZE	0
-#define PUD_TABLE_SIZE	0
-#define PGD_TABLE_SIZE	(sizeof(pgd_t) << PGD_INDEX_SIZE)
-#endif	/* __ASSEMBLY__ */
-
-#define PTRS_PER_PTE	(1 << PTE_INDEX_SIZE)
-#define PTRS_PER_PGD	(1 << PGD_INDEX_SIZE)
 
 /*
  * The normal case is that PTEs are 32-bits and we have a 1-page
@@ -48,12 +27,22 @@ extern int icache_44x_need_flush;
  * -Matt
  */
 /* PGDIR_SHIFT determines what a top-level page table entry can map */
-#define PGDIR_SHIFT	(PAGE_SHIFT + PTE_INDEX_SIZE)
+#define PGDIR_SHIFT	(PAGE_SHIFT + PTE_SHIFT)
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
-/* Bits to mask out from a PGD to get to the PUD page */
-#define PGD_MASKED_BITS		0
+/*
+ * entries per page directory level: our page-table tree is two-level, so
+ * we don't really have any PMD directory.
+ */
+#ifndef __ASSEMBLY__
+#define PTE_TABLE_SIZE	(sizeof(pte_t) << PTE_SHIFT)
+#define PGD_TABLE_SIZE	(sizeof(pgd_t) << (32 - PGDIR_SHIFT))
+#endif	/* __ASSEMBLY__ */
+
+#define PTRS_PER_PTE	(1 << PTE_SHIFT)
+#define PTRS_PER_PMD	1
+#define PTRS_PER_PGD	(1 << (32 - PGDIR_SHIFT))
 
 #define USER_PTRS_PER_PGD	(TASK_SIZE / PGDIR_SIZE)
 #define FIRST_USER_ADDRESS	0UL
@@ -124,7 +113,7 @@ extern int icache_44x_need_flush;
 #include <asm/nohash/pte-book3e.h>
 #elif defined(CONFIG_FSL_BOOKE)
 #include <asm/nohash/32/pte-fsl-booke.h>
-#elif defined(CONFIG_PPC_8xx)
+#elif defined(CONFIG_8xx)
 #include <asm/nohash/32/pte-8xx.h>
 #endif
 
@@ -134,7 +123,7 @@ extern int icache_44x_need_flush;
 #ifndef __ASSEMBLY__
 
 #define pte_clear(mm, addr, ptep) \
-	do { pte_update(ptep, ~0, 0); } while (0)
+	do { pte_update(ptep, ~_PAGE_HASHPTE, 0); } while (0)
 
 #define pmd_none(pmd)		(!pmd_val(pmd))
 #define	pmd_bad(pmd)		(pmd_val(pmd) & _PMD_BAD)
@@ -145,6 +134,21 @@ static inline void pmd_clear(pmd_t *pmdp)
 }
 
 
+
+/*
+ * When flushing the tlb entry for a page, we also need to flush the hash
+ * table entry.  flush_hash_pages is assembler (for speed) in hashtable.S.
+ */
+extern int flush_hash_pages(unsigned context, unsigned long va,
+			    unsigned long pmdval, int count);
+
+/* Add an HPTE to the hash table */
+extern void add_hash_page(unsigned context, unsigned long va,
+			  unsigned long pmdval);
+
+/* Flush an entry from the TLB/hash table */
+extern void flush_hash_entry(struct mm_struct *mm, pte_t *ptep,
+			     unsigned long address);
 
 /*
  * PTE updates. This function is called whenever an existing
@@ -223,11 +227,21 @@ static inline unsigned long long pte_update(pte_t *p,
 }
 #endif /* CONFIG_PTE_64BIT */
 
+/*
+ * 2.6 calls this without flushing the TLB entry; this is wrong
+ * for our hash-based implementation, we fix that up here.
+ */
 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
 static inline int __ptep_test_and_clear_young(unsigned int context, unsigned long addr, pte_t *ptep)
 {
 	unsigned long old;
 	old = pte_update(ptep, _PAGE_ACCESSED, 0);
+#if _PAGE_HASHPTE != 0
+	if (old & _PAGE_HASHPTE) {
+		unsigned long ptephys = __pa(ptep) & PAGE_MASK;
+		flush_hash_pages(context, addr, ptephys, 1);
+	}
+#endif
 	return (old & _PAGE_ACCESSED) != 0;
 }
 #define ptep_test_and_clear_young(__vma, __addr, __ptep) \
@@ -237,7 +251,7 @@ static inline int __ptep_test_and_clear_young(unsigned int context, unsigned lon
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 				       pte_t *ptep)
 {
-	return __pte(pte_update(ptep, ~0, 0));
+	return __pte(pte_update(ptep, ~_PAGE_HASHPTE, 0));
 }
 
 #define __HAVE_ARCH_PTEP_SET_WRPROTECT
@@ -253,27 +267,18 @@ static inline void huge_ptep_set_wrprotect(struct mm_struct *mm,
 }
 
 
-static inline void __ptep_set_access_flags(struct vm_area_struct *vma,
-					   pte_t *ptep, pte_t entry,
-					   unsigned long address,
-					   int psize)
+static inline void __ptep_set_access_flags(struct mm_struct *mm,
+					   pte_t *ptep, pte_t entry)
 {
 	unsigned long set = pte_val(entry) &
 		(_PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_RW | _PAGE_EXEC);
-	unsigned long clr = ~pte_val(entry) & (_PAGE_RO | _PAGE_NA);
+	unsigned long clr = ~pte_val(entry) & _PAGE_RO;
 
 	pte_update(ptep, clr, set);
-
-	flush_tlb_page(vma, address);
-}
-
-static inline int pte_young(pte_t pte)
-{
-	return pte_val(pte) & _PAGE_ACCESSED;
 }
 
 #define __HAVE_ARCH_PTE_SAME
-#define pte_same(A,B)	((pte_val(A) ^ pte_val(B)) == 0)
+#define pte_same(A,B)	(((pte_val(A) ^ pte_val(B)) & ~_PAGE_HASHPTE) == 0)
 
 /*
  * Note that on Book E processors, the pmd contains the kernel virtual
@@ -314,7 +319,7 @@ static inline int pte_young(pte_t pte)
 /*
  * Encode and decode a swap entry.
  * Note that the bits we use in a PTE for representing a swap entry
- * must not include the _PAGE_PRESENT bit.
+ * must not include the _PAGE_PRESENT bit or the _PAGE_HASHPTE bit (if used).
  *   -- paulus
  */
 #define __swp_type(entry)		((entry).val & 0x1f)
@@ -323,7 +328,17 @@ static inline int pte_young(pte_t pte)
 #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) >> 3 })
 #define __swp_entry_to_pte(x)		((pte_t) { (x).val << 3 })
 
-int map_kernel_page(unsigned long va, phys_addr_t pa, int flags);
+#ifndef CONFIG_PPC_4K_PAGES
+void pgtable_cache_init(void);
+#else
+/*
+ * No page table caches to initialise
+ */
+#define pgtable_cache_init()	do { } while (0)
+#endif
+
+extern int get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep,
+		      pmd_t **pmdp);
 
 #endif /* !__ASSEMBLY__ */
 

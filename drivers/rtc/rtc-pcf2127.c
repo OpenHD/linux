@@ -36,11 +36,6 @@
 #define PCF2127_REG_MO          (0x08)
 #define PCF2127_REG_YR          (0x09)
 
-/* the pcf2127 has 512 bytes nvmem, pcf2129 doesn't */
-#define PCF2127_REG_RAM_addr_MSB       0x1a
-#define PCF2127_REG_RAM_wrt_cmd        0x1c
-#define PCF2127_REG_RAM_rd_cmd         0x1d
-
 #define PCF2127_OSF             BIT(7)  /* Oscillator Fail flag */
 
 struct pcf2127 {
@@ -58,13 +53,8 @@ static int pcf2127_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	unsigned char buf[10];
 	int ret;
 
-	/*
-	 * Avoid reading CTRL2 register as it causes WD_VAL register
-	 * value to reset to 0 which means watchdog is stopped.
-	 */
-	ret = regmap_bulk_read(pcf2127->regmap, PCF2127_REG_CTRL3,
-			       (buf + PCF2127_REG_CTRL3),
-			       ARRAY_SIZE(buf) - PCF2127_REG_CTRL3);
+	ret = regmap_bulk_read(pcf2127->regmap, PCF2127_REG_CTRL1, buf,
+				sizeof(buf));
 	if (ret) {
 		dev_err(dev, "%s: read error\n", __func__);
 		return ret;
@@ -85,12 +75,14 @@ static int pcf2127_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	}
 
 	dev_dbg(dev,
-		"%s: raw data is cr3=%02x, sec=%02x, min=%02x, hr=%02x, "
+		"%s: raw data is cr1=%02x, cr2=%02x, cr3=%02x, "
+		"sec=%02x, min=%02x, hr=%02x, "
 		"mday=%02x, wday=%02x, mon=%02x, year=%02x\n",
-		__func__, buf[PCF2127_REG_CTRL3], buf[PCF2127_REG_SC],
-		buf[PCF2127_REG_MN], buf[PCF2127_REG_HR],
-		buf[PCF2127_REG_DM], buf[PCF2127_REG_DW],
-		buf[PCF2127_REG_MO], buf[PCF2127_REG_YR]);
+		__func__,
+		buf[0], buf[1], buf[2],
+		buf[3], buf[4], buf[5],
+		buf[6], buf[7], buf[8], buf[9]);
+
 
 	tm->tm_sec = bcd2bin(buf[PCF2127_REG_SC] & 0x7F);
 	tm->tm_min = bcd2bin(buf[PCF2127_REG_MN] & 0x7F);
@@ -108,7 +100,7 @@ static int pcf2127_rtc_read_time(struct device *dev, struct rtc_time *tm)
 		tm->tm_sec, tm->tm_min, tm->tm_hour,
 		tm->tm_mday, tm->tm_mon, tm->tm_year, tm->tm_wday);
 
-	return 0;
+	return rtc_valid_tm(tm);
 }
 
 static int pcf2127_rtc_set_time(struct device *dev, struct rtc_time *tm)
@@ -180,47 +172,10 @@ static const struct rtc_class_ops pcf2127_rtc_ops = {
 	.set_time	= pcf2127_rtc_set_time,
 };
 
-static int pcf2127_nvmem_read(void *priv, unsigned int offset,
-			      void *val, size_t bytes)
-{
-	struct pcf2127 *pcf2127 = priv;
-	int ret;
-	unsigned char offsetbuf[] = { offset >> 8, offset };
-
-	ret = regmap_bulk_write(pcf2127->regmap, PCF2127_REG_RAM_addr_MSB,
-				offsetbuf, 2);
-	if (ret)
-		return ret;
-
-	ret = regmap_bulk_read(pcf2127->regmap, PCF2127_REG_RAM_rd_cmd,
-			       val, bytes);
-
-	return ret ?: bytes;
-}
-
-static int pcf2127_nvmem_write(void *priv, unsigned int offset,
-			       void *val, size_t bytes)
-{
-	struct pcf2127 *pcf2127 = priv;
-	int ret;
-	unsigned char offsetbuf[] = { offset >> 8, offset };
-
-	ret = regmap_bulk_write(pcf2127->regmap, PCF2127_REG_RAM_addr_MSB,
-				offsetbuf, 2);
-	if (ret)
-		return ret;
-
-	ret = regmap_bulk_write(pcf2127->regmap, PCF2127_REG_RAM_wrt_cmd,
-				val, bytes);
-
-	return ret ?: bytes;
-}
-
 static int pcf2127_probe(struct device *dev, struct regmap *regmap,
-			const char *name, bool has_nvmem)
+			const char *name)
 {
 	struct pcf2127 *pcf2127;
-	int ret = 0;
 
 	dev_dbg(dev, "%s\n", __func__);
 
@@ -234,21 +189,8 @@ static int pcf2127_probe(struct device *dev, struct regmap *regmap,
 
 	pcf2127->rtc = devm_rtc_device_register(dev, name, &pcf2127_rtc_ops,
 						THIS_MODULE);
-	if (IS_ERR(pcf2127->rtc))
-		return PTR_ERR(pcf2127->rtc);
 
-	if (has_nvmem) {
-		struct nvmem_config nvmem_cfg = {
-			.priv = pcf2127,
-			.reg_read = pcf2127_nvmem_read,
-			.reg_write = pcf2127_nvmem_write,
-			.size = 512,
-		};
-
-		ret = rtc_nvmem_register(pcf2127->rtc, &nvmem_cfg);
-	}
-
-	return ret;
+	return PTR_ERR_OR_ZERO(pcf2127->rtc);
 }
 
 #ifdef CONFIG_OF
@@ -359,11 +301,11 @@ static int pcf2127_i2c_probe(struct i2c_client *client,
 	}
 
 	return pcf2127_probe(&client->dev, regmap,
-			     pcf2127_i2c_driver.driver.name, id->driver_data);
+				pcf2127_i2c_driver.driver.name);
 }
 
 static const struct i2c_device_id pcf2127_i2c_id[] = {
-	{ "pcf2127", 1 },
+	{ "pcf2127", 0 },
 	{ "pcf2129", 0 },
 	{ }
 };
@@ -422,12 +364,11 @@ static int pcf2127_spi_probe(struct spi_device *spi)
 		return PTR_ERR(regmap);
 	}
 
-	return pcf2127_probe(&spi->dev, regmap, pcf2127_spi_driver.driver.name,
-			     spi_get_device_id(spi)->driver_data);
+	return pcf2127_probe(&spi->dev, regmap, pcf2127_spi_driver.driver.name);
 }
 
 static const struct spi_device_id pcf2127_spi_id[] = {
-	{ "pcf2127", 1 },
+	{ "pcf2127", 0 },
 	{ "pcf2129", 0 },
 	{ }
 };

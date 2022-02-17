@@ -1,7 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-2.0
 # description: event trigger - test histogram trigger
-# flags: instance
 
 do_reset() {
     reset_trigger
@@ -12,7 +10,7 @@ do_reset() {
 fail() { #msg
     do_reset
     echo $1
-    exit_fail
+    exit $FAIL
 }
 
 if [ ! -f set_event -o ! -d events/sched ]; then

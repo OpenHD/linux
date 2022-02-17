@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Xen hypercall batching.
  *
@@ -80,9 +79,9 @@ void xen_mc_flush(void)
 		   and just do the call directly. */
 		mc = &b->entries[0];
 
-		mc->result = xen_single_call(mc->op, mc->args[0], mc->args[1],
-					     mc->args[2], mc->args[3],
-					     mc->args[4]);
+		mc->result = privcmd_call(mc->op,
+					  mc->args[0], mc->args[1], mc->args[2], 
+					  mc->args[3], mc->args[4]);
 		ret = mc->result < 0;
 		break;
 

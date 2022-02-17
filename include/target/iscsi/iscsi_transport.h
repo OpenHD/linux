@@ -1,7 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-#include "iscsi_target_core.h" /* struct iscsi_cmd */
-
-struct sockaddr_storage;
+#include <linux/module.h>
+#include <linux/list.h>
+#include "iscsi_target_core.h"
 
 struct iscsit_transport {
 #define ISCSIT_TRANSPORT_NAME	16
@@ -56,12 +55,8 @@ extern int iscsit_setup_scsi_cmd(struct iscsi_conn *, struct iscsi_cmd *,
 extern void iscsit_set_unsoliticed_dataout(struct iscsi_cmd *);
 extern int iscsit_process_scsi_cmd(struct iscsi_conn *, struct iscsi_cmd *,
 				struct iscsi_scsi_req *);
-extern int
-__iscsit_check_dataout_hdr(struct iscsi_conn *, void *,
-			   struct iscsi_cmd *, u32, bool *);
-extern int
-iscsit_check_dataout_hdr(struct iscsi_conn *conn, void *buf,
-			 struct iscsi_cmd **out_cmd);
+extern int iscsit_check_dataout_hdr(struct iscsi_conn *, unsigned char *,
+				struct iscsi_cmd **);
 extern int iscsit_check_dataout_payload(struct iscsi_cmd *, struct iscsi_data *,
 				bool);
 extern int iscsit_setup_nop_out(struct iscsi_conn *, struct iscsi_cmd *,
@@ -130,9 +125,6 @@ extern void iscsit_release_cmd(struct iscsi_cmd *);
 extern void iscsit_free_cmd(struct iscsi_cmd *, bool);
 extern void iscsit_add_cmd_to_immediate_queue(struct iscsi_cmd *,
 					      struct iscsi_conn *, u8);
-extern struct iscsi_cmd *
-iscsit_find_cmd_from_itt_or_dump(struct iscsi_conn *conn,
-				 itt_t init_task_tag, u32 length);
 
 /*
  * From iscsi_target_nego.c

@@ -150,13 +150,6 @@ config LCD_HX8357
 	  If you have a HX-8357 LCD panel, say Y to enable its LCD control
 	  driver.
 
-  config LCD_OTM3225A
-  	tristate "ORISE Technology OTM3225A support"
-  	depends on SPI
-  	help
-  	  If you have a panel based on the OTM3225A controller
-  	  chip then say y to include a driver for it.
-
 endif # LCD_CLASS_DEVICE
 
 #
@@ -271,13 +264,6 @@ config BACKLIGHT_PWM
 	help
 	  If you have a LCD backlight adjustable by PWM, say Y to enable
 	  this driver.
-
-config BACKLIGHT_RPI
-	tristate "Raspberry Pi display firmware driven backlight"
-	depends on RASPBERRYPI_FIRMWARE
-	help
-	  If you have the Raspberry Pi DSI touchscreen display, say Y to
-	  enable the mailbox-controlled backlight driver.
 
 config BACKLIGHT_DA903X
 	tristate "Backlight Driver for DA9030/DA9034 using WLED"
@@ -417,6 +403,22 @@ config BACKLIGHT_LP8788
 	help
 	  This supports TI LP8788 backlight driver.
 
+config BACKLIGHT_LP88XX_I2C
+	tristate "Backlight driver for TI LP88XX I2C driver"
+	depends on BACKLIGHT_CLASS_DEVICE && I2C
+	select LP88XX_CORE
+	help
+	  This supports TI LP8580, LP8863 and LP8880 backlight driver.
+	  Register access through the I2C.
+
+config BACKLIGHT_LP88XX_SPI
+	tristate "Backlight driver for TI LP88XX SPI driver"
+	depends on BACKLIGHT_CLASS_DEVICE && SPI
+	select LP88XX_CORE
+	help
+	  This supports TI lp8580, LP8863 and LP8880 backlight driver.
+	  Register access through the SPI.
+
 config BACKLIGHT_OT200
 	tristate "Backlight driver for ot200 visualisation device"
 	depends on BACKLIGHT_CLASS_DEVICE && CS5535_MFGPT && GPIO_CS5535
@@ -473,19 +475,6 @@ config BACKLIGHT_BD6107
 	depends on I2C
 	help
 	  If you have a Rohm BD6107 say Y to enable the backlight driver.
-
-config BACKLIGHT_ARCXCNN
-	tristate "Backlight driver for the Arctic Sands ARCxCnnnn family"
-	depends on I2C
-	help
-	  If you have an ARCxCnnnn family backlight say Y to enable
-	  the backlight driver.
-
-config BACKLIGHT_RAVE_SP
-	tristate "RAVE SP Backlight driver"
-	depends on RAVE_SP_CORE
-	help
-	  Support for backlight control on RAVE SP device.
 
 endif # BACKLIGHT_CLASS_DEVICE
 

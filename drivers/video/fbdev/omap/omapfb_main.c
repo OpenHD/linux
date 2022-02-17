@@ -62,7 +62,7 @@ struct caps_table_struct {
 	const char *name;
 };
 
-static const struct caps_table_struct ctrl_caps[] = {
+static struct caps_table_struct ctrl_caps[] = {
 	{ OMAPFB_CAPS_MANUAL_UPDATE,  "manual update" },
 	{ OMAPFB_CAPS_TEARSYNC,       "tearing synchronization" },
 	{ OMAPFB_CAPS_PLANE_RELOCATE_MEM, "relocate plane memory" },
@@ -74,7 +74,7 @@ static const struct caps_table_struct ctrl_caps[] = {
 	{ OMAPFB_CAPS_SET_BACKLIGHT,  "backlight setting" },
 };
 
-static const struct caps_table_struct color_caps[] = {
+static struct caps_table_struct color_caps[] = {
 	{ 1 << OMAPFB_COLOR_RGB565,	"RGB565", },
 	{ 1 << OMAPFB_COLOR_YUV422,	"YUV422", },
 	{ 1 << OMAPFB_COLOR_YUV420,	"YUV420", },
@@ -337,8 +337,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		if (fbdev->state == OMAPFB_SUSPENDED) {
 			if (fbdev->ctrl->resume)
 				fbdev->ctrl->resume();
-			if (fbdev->panel->enable)
-				fbdev->panel->enable(fbdev->panel);
+			fbdev->panel->enable(fbdev->panel);
 			fbdev->state = OMAPFB_ACTIVE;
 			if (fbdev->ctrl->get_update_mode() ==
 					OMAPFB_MANUAL_UPDATE)
@@ -347,8 +346,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		break;
 	case FB_BLANK_POWERDOWN:
 		if (fbdev->state == OMAPFB_ACTIVE) {
-			if (fbdev->panel->disable)
-				fbdev->panel->disable(fbdev->panel);
+			fbdev->panel->disable(fbdev->panel);
 			if (fbdev->ctrl->suspend)
 				fbdev->ctrl->suspend();
 			fbdev->state = OMAPFB_SUSPENDED;
@@ -1032,8 +1030,7 @@ static void omapfb_get_caps(struct omapfb_device *fbdev, int plane,
 {
 	memset(caps, 0, sizeof(*caps));
 	fbdev->ctrl->get_caps(plane, caps);
-	if (fbdev->panel->get_caps)
-		caps->ctrl |= fbdev->panel->get_caps(fbdev->panel);
+	caps->ctrl |= fbdev->panel->get_caps(fbdev->panel);
 }
 
 /* For lcd testing */
@@ -1384,7 +1381,7 @@ static struct attribute *panel_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group panel_attr_grp = {
+static struct attribute_group panel_attr_grp = {
 	.name  = "panel",
 	.attrs = panel_attrs,
 };
@@ -1406,7 +1403,7 @@ static struct attribute *ctrl_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group ctrl_attr_grp = {
+static struct attribute_group ctrl_attr_grp = {
 	.name  = "ctrl",
 	.attrs = ctrl_attrs,
 };
@@ -1552,8 +1549,7 @@ static void omapfb_free_resources(struct omapfb_device *fbdev, int state)
 	case 7:
 		omapfb_unregister_sysfs(fbdev);
 	case 6:
-		if (fbdev->panel->disable)
-			fbdev->panel->disable(fbdev->panel);
+		fbdev->panel->disable(fbdev->panel);
 	case 5:
 		omapfb_set_update_mode(fbdev, OMAPFB_UPDATE_DISABLED);
 	case 4:
@@ -1561,8 +1557,7 @@ static void omapfb_free_resources(struct omapfb_device *fbdev, int state)
 	case 3:
 		ctrl_cleanup(fbdev);
 	case 2:
-		if (fbdev->panel->cleanup)
-			fbdev->panel->cleanup(fbdev->panel);
+		fbdev->panel->cleanup(fbdev->panel);
 	case 1:
 		dev_set_drvdata(fbdev->dev, NULL);
 		kfree(fbdev);
@@ -1608,6 +1603,19 @@ static int omapfb_find_ctrl(struct omapfb_device *fbdev)
 	return 0;
 }
 
+static void check_required_callbacks(struct omapfb_device *fbdev)
+{
+#define _C(x) (fbdev->ctrl->x != NULL)
+#define _P(x) (fbdev->panel->x != NULL)
+	BUG_ON(fbdev->ctrl == NULL || fbdev->panel == NULL);
+	BUG_ON(!(_C(init) && _C(cleanup) && _C(get_caps) &&
+		 _C(set_update_mode) && _C(setup_plane) && _C(enable_plane) &&
+		 _P(init) && _P(cleanup) && _P(enable) && _P(disable) &&
+		 _P(get_caps)));
+#undef _P
+#undef _C
+}
+
 /*
  * Called by LDM binding to probe and attach a new device.
  * Initialization sequence:
@@ -1645,7 +1653,7 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		goto cleanup;
 	}
 
-	fbdev = kzalloc(sizeof(*fbdev), GFP_KERNEL);
+	fbdev = kzalloc(sizeof(struct omapfb_device), GFP_KERNEL);
 	if (fbdev == NULL) {
 		dev_err(&pdev->dev,
 			"unable to allocate memory for device info\n");
@@ -1672,11 +1680,9 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		goto cleanup;
 	}
 
-	if (fbdev->panel->init) {
-		r = fbdev->panel->init(fbdev->panel, fbdev);
-		if (r)
-			goto cleanup;
-	}
+	r = fbdev->panel->init(fbdev->panel, fbdev);
+	if (r)
+		goto cleanup;
 
 	pr_info("omapfb: configured for panel %s\n", fbdev->panel->name);
 
@@ -1691,6 +1697,8 @@ static int omapfb_do_probe(struct platform_device *pdev,
 	if (fbdev->ctrl->mmap != NULL)
 		omapfb_ops.fb_mmap = omapfb_mmap;
 	init_state++;
+
+	check_required_callbacks(fbdev);
 
 	r = planes_init(fbdev);
 	if (r)
@@ -1717,11 +1725,9 @@ static int omapfb_do_probe(struct platform_device *pdev,
 				   OMAPFB_MANUAL_UPDATE : OMAPFB_AUTO_UPDATE);
 	init_state++;
 
-	if (fbdev->panel->enable) {
-		r = fbdev->panel->enable(fbdev->panel);
-		if (r)
-			goto cleanup;
-	}
+	r = fbdev->panel->enable(fbdev->panel);
+	if (r)
+		goto cleanup;
 	init_state++;
 
 	r = omapfb_register_sysfs(fbdev);

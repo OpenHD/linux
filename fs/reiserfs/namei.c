@@ -1319,7 +1319,7 @@ static int reiserfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	int jbegin_count;
 	umode_t old_inode_mode;
 	unsigned long savelink = 1;
-	struct timespec64 ctime;
+	struct timespec ctime;
 
 	if (flags & ~RENAME_NOREPLACE)
 		return -EINVAL;
@@ -1664,6 +1664,7 @@ const struct inode_operations reiserfs_dir_inode_operations = {
  * stuff added
  */
 const struct inode_operations reiserfs_symlink_inode_operations = {
+	.readlink = generic_readlink,
 	.get_link	= page_get_link,
 	.setattr = reiserfs_setattr,
 	.listxattr = reiserfs_listxattr,

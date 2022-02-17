@@ -18,9 +18,6 @@
 
 #include <linux/ctype.h>
 #include <linux/kthread.h>
-#include <linux/slab.h>
-#include <linux/sched/signal.h>
-#include <net/sock.h>
 #include <scsi/iscsi_proto.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
@@ -432,9 +429,6 @@ static void iscsi_target_sk_data_ready(struct sock *sk)
 	if (test_and_set_bit(LOGIN_FLAGS_READ_ACTIVE, &conn->login_flags)) {
 		write_unlock_bh(&sk->sk_callback_lock);
 		pr_debug("Got LOGIN_FLAGS_READ_ACTIVE=1, conn: %p >>>>\n", conn);
-		if (iscsi_target_sk_data_ready == conn->orig_data_ready)
-			return;
-		conn->orig_data_ready(sk);
 		return;
 	}
 
@@ -554,23 +548,16 @@ static bool iscsi_target_sk_check_and_clear(struct iscsi_conn *conn, unsigned in
 
 static void iscsi_target_login_drop(struct iscsi_conn *conn, struct iscsi_login *login)
 {
-	struct iscsi_np *np = login->np;
 	bool zero_tsih = login->zero_tsih;
 
 	iscsi_remove_failed_auth_entry(conn);
 	iscsi_target_nego_release(conn);
-	iscsi_target_login_sess_out(conn, np, zero_tsih, true);
+	iscsi_target_login_sess_out(conn, zero_tsih, true);
 }
 
-struct conn_timeout {
-	struct timer_list timer;
-	struct iscsi_conn *conn;
-};
-
-static void iscsi_target_login_timeout(struct timer_list *t)
+static void iscsi_target_login_timeout(unsigned long data)
 {
-	struct conn_timeout *timeout = from_timer(timeout, t, timer);
-	struct iscsi_conn *conn = timeout->conn;
+	struct iscsi_conn *conn = (struct iscsi_conn *)data;
 
 	pr_debug("Entering iscsi_target_login_timeout >>>>>>>>>>>>>>>>>>>\n");
 
@@ -589,7 +576,7 @@ static void iscsi_target_do_login_rx(struct work_struct *work)
 	struct iscsi_np *np = login->np;
 	struct iscsi_portal_group *tpg = conn->tpg;
 	struct iscsi_tpg_np *tpg_np = conn->tpg_np;
-	struct conn_timeout timeout;
+	struct timer_list login_timer;
 	int rc, zero_tsih = login->zero_tsih;
 	bool state;
 
@@ -627,14 +614,15 @@ static void iscsi_target_do_login_rx(struct work_struct *work)
 	conn->login_kworker = current;
 	allow_signal(SIGINT);
 
-	timeout.conn = conn;
-	timer_setup_on_stack(&timeout.timer, iscsi_target_login_timeout, 0);
-	mod_timer(&timeout.timer, jiffies + TA_LOGIN_TIMEOUT * HZ);
-	pr_debug("Starting login timer for %s/%d\n", current->comm, current->pid);
+	init_timer(&login_timer);
+	login_timer.expires = (get_jiffies_64() + TA_LOGIN_TIMEOUT * HZ);
+	login_timer.data = (unsigned long)conn;
+	login_timer.function = iscsi_target_login_timeout;
+	add_timer(&login_timer);
+	pr_debug("Starting login_timer for %s/%d\n", current->comm, current->pid);
 
 	rc = conn->conn_transport->iscsit_get_login_rx(conn, login);
-	del_timer_sync(&timeout.timer);
-	destroy_timer_on_stack(&timeout.timer);
+	del_timer_sync(&login_timer);
 	flush_signals(current);
 	conn->login_kworker = NULL;
 
@@ -661,6 +649,28 @@ err:
 	iscsi_target_restore_sock_callbacks(conn);
 	iscsi_target_login_drop(conn, login);
 	iscsit_deaccess_np(np, tpg, tpg_np);
+}
+
+static void iscsi_target_do_cleanup(struct work_struct *work)
+{
+	struct iscsi_conn *conn = container_of(work,
+				struct iscsi_conn, login_cleanup_work.work);
+	struct sock *sk = conn->sock->sk;
+	struct iscsi_login *login = conn->login;
+	struct iscsi_np *np = login->np;
+	struct iscsi_portal_group *tpg = conn->tpg;
+	struct iscsi_tpg_np *tpg_np = conn->tpg_np;
+
+	pr_debug("Entering iscsi_target_do_cleanup\n");
+
+	cancel_delayed_work_sync(&conn->login_work);
+	conn->orig_state_change(sk);
+
+	iscsi_target_restore_sock_callbacks(conn);
+	iscsi_target_login_drop(conn, login);
+	iscsit_deaccess_np(np, tpg, tpg_np);
+
+	pr_debug("iscsi_target_do_cleanup done()\n");
 }
 
 static void iscsi_target_sk_state_change(struct sock *sk)
@@ -1070,6 +1080,7 @@ int iscsi_target_locate_portal(
 	int sessiontype = 0, ret = 0, tag_num, tag_size;
 
 	INIT_DELAYED_WORK(&conn->login_work, iscsi_target_do_login_rx);
+	INIT_DELAYED_WORK(&conn->login_cleanup_work, iscsi_target_do_cleanup);
 	iscsi_target_set_sock_callbacks(conn);
 
 	login->np = np;
@@ -1295,8 +1306,8 @@ int iscsi_target_start_negotiation(
 {
 	int ret;
 
-	if (conn->sock) {
-		struct sock *sk = conn->sock->sk;
+       if (conn->sock) {
+               struct sock *sk = conn->sock->sk;
 
 		write_lock_bh(&sk->sk_callback_lock);
 		set_bit(LOGIN_FLAGS_READY, &conn->login_flags);
@@ -1318,6 +1329,7 @@ int iscsi_target_start_negotiation(
 
 	if (ret < 0) {
 		cancel_delayed_work_sync(&conn->login_work);
+		cancel_delayed_work_sync(&conn->login_cleanup_work);
 		iscsi_target_restore_sock_callbacks(conn);
 		iscsi_remove_failed_auth_entry(conn);
 	}

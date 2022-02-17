@@ -242,7 +242,7 @@ static int bcm6328_hwled(struct device *dev, struct device_node *nc, u32 reg,
 
 		spin_lock_irqsave(lock, flags);
 		val = bcm6328_led_read(addr);
-		val |= (BIT(reg % 4) << (((sel % 4) * 4) + 16));
+		val |= (BIT(reg) << (((sel % 4) * 4) + 16));
 		bcm6328_led_write(addr, val);
 		spin_unlock_irqrestore(lock, flags);
 	}
@@ -269,7 +269,7 @@ static int bcm6328_hwled(struct device *dev, struct device_node *nc, u32 reg,
 
 		spin_lock_irqsave(lock, flags);
 		val = bcm6328_led_read(addr);
-		val |= (BIT(reg % 4) << ((sel % 4) * 4));
+		val |= (BIT(reg) << ((sel % 4) * 4));
 		bcm6328_led_write(addr, val);
 		spin_unlock_irqrestore(lock, flags);
 	}
@@ -336,7 +336,7 @@ static int bcm6328_led(struct device *dev, struct device_node *nc, u32 reg,
 	led->cdev.brightness_set = bcm6328_led_set;
 	led->cdev.blink_set = bcm6328_blink_set;
 
-	rc = led_classdev_register(dev, &led->cdev);
+	rc = devm_led_classdev_register(dev, &led->cdev);
 	if (rc < 0)
 		return rc;
 

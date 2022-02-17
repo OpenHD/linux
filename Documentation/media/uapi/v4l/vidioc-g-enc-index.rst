@@ -26,7 +26,6 @@ Arguments
     File descriptor returned by :ref:`open() <func-open>`.
 
 ``argp``
-    Pointer to struct :c:type:`v4l2_enc_idx`.
 
 
 Description
@@ -56,7 +55,7 @@ Currently this ioctl is only defined for MPEG-2 program streams and
 video elementary streams.
 
 
-.. tabularcolumns:: |p{3.8cm}|p{5.6cm}|p{8.1cm}|
+.. tabularcolumns:: |p{3.5cm}|p{5.6cm}|p{8.4cm}|
 
 .. c:type:: v4l2_enc_idx
 

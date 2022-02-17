@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * fscrypt.h: declarations for per-file encryption
  *
@@ -38,9 +37,6 @@ struct fscrypt_name {
 #define FSTR_TO_QSTR(f)		QSTR_INIT((f)->name, (f)->len)
 #define fname_name(p)		((p)->disk_name.name)
 #define fname_len(p)		((p)->disk_name.len)
-
-/* Maximum value for the third parameter of fscrypt_operations.set_context(). */
-#define FSCRYPT_SET_CONTEXT_MAX_SIZE	28
 
 #if __FS_HAS_ENCRYPTION
 #include <linux/fscrypt_supp.h>

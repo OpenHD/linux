@@ -17,7 +17,6 @@
 #include "evlist.h"
 #include "evsel.h"
 #include "pmu.h"
-#include <errno.h>
 
 static int
 perf_evsel__apply_drv_configs(struct perf_evsel *evsel,

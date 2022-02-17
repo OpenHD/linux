@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * System Trace Module (STM) master/channel allocation policy management
  * Copyright (c) 2014, Intel Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  *
  * A master/channel allocation policy allows mapping string identifiers to
  * master and channel ranges, where allocation can be done.
@@ -179,8 +187,8 @@ static struct configfs_attribute *stp_policy_node_attrs[] = {
 	NULL,
 };
 
-static const struct config_item_type stp_policy_type;
-static const struct config_item_type stp_policy_node_type;
+static struct config_item_type stp_policy_type;
+static struct config_item_type stp_policy_node_type;
 
 static struct config_group *
 stp_policy_node_make(struct config_group *group, const char *name)
@@ -228,7 +236,7 @@ static struct configfs_group_operations stp_policy_node_group_ops = {
 	.drop_item	= stp_policy_node_drop,
 };
 
-static const struct config_item_type stp_policy_node_type = {
+static struct config_item_type stp_policy_node_type = {
 	.ct_item_ops	= &stp_policy_node_item_ops,
 	.ct_group_ops	= &stp_policy_node_group_ops,
 	.ct_attrs	= stp_policy_node_attrs,
@@ -303,7 +311,7 @@ static struct configfs_group_operations stp_policy_group_ops = {
 	.make_group	= stp_policy_node_make,
 };
 
-static const struct config_item_type stp_policy_type = {
+static struct config_item_type stp_policy_type = {
 	.ct_item_ops	= &stp_policy_item_ops,
 	.ct_group_ops	= &stp_policy_group_ops,
 	.ct_attrs	= stp_policy_attrs,
@@ -372,7 +380,7 @@ static struct configfs_group_operations stp_policies_group_ops = {
 	.make_group	= stp_policies_make,
 };
 
-static const struct config_item_type stp_policies_type = {
+static struct config_item_type stp_policies_type = {
 	.ct_group_ops	= &stp_policies_group_ops,
 	.ct_owner	= THIS_MODULE,
 };

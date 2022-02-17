@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _UAPI_LINUX_FS_H
 #define _UAPI_LINUX_FS_H
 
@@ -227,10 +226,6 @@ struct fsxattr {
 #define BLKSECDISCARD _IO(0x12,125)
 #define BLKROTATIONAL _IO(0x12,126)
 #define BLKZEROOUT _IO(0x12,127)
-/*
- * A jump here: 130-131 are reserved for zoned block devices
- * (see uapi/linux/blkzoned.h)
- */
 
 #define BMAP_IOCTL 1		/* obsolete - kept for compatibility */
 #define FIBMAP	   _IO(0x00,1)	/* bmap access */
@@ -242,7 +237,7 @@ struct fsxattr {
 #define FICLONERANGE	_IOW(0x94, 13, struct file_clone_range)
 #define FIDEDUPERANGE	_IOWR(0x94, 54, struct file_dedupe_range)
 
-#define FSLABEL_MAX 256	/* Max chars for the interface; each fs may differ */
+#define FIDTRIM	_IOWR('f', 128, struct fstrim_range)	/* Deep discard trim */
 
 #define	FS_IOC_GETFLAGS			_IOR('f', 1, long)
 #define	FS_IOC_SETFLAGS			_IOW('f', 2, long)
@@ -253,10 +248,8 @@ struct fsxattr {
 #define FS_IOC32_SETFLAGS		_IOW('f', 2, int)
 #define FS_IOC32_GETVERSION		_IOR('v', 1, int)
 #define FS_IOC32_SETVERSION		_IOW('v', 2, int)
-#define FS_IOC_FSGETXATTR		_IOR('X', 31, struct fsxattr)
-#define FS_IOC_FSSETXATTR		_IOW('X', 32, struct fsxattr)
-#define FS_IOC_GETFSLABEL		_IOR(0x94, 49, char[FSLABEL_MAX])
-#define FS_IOC_SETFSLABEL		_IOW(0x94, 50, char[FSLABEL_MAX])
+#define FS_IOC_FSGETXATTR		_IOR ('X', 31, struct fsxattr)
+#define FS_IOC_FSSETXATTR		_IOW ('X', 32, struct fsxattr)
 
 /*
  * File system encryption support
@@ -279,8 +272,8 @@ struct fsxattr {
 #define FS_ENCRYPTION_MODE_AES_256_CTS		4
 #define FS_ENCRYPTION_MODE_AES_128_CBC		5
 #define FS_ENCRYPTION_MODE_AES_128_CTS		6
-#define FS_ENCRYPTION_MODE_SPECK128_256_XTS	7 /* Removed, do not use. */
-#define FS_ENCRYPTION_MODE_SPECK128_256_CTS	8 /* Removed, do not use. */
+#define FS_ENCRYPTION_MODE_SPECK128_256_XTS	7
+#define FS_ENCRYPTION_MODE_SPECK128_256_CTS	8
 
 struct fscrypt_policy {
 	__u8 version;
@@ -365,29 +358,9 @@ struct fscrypt_key {
 #define SYNC_FILE_RANGE_WRITE		2
 #define SYNC_FILE_RANGE_WAIT_AFTER	4
 
-/*
- * Flags for preadv2/pwritev2:
- */
-
-typedef int __bitwise __kernel_rwf_t;
-
-/* high priority request, poll if possible */
-#define RWF_HIPRI	((__force __kernel_rwf_t)0x00000001)
-
-/* per-IO O_DSYNC */
-#define RWF_DSYNC	((__force __kernel_rwf_t)0x00000002)
-
-/* per-IO O_SYNC */
-#define RWF_SYNC	((__force __kernel_rwf_t)0x00000004)
-
-/* per-IO, return -EAGAIN if operation would block */
-#define RWF_NOWAIT	((__force __kernel_rwf_t)0x00000008)
-
-/* per-IO O_APPEND */
-#define RWF_APPEND	((__force __kernel_rwf_t)0x00000010)
-
-/* mask of flags supported by the kernel */
-#define RWF_SUPPORTED	(RWF_HIPRI | RWF_DSYNC | RWF_SYNC | RWF_NOWAIT |\
-			 RWF_APPEND)
+/* flags for preadv2/pwritev2: */
+#define RWF_HIPRI			0x00000001 /* high priority request, poll if possible */
+#define RWF_DSYNC			0x00000002 /* per-IO O_DSYNC */
+#define RWF_SYNC			0x00000004 /* per-IO O_SYNC */
 
 #endif /* _UAPI_LINUX_FS_H */

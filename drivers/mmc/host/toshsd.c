@@ -479,7 +479,7 @@ static void toshsd_start_data(struct toshsd_host *host, struct mmc_data *data)
 {
 	unsigned int flags = SG_MITER_ATOMIC;
 
-	dev_dbg(&host->pdev->dev, "setup data transfer: blocksize %08x  nr_blocks %d, offset: %08x\n",
+	dev_dbg(&host->pdev->dev, "setup data transfer: blocksize %08x  nr_blocks %d, offset: %08lx\n",
 		data->blksz, data->blocks, data->sg->offset);
 
 	host->data = data;
@@ -550,7 +550,7 @@ static int toshsd_get_cd(struct mmc_host *mmc)
 	return !!(ioread16(host->ioaddr + SD_CARDSTATUS) & SD_CARD_PRESENT_0);
 }
 
-static const struct mmc_host_ops toshsd_ops = {
+static struct mmc_host_ops toshsd_ops = {
 	.request = toshsd_request,
 	.set_ios = toshsd_set_ios,
 	.get_ro = toshsd_get_ro,

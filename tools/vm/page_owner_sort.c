@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * User-space helper to sort the output of /sys/kernel/debug/page_owner
  *

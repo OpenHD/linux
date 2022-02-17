@@ -1,5 +1,6 @@
 /*
  * Mailbox: Common code for Mailbox controllers and users
+ * Copyright (c) 2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * Copyright (C) 2013-2014 Linaro Ltd.
  * Author: Jassi Brar <jassisinghbrar@gmail.com>
@@ -87,7 +88,8 @@ exit:
 
 	if (!err && (chan->txdone_method & TXDONE_BY_POLL))
 		/* kick start the timer immediately to avoid delays */
-		hrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);
+		hrtimer_start(&chan->mbox->poll_hrt, ktime_set(0, 0),
+			      HRTIMER_MODE_REL);
 }
 
 static void tx_tick(struct mbox_chan *chan, int r)
@@ -225,6 +227,29 @@ bool mbox_client_peek_data(struct mbox_chan *chan)
 EXPORT_SYMBOL_GPL(mbox_client_peek_data);
 
 /**
+ * mbox_get_max_txsize - For client to query the maximum tx message
+ *			 size to send to the remote.
+ * @chan: Mailbox channel assigned to this client.
+ *
+ * Queries the controller driver for the maximum tx message size that
+ * can be transmitted.
+ *
+ * Return: max tx size on success
+ *	   Negative value on failure.
+ */
+int mbox_get_max_txsize(struct mbox_chan *chan)
+{
+	if (!chan || !chan->cl)
+		return -EINVAL;
+
+	if (!chan->mbox->ops->get_max_txsize)
+		return INT_MAX;
+
+	return chan->mbox->ops->get_max_txsize(chan);
+}
+EXPORT_SYMBOL_GPL(mbox_get_max_txsize);
+
+/**
  * mbox_send_message -	For client to submit a message to be
  *				sent to the remote.
  * @chan: Mailbox channel assigned to this client.
@@ -351,18 +376,15 @@ struct mbox_chan *mbox_request_channel(struct mbox_client *cl, int index)
 	init_completion(&chan->tx_complete);
 
 	if (chan->txdone_method	== TXDONE_BY_POLL && cl->knows_txdone)
-		chan->txdone_method = TXDONE_BY_ACK;
+		chan->txdone_method |= TXDONE_BY_ACK;
 
 	spin_unlock_irqrestore(&chan->lock, flags);
 
-	if (chan->mbox->ops->startup) {
-		ret = chan->mbox->ops->startup(chan);
-
-		if (ret) {
-			dev_err(dev, "Unable to startup the chan (%d)\n", ret);
-			mbox_free_channel(chan);
-			chan = ERR_PTR(ret);
-		}
+	ret = chan->mbox->ops->startup(chan);
+	if (ret) {
+		dev_err(dev, "Unable to startup the chan (%d)\n", ret);
+		mbox_free_channel(chan);
+		chan = ERR_PTR(ret);
 	}
 
 	mutex_unlock(&con_mutex);
@@ -413,14 +435,13 @@ void mbox_free_channel(struct mbox_chan *chan)
 	if (!chan || !chan->cl)
 		return;
 
-	if (chan->mbox->ops->shutdown)
-		chan->mbox->ops->shutdown(chan);
+	chan->mbox->ops->shutdown(chan);
 
 	/* The queued TX requests are simply aborted, no callbacks are made */
 	spin_lock_irqsave(&chan->lock, flags);
 	chan->cl = NULL;
 	chan->active_req = NULL;
-	if (chan->txdone_method == TXDONE_BY_ACK)
+	if (chan->txdone_method == (TXDONE_BY_POLL | TXDONE_BY_ACK))
 		chan->txdone_method = TXDONE_BY_POLL;
 
 	module_put(chan->mbox->dev->driver->owner);
@@ -462,12 +483,6 @@ int mbox_controller_register(struct mbox_controller *mbox)
 		txdone = TXDONE_BY_ACK;
 
 	if (txdone == TXDONE_BY_POLL) {
-
-		if (!mbox->ops->last_tx_done) {
-			dev_err(mbox->dev, "last_tx_done method is absent\n");
-			return -EINVAL;
-		}
-
 		hrtimer_init(&mbox->poll_hrt, CLOCK_MONOTONIC,
 			     HRTIMER_MODE_REL);
 		mbox->poll_hrt.function = txdone_hrtimer;

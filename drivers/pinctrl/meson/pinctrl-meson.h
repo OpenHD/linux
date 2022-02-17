@@ -13,7 +13,6 @@
 
 #include <linux/gpio.h>
 #include <linux/pinctrl/pinctrl.h>
-#include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/types.h>
 
@@ -32,7 +31,9 @@ struct meson_pmx_group {
 	const char *name;
 	const unsigned int *pins;
 	unsigned int num_pins;
-	const void *data;
+	bool is_gpio;
+	unsigned int reg;
+	unsigned int bit;
 };
 
 /**
@@ -80,7 +81,6 @@ enum meson_reg_type {
  * @name:	bank name
  * @first:	first pin of the bank
  * @last:	last pin of the bank
- * @irq:	hwirq base number of the bank
  * @regs:	array of register descriptors
  *
  * A bank represents a set of pins controlled by a contiguous set of
@@ -92,8 +92,6 @@ struct meson_bank {
 	const char *name;
 	unsigned int first;
 	unsigned int last;
-	int irq_first;
-	int irq_last;
 	struct meson_reg_desc regs[NUM_REG];
 };
 
@@ -102,13 +100,12 @@ struct meson_pinctrl_data {
 	const struct pinctrl_pin_desc *pins;
 	struct meson_pmx_group *groups;
 	struct meson_pmx_func *funcs;
+	unsigned int pin_base;
 	unsigned int num_pins;
 	unsigned int num_groups;
 	unsigned int num_funcs;
 	struct meson_bank *banks;
 	unsigned int num_banks;
-	const struct pinmux_ops *pmx_ops;
-	void *pmx_data;
 };
 
 struct meson_pinctrl {
@@ -124,6 +121,25 @@ struct meson_pinctrl {
 	struct device_node *of_node;
 };
 
+#define PIN(x, b)	(b + x)
+
+#define GROUP(grp, r, b)						\
+	{								\
+		.name = #grp,						\
+		.pins = grp ## _pins,					\
+		.num_pins = ARRAY_SIZE(grp ## _pins),			\
+		.reg = r,						\
+		.bit = b,						\
+	 }
+
+#define GPIO_GROUP(gpio, b)						\
+	{								\
+		.name = #gpio,						\
+		.pins = (const unsigned int[]){ PIN(gpio, b) },		\
+		.num_pins = 1,						\
+		.is_gpio = true,					\
+	 }
+
 #define FUNCTION(fn)							\
 	{								\
 		.name = #fn,						\
@@ -131,14 +147,12 @@ struct meson_pinctrl {
 		.num_groups = ARRAY_SIZE(fn ## _groups),		\
 	}
 
-#define BANK(n, f, l, fi, li, per, peb, pr, pb, dr, db, or, ob, ir, ib)	\
+#define BANK(n, f, l, per, peb, pr, pb, dr, db, or, ob, ir, ib)		\
 	{								\
-		.name		= n,					\
-		.first		= f,					\
-		.last		= l,					\
-		.irq_first	= fi,					\
-		.irq_last	= li,					\
-		.regs = {						\
+		.name	= n,						\
+		.first	= f,						\
+		.last	= l,						\
+		.regs	= {						\
 			[REG_PULLEN]	= { per, peb },			\
 			[REG_PULL]	= { pr, pb },			\
 			[REG_DIR]	= { dr, db },			\
@@ -147,16 +161,11 @@ struct meson_pinctrl {
 		},							\
 	 }
 
-#define MESON_PIN(x) PINCTRL_PIN(x, #x)
+#define MESON_PIN(x, b) PINCTRL_PIN(PIN(x, b), #x)
 
-/* Common pmx functions */
-int meson_pmx_get_funcs_count(struct pinctrl_dev *pcdev);
-const char *meson_pmx_get_func_name(struct pinctrl_dev *pcdev,
-				    unsigned selector);
-int meson_pmx_get_groups(struct pinctrl_dev *pcdev,
-			 unsigned selector,
-			 const char * const **groups,
-			 unsigned * const num_groups);
-
-/* Common probe function */
-int meson_pinctrl_probe(struct platform_device *pdev);
+extern struct meson_pinctrl_data meson8_cbus_pinctrl_data;
+extern struct meson_pinctrl_data meson8_aobus_pinctrl_data;
+extern struct meson_pinctrl_data meson8b_cbus_pinctrl_data;
+extern struct meson_pinctrl_data meson8b_aobus_pinctrl_data;
+extern struct meson_pinctrl_data meson_gxbb_periphs_pinctrl_data;
+extern struct meson_pinctrl_data meson_gxbb_aobus_pinctrl_data;

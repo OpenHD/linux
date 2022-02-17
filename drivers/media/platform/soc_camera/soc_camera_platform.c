@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Generic Platform Camera Driver
  *
  * Copyright (C) 2008 Magnus Damm
  * Based on mt9m001 driver,
  * Copyright (C) 2008, Guennadi Liakhovetski <kernel@pengutronix.de>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -56,7 +59,7 @@ static int soc_camera_platform_s_power(struct v4l2_subdev *sd, int on)
 	return soc_camera_set_power(p->icd->control, &p->icd->sdesc->subdev_desc, NULL, on);
 }
 
-static const struct v4l2_subdev_core_ops platform_subdev_core_ops = {
+static struct v4l2_subdev_core_ops platform_subdev_core_ops = {
 	.s_power = soc_camera_platform_s_power,
 };
 
@@ -107,7 +110,7 @@ static int soc_camera_platform_g_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops platform_subdev_video_ops = {
+static struct v4l2_subdev_video_ops platform_subdev_video_ops = {
 	.s_stream	= soc_camera_platform_s_stream,
 	.g_mbus_config	= soc_camera_platform_g_mbus_config,
 };
@@ -119,7 +122,7 @@ static const struct v4l2_subdev_pad_ops platform_subdev_pad_ops = {
 	.set_fmt	= soc_camera_platform_fill_fmt,
 };
 
-static const struct v4l2_subdev_ops platform_subdev_ops = {
+static struct v4l2_subdev_ops platform_subdev_ops = {
 	.core	= &platform_subdev_core_ops,
 	.video	= &platform_subdev_video_ops,
 	.pad	= &platform_subdev_pad_ops,
@@ -156,8 +159,7 @@ static int soc_camera_platform_probe(struct platform_device *pdev)
 
 	v4l2_subdev_init(&priv->subdev, &platform_subdev_ops);
 	v4l2_set_subdevdata(&priv->subdev, p);
-	strlcpy(priv->subdev.name, dev_name(&pdev->dev),
-		sizeof(priv->subdev.name));
+	strncpy(priv->subdev.name, dev_name(&pdev->dev), V4L2_SUBDEV_NAME_SIZE);
 
 	return v4l2_device_register_subdev(&ici->v4l2_dev, &priv->subdev);
 }

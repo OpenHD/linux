@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 config MACH_TX39XX
 	bool
 	select MACH_TXX9

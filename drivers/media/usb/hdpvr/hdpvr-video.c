@@ -336,7 +336,9 @@ static int hdpvr_stop_streaming(struct hdpvr_device *dev)
 
 	buf = kmalloc(dev->bulk_in_size, GFP_KERNEL);
 	if (!buf)
-		v4l2_err(&dev->v4l2_dev, "failed to allocate temporary buffer for emptying the internal device buffer. Next capture start will be slow\n");
+		v4l2_err(&dev->v4l2_dev, "failed to allocate temporary buffer "
+			 "for emptying the internal device buffer. "
+			 "Next capture start will be slow\n");
 
 	dev->status = STATUS_SHUTTING_DOWN;
 	hdpvr_config_call(dev, CTRL_STOP_STREAMING_VALUE, 0x00);
@@ -439,7 +441,7 @@ static ssize_t hdpvr_read(struct file *file, char __user *buffer, size_t count,
 	/* wait for the first buffer */
 	if (!(file->f_flags & O_NONBLOCK)) {
 		if (wait_event_interruptible(dev->wait_data,
-					     !list_empty_careful(&dev->rec_buff_list)))
+					     hdpvr_get_next_buffer(dev)))
 			return -ERESTARTSYS;
 	}
 
@@ -449,7 +451,6 @@ static ssize_t hdpvr_read(struct file *file, char __user *buffer, size_t count,
 
 		if (buf->status != BUFSTAT_READY &&
 		    dev->status != STATUS_DISCONNECTED) {
-			int err;
 			/* return nonblocking */
 			if (file->f_flags & O_NONBLOCK) {
 				if (!ret)
@@ -457,31 +458,9 @@ static ssize_t hdpvr_read(struct file *file, char __user *buffer, size_t count,
 				goto err;
 			}
 
-			err = wait_event_interruptible_timeout(dev->wait_data,
-				buf->status == BUFSTAT_READY,
-				msecs_to_jiffies(1000));
-			if (err < 0) {
-				ret = err;
-				goto err;
-			}
-			if (!err) {
-				v4l2_info(&dev->v4l2_dev,
-					  "timeout: restart streaming\n");
-				mutex_lock(&dev->io_mutex);
-				hdpvr_stop_streaming(dev);
-				mutex_unlock(&dev->io_mutex);
-				/*
-				 * The FW needs about 4 seconds after streaming
-				 * stopped before it is ready to restart
-				 * streaming.
-				 */
-				msleep(4000);
-				err = hdpvr_start_streaming(dev);
-				if (err) {
-					ret = err;
-					goto err;
-				}
-			}
+			if (wait_event_interruptible(dev->wait_data,
+					      buf->status == BUFSTAT_READY))
+				return -ERESTARTSYS;
 		}
 
 		if (buf->status != BUFSTAT_READY)
@@ -528,14 +507,14 @@ err:
 	return ret;
 }
 
-static __poll_t hdpvr_poll(struct file *filp, poll_table *wait)
+static unsigned int hdpvr_poll(struct file *filp, poll_table *wait)
 {
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned long req_events = poll_requested_events(wait);
 	struct hdpvr_buffer *buf = NULL;
 	struct hdpvr_device *dev = video_drvdata(filp);
-	__poll_t mask = v4l2_ctrl_poll(filp, wait);
+	unsigned int mask = v4l2_ctrl_poll(filp, wait);
 
-	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
+	if (!(req_events & (POLLIN | POLLRDNORM)))
 		return mask;
 
 	mutex_lock(&dev->io_mutex);
@@ -560,7 +539,7 @@ static __poll_t hdpvr_poll(struct file *filp, poll_table *wait)
 		buf = hdpvr_get_next_buffer(dev);
 	}
 	if (buf && buf->status == BUFSTAT_READY)
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 
 	return mask;
 }
@@ -880,7 +859,7 @@ static int vidioc_g_audio(struct file *file, void *private_data,
 
 	audio->index = dev->options.audio_input;
 	audio->capability = V4L2_AUDCAP_STEREO;
-	strlcpy(audio->name, audio_iname[audio->index], sizeof(audio->name));
+	strncpy(audio->name, audio_iname[audio->index], sizeof(audio->name));
 	audio->name[sizeof(audio->name) - 1] = '\0';
 	return 0;
 }
@@ -948,18 +927,18 @@ static int hdpvr_s_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 	case V4L2_CID_MPEG_VIDEO_ENCODING:
 		return 0;
-/*	case V4L2_CID_MPEG_VIDEO_B_FRAMES: */
-/*		if (ctrl->value == 0 && !(opt->gop_mode & 0x2)) { */
-/*			opt->gop_mode |= 0x2; */
-/*			hdpvr_config_call(dev, CTRL_GOP_MODE_VALUE, */
-/*					  opt->gop_mode); */
-/*		} */
-/*		if (ctrl->value == 128 && opt->gop_mode & 0x2) { */
-/*			opt->gop_mode &= ~0x2; */
-/*			hdpvr_config_call(dev, CTRL_GOP_MODE_VALUE, */
-/*					  opt->gop_mode); */
-/*		} */
-/*		break; */
+/* 	case V4L2_CID_MPEG_VIDEO_B_FRAMES: */
+/* 		if (ctrl->value == 0 && !(opt->gop_mode & 0x2)) { */
+/* 			opt->gop_mode |= 0x2; */
+/* 			hdpvr_config_call(dev, CTRL_GOP_MODE_VALUE, */
+/* 					  opt->gop_mode); */
+/* 		} */
+/* 		if (ctrl->value == 128 && opt->gop_mode & 0x2) { */
+/* 			opt->gop_mode &= ~0x2; */
+/* 			hdpvr_config_call(dev, CTRL_GOP_MODE_VALUE, */
+/* 					  opt->gop_mode); */
+/* 		} */
+/* 		break; */
 	case V4L2_CID_MPEG_VIDEO_BITRATE_MODE: {
 		uint peak_bitrate = dev->video_bitrate_peak->val / 100000;
 		uint bitrate = dev->video_bitrate->val / 100000;
@@ -1140,7 +1119,9 @@ static void hdpvr_device_release(struct video_device *vdev)
 	struct hdpvr_device *dev = video_get_drvdata(vdev);
 
 	hdpvr_delete(dev);
+	mutex_lock(&dev->io_mutex);
 	flush_work(&dev->worker);
+	mutex_unlock(&dev->io_mutex);
 
 	v4l2_device_unregister(&dev->v4l2_dev);
 	v4l2_ctrl_handler_free(&dev->hdl);
@@ -1159,7 +1140,7 @@ static void hdpvr_device_release(struct video_device *vdev)
 static const struct video_device hdpvr_video_template = {
 	.fops			= &hdpvr_fops,
 	.release		= hdpvr_device_release,
-	.ioctl_ops		= &hdpvr_ioctl_ops,
+	.ioctl_ops 		= &hdpvr_ioctl_ops,
 	.tvnorms		= V4L2_STD_ALL,
 };
 

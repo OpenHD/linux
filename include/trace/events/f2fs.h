@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM f2fs
 
@@ -20,9 +19,6 @@ TRACE_DEFINE_ENUM(INMEM_INVALIDATE);
 TRACE_DEFINE_ENUM(INMEM_REVOKE);
 TRACE_DEFINE_ENUM(IPU);
 TRACE_DEFINE_ENUM(OPU);
-TRACE_DEFINE_ENUM(HOT);
-TRACE_DEFINE_ENUM(WARM);
-TRACE_DEFINE_ENUM(COLD);
 TRACE_DEFINE_ENUM(CURSEG_HOT_DATA);
 TRACE_DEFINE_ENUM(CURSEG_WARM_DATA);
 TRACE_DEFINE_ENUM(CURSEG_COLD_DATA);
@@ -38,7 +34,7 @@ TRACE_DEFINE_ENUM(LFS);
 TRACE_DEFINE_ENUM(SSR);
 TRACE_DEFINE_ENUM(__REQ_RAHEAD);
 TRACE_DEFINE_ENUM(__REQ_SYNC);
-TRACE_DEFINE_ENUM(__REQ_IDLE);
+TRACE_DEFINE_ENUM(__REQ_NOIDLE);
 TRACE_DEFINE_ENUM(__REQ_PREFLUSH);
 TRACE_DEFINE_ENUM(__REQ_FUA);
 TRACE_DEFINE_ENUM(__REQ_PRIO);
@@ -63,12 +59,6 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 		{ IPU,		"IN-PLACE" },				\
 		{ OPU,		"OUT-OF-PLACE" })
 
-#define show_block_temp(temp)						\
-	__print_symbolic(temp,						\
-		{ HOT,		"HOT" },				\
-		{ WARM,		"WARM" },				\
-		{ COLD,		"COLD" })
-
 #define F2FS_OP_FLAGS (REQ_RAHEAD | REQ_SYNC | REQ_META | REQ_PRIO |	\
 			REQ_PREFLUSH | REQ_FUA)
 #define F2FS_BIO_FLAG_MASK(t)	(t & F2FS_OP_FLAGS)
@@ -80,13 +70,9 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 	__print_symbolic(op,						\
 		{ REQ_OP_READ,			"READ" },		\
 		{ REQ_OP_WRITE,			"WRITE" },		\
-		{ REQ_OP_FLUSH,			"FLUSH" },		\
 		{ REQ_OP_DISCARD,		"DISCARD" },		\
-		{ REQ_OP_ZONE_REPORT,		"ZONE_REPORT" },	\
 		{ REQ_OP_SECURE_ERASE,		"SECURE_ERASE" },	\
-		{ REQ_OP_ZONE_RESET,		"ZONE_RESET" },		\
-		{ REQ_OP_WRITE_SAME,		"WRITE_SAME" },		\
-		{ REQ_OP_WRITE_ZEROES,		"WRITE_ZEROES" })
+		{ REQ_OP_WRITE_SAME,		"WRITE_SAME" })
 
 #define show_bio_op_flags(flags)					\
 	__print_flags(F2FS_BIO_FLAG_MASK(flags), "|",			\
@@ -96,6 +82,12 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 		{ REQ_PRIO,		"P" },				\
 		{ REQ_PREFLUSH,		"PF" },				\
 		{ REQ_FUA,		"FUA" })
+
+#define show_block_temp(temp)						\
+	__print_symbolic(temp,						\
+		{ HOT,		"HOT" },				\
+		{ WARM,		"WARM" },				\
+		{ COLD,		"COLD" })
 
 #define show_data_type(type)						\
 	__print_symbolic(type,						\
@@ -491,7 +483,7 @@ DEFINE_EVENT(f2fs__truncate_node, f2fs_truncate_node,
 
 TRACE_EVENT(f2fs_truncate_partial_nodes,
 
-	TP_PROTO(struct inode *inode, nid_t *nid, int depth, int err),
+	TP_PROTO(struct inode *inode, nid_t nid[], int depth, int err),
 
 	TP_ARGS(inode, nid, depth, err),
 
@@ -1035,7 +1027,7 @@ DECLARE_EVENT_CLASS(f2fs__bio,
 
 	TP_fast_assign(
 		__entry->dev		= sb->s_dev;
-		__entry->target		= bio_dev(bio);
+		__entry->target		= bio->bi_bdev->bd_dev;
 		__entry->op		= bio_op(bio);
 		__entry->op_flags	= bio->bi_opf;
 		__entry->type		= type;

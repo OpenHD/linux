@@ -80,7 +80,12 @@ static void tee_shm_op_release(struct dma_buf *dmabuf)
 	tee_shm_release(shm);
 }
 
-static void *tee_shm_op_map(struct dma_buf *dmabuf, unsigned long pgnum)
+static void *tee_shm_op_kmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum)
+{
+	return NULL;
+}
+
+static void *tee_shm_op_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
 {
 	return NULL;
 }
@@ -102,7 +107,8 @@ static const struct dma_buf_ops tee_shm_dma_buf_ops = {
 	.map_dma_buf = tee_shm_op_map_dma_buf,
 	.unmap_dma_buf = tee_shm_op_unmap_dma_buf,
 	.release = tee_shm_op_release,
-	.map = tee_shm_op_map,
+	.kmap_atomic = tee_shm_op_kmap_atomic,
+	.kmap = tee_shm_op_kmap,
 	.mmap = tee_shm_op_mmap,
 };
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /* qlogicpti.h: Performance Technologies QlogicISP sbus card defines.
  *
  * Copyright (C) 1996 David S. Miller (davem@caipfs.rutgers.edu)

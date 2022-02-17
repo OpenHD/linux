@@ -22,7 +22,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "tda665x.h"
 
 struct tda665x_state {
@@ -197,12 +197,13 @@ static int tda665x_set_params(struct dvb_frontend *fe)
 	return 0;
 }
 
-static void tda665x_release(struct dvb_frontend *fe)
+static int tda665x_release(struct dvb_frontend *fe)
 {
 	struct tda665x_state *state = fe->tuner_priv;
 
 	fe->tuner_priv = NULL;
 	kfree(state);
+	return 0;
 }
 
 static const struct dvb_tuner_ops tda665x_ops = {
@@ -231,9 +232,9 @@ struct dvb_frontend *tda665x_attach(struct dvb_frontend *fe,
 	info			 = &fe->ops.tuner_ops.info;
 
 	memcpy(info->name, config->name, sizeof(config->name));
-	info->frequency_min_hz	= config->frequency_min;
-	info->frequency_max_hz	= config->frequency_max;
-	info->frequency_step_hz	= config->frequency_offst;
+	info->frequency_min	= config->frequency_min;
+	info->frequency_max	= config->frequency_max;
+	info->frequency_step	= config->frequency_offst;
 
 	printk(KERN_DEBUG "%s: Attaching TDA665x (%s) tuner\n", __func__, info->name);
 

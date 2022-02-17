@@ -53,37 +53,57 @@ static struct bman_portal *init_pcfg(struct bm_portal_config *pcfg)
 	return p;
 }
 
-static int bman_offline_cpu(unsigned int cpu)
+static void bman_offline_cpu(unsigned int cpu)
 {
 	struct bman_portal *p = affine_bportals[cpu];
 	const struct bm_portal_config *pcfg;
 
 	if (!p)
-		return 0;
+		return;
 
 	pcfg = bman_get_bm_portal_config(p);
 	if (!pcfg)
-		return 0;
+		return;
 
 	irq_set_affinity(pcfg->irq, cpumask_of(0));
-	return 0;
 }
 
-static int bman_online_cpu(unsigned int cpu)
+static void bman_online_cpu(unsigned int cpu)
 {
 	struct bman_portal *p = affine_bportals[cpu];
 	const struct bm_portal_config *pcfg;
 
 	if (!p)
-		return 0;
+		return;
 
 	pcfg = bman_get_bm_portal_config(p);
 	if (!pcfg)
-		return 0;
+		return;
 
 	irq_set_affinity(pcfg->irq, cpumask_of(cpu));
-	return 0;
 }
+
+static int bman_hotplug_cpu_callback(struct notifier_block *nfb,
+				     unsigned long action, void *hcpu)
+{
+	unsigned int cpu = (unsigned long)hcpu;
+
+	switch (action) {
+	case CPU_ONLINE:
+	case CPU_ONLINE_FROZEN:
+		bman_online_cpu(cpu);
+		break;
+	case CPU_DOWN_PREPARE:
+	case CPU_DOWN_PREPARE_FROZEN:
+		bman_offline_cpu(cpu);
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block bman_hotplug_cpu_notifier = {
+	.notifier_call = bman_hotplug_cpu_callback,
+};
 
 static int bman_portal_probe(struct platform_device *pdev)
 {
@@ -91,15 +111,8 @@ static int bman_portal_probe(struct platform_device *pdev)
 	struct device_node *node = dev->of_node;
 	struct bm_portal_config *pcfg;
 	struct resource *addr_phys[2];
-	int irq, cpu, err;
-
-	err = bman_is_probed();
-	if (!err)
-		return -EPROBE_DEFER;
-	if (err < 0) {
-		dev_err(&pdev->dev, "failing probe due to bman probe error\n");
-		return -ENODEV;
-	}
+	void __iomem *va;
+	int irq, cpu;
 
 	pcfg = devm_kmalloc(dev, sizeof(*pcfg), GFP_KERNEL);
 	if (!pcfg)
@@ -110,14 +123,16 @@ static int bman_portal_probe(struct platform_device *pdev)
 	addr_phys[0] = platform_get_resource(pdev, IORESOURCE_MEM,
 					     DPAA_PORTAL_CE);
 	if (!addr_phys[0]) {
-		dev_err(dev, "Can't get %pOF property 'reg::CE'\n", node);
+		dev_err(dev, "Can't get %s property 'reg::CE'\n",
+			node->full_name);
 		return -ENXIO;
 	}
 
 	addr_phys[1] = platform_get_resource(pdev, IORESOURCE_MEM,
 					     DPAA_PORTAL_CI);
 	if (!addr_phys[1]) {
-		dev_err(dev, "Can't get %pOF property 'reg::CI'\n", node);
+		dev_err(dev, "Can't get %s property 'reg::CI'\n",
+			node->full_name);
 		return -ENXIO;
 	}
 
@@ -125,25 +140,23 @@ static int bman_portal_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
-		dev_err(dev, "Can't get %pOF IRQ'\n", node);
+		dev_err(dev, "Can't get %s IRQ'\n", node->full_name);
 		return -ENXIO;
 	}
 	pcfg->irq = irq;
 
-	pcfg->addr_virt_ce = memremap(addr_phys[0]->start,
-					resource_size(addr_phys[0]),
-					QBMAN_MEMREMAP_ATTR);
-	if (!pcfg->addr_virt_ce) {
-		dev_err(dev, "memremap::CE failed\n");
+	va = ioremap_prot(addr_phys[0]->start, resource_size(addr_phys[0]), 0);
+	if (!va)
 		goto err_ioremap1;
-	}
 
-	pcfg->addr_virt_ci = ioremap(addr_phys[1]->start,
-					resource_size(addr_phys[1]));
-	if (!pcfg->addr_virt_ci) {
-		dev_err(dev, "ioremap::CI failed\n");
+	pcfg->addr_virt[DPAA_PORTAL_CE] = va;
+
+	va = ioremap_prot(addr_phys[1]->start, resource_size(addr_phys[1]),
+			  _PAGE_GUARDED | _PAGE_NO_CACHE);
+	if (!va)
 		goto err_ioremap2;
-	}
+
+	pcfg->addr_virt[DPAA_PORTAL_CI] = va;
 
 	spin_lock(&bman_lock);
 	cpu = cpumask_next_zero(-1, &portal_cpus);
@@ -157,10 +170,8 @@ static int bman_portal_probe(struct platform_device *pdev)
 	spin_unlock(&bman_lock);
 	pcfg->cpu = cpu;
 
-	if (!init_pcfg(pcfg)) {
-		dev_err(dev, "portal init failed\n");
-		goto err_portal_init;
-	}
+	if (!init_pcfg(pcfg))
+		goto err_ioremap2;
 
 	/* clear irq affinity if assigned cpu is offline */
 	if (!cpu_online(cpu))
@@ -168,11 +179,10 @@ static int bman_portal_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_portal_init:
-	iounmap(pcfg->addr_virt_ci);
 err_ioremap2:
-	memunmap(pcfg->addr_virt_ce);
+	iounmap(pcfg->addr_virt[DPAA_PORTAL_CE]);
 err_ioremap1:
+	dev_err(dev, "ioremap failed\n");
 	return -ENXIO;
 }
 
@@ -200,14 +210,8 @@ static int __init bman_portal_driver_register(struct platform_driver *drv)
 	if (ret < 0)
 		return ret;
 
-	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-					"soc/qbman_portal:online",
-					bman_online_cpu, bman_offline_cpu);
-	if (ret < 0) {
-		pr_err("bman: failed to register hotplug callbacks.\n");
-		platform_driver_unregister(drv);
-		return ret;
-	}
+	register_hotcpu_notifier(&bman_hotplug_cpu_notifier);
+
 	return 0;
 }
 

@@ -46,6 +46,7 @@
 #include <linux/virtio_scsi.h>
 #include <linux/llist.h>
 #include <linux/bitmap.h>
+#include <linux/percpu_ida.h>
 
 #include "vhost.h"
 
@@ -55,7 +56,7 @@
 #define VHOST_SCSI_DEFAULT_TAGS 256
 #define VHOST_SCSI_PREALLOC_SGLS 2048
 #define VHOST_SCSI_PREALLOC_UPAGES 2048
-#define VHOST_SCSI_PREALLOC_PROT_SGLS 2048
+#define VHOST_SCSI_PREALLOC_PROT_SGLS 512
 
 /* Max number of requests before requeueing the job.
  * Using this limit prevents one virtqueue from starving others with
@@ -215,6 +216,12 @@ static struct workqueue_struct *vhost_scsi_workqueue;
 static DEFINE_MUTEX(vhost_scsi_mutex);
 static LIST_HEAD(vhost_scsi_list);
 
+static int iov_num_pages(void __user *iov_base, size_t iov_len)
+{
+	return (PAGE_ALIGN((unsigned long)iov_base + iov_len) -
+	       ((unsigned long)iov_base & PAGE_MASK)) >> PAGE_SHIFT;
+}
+
 static void vhost_scsi_done_inflight(struct kref *kref)
 {
 	struct vhost_scsi_inflight *inflight;
@@ -329,7 +336,7 @@ static void vhost_scsi_release_cmd(struct se_cmd *se_cmd)
 	}
 
 	vhost_scsi_put_inflight(tv_cmd->inflight);
-	target_free_tag(se_sess, se_cmd);
+	percpu_ida_free(&se_sess->sess_tag_pool, se_cmd->map_tag);
 }
 
 static u32 vhost_scsi_sess_get_index(struct se_session *se_sess)
@@ -495,12 +502,14 @@ static void vhost_scsi_evt_work(struct vhost_work *work)
 	struct vhost_scsi *vs = container_of(work, struct vhost_scsi,
 					vs_event_work);
 	struct vhost_virtqueue *vq = &vs->vqs[VHOST_SCSI_VQ_EVT].vq;
-	struct vhost_scsi_evt *evt, *t;
+	struct vhost_scsi_evt *evt;
 	struct llist_node *llnode;
 
 	mutex_lock(&vq->mutex);
 	llnode = llist_del_all(&vs->vs_event_list);
-	llist_for_each_entry_safe(evt, t, llnode, list) {
+	while (llnode) {
+		evt = llist_entry(llnode, struct vhost_scsi_evt, list);
+		llnode = llist_next(llnode);
 		vhost_scsi_do_evt_work(vs, evt);
 		vhost_scsi_free_evt(vs, evt);
 	}
@@ -518,7 +527,7 @@ static void vhost_scsi_complete_cmd_work(struct vhost_work *work)
 					vs_completion_work);
 	DECLARE_BITMAP(signal, VHOST_SCSI_MAX_VQ);
 	struct virtio_scsi_cmd_resp v_rsp;
-	struct vhost_scsi_cmd *cmd, *t;
+	struct vhost_scsi_cmd *cmd;
 	struct llist_node *llnode;
 	struct se_cmd *se_cmd;
 	struct iov_iter iov_iter;
@@ -526,7 +535,10 @@ static void vhost_scsi_complete_cmd_work(struct vhost_work *work)
 
 	bitmap_zero(signal, VHOST_SCSI_MAX_VQ);
 	llnode = llist_del_all(&vs->vs_completion_list);
-	llist_for_each_entry_safe(cmd, t, llnode, tvc_completion_list) {
+	while (llnode) {
+		cmd = llist_entry(llnode, struct vhost_scsi_cmd,
+				     tvc_completion_list);
+		llnode = llist_next(llnode);
 		se_cmd = &cmd->tvc_se_cmd;
 
 		pr_debug("%s tv_cmd %p resid %u status %#02x\n", __func__,
@@ -572,7 +584,7 @@ vhost_scsi_get_tag(struct vhost_virtqueue *vq, struct vhost_scsi_tpg *tpg,
 	struct se_session *se_sess;
 	struct scatterlist *sg, *prot_sg;
 	struct page **pages;
-	int tag, cpu;
+	int tag;
 
 	tv_nexus = tpg->tpg_nexus;
 	if (!tv_nexus) {
@@ -581,7 +593,7 @@ vhost_scsi_get_tag(struct vhost_virtqueue *vq, struct vhost_scsi_tpg *tpg,
 	}
 	se_sess = tv_nexus->tvn_se_sess;
 
-	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
+	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
 	if (tag < 0) {
 		pr_err("Unable to obtain tag for vhost_scsi_cmd\n");
 		return ERR_PTR(-ENOMEM);
@@ -591,12 +603,12 @@ vhost_scsi_get_tag(struct vhost_virtqueue *vq, struct vhost_scsi_tpg *tpg,
 	sg = cmd->tvc_sgl;
 	prot_sg = cmd->tvc_prot_sgl;
 	pages = cmd->tvc_upages;
-	memset(cmd, 0, sizeof(*cmd));
+	memset(cmd, 0, sizeof(struct vhost_scsi_cmd));
+
 	cmd->tvc_sgl = sg;
 	cmd->tvc_prot_sgl = prot_sg;
 	cmd->tvc_upages = pages;
 	cmd->tvc_se_cmd.map_tag = tag;
-	cmd->tvc_se_cmd.map_cpu = cpu;
 	cmd->tvc_tag = scsi_tag;
 	cmd->tvc_lun = lun;
 	cmd->tvc_task_attr = task_attr;
@@ -617,31 +629,48 @@ vhost_scsi_get_tag(struct vhost_virtqueue *vq, struct vhost_scsi_tpg *tpg,
  */
 static int
 vhost_scsi_map_to_sgl(struct vhost_scsi_cmd *cmd,
-		      struct iov_iter *iter,
+		      void __user *ptr,
+		      size_t len,
 		      struct scatterlist *sgl,
 		      bool write)
 {
-	struct page **pages = cmd->tvc_upages;
+	unsigned int npages = 0, offset, nbytes;
+	unsigned int pages_nr = iov_num_pages(ptr, len);
 	struct scatterlist *sg = sgl;
-	ssize_t bytes;
-	size_t offset;
-	unsigned int npages = 0;
+	struct page **pages = cmd->tvc_upages;
+	int ret, i;
 
-	bytes = iov_iter_get_pages(iter, pages, LONG_MAX,
-				VHOST_SCSI_PREALLOC_UPAGES, &offset);
-	/* No pages were pinned */
-	if (bytes <= 0)
-		return bytes < 0 ? bytes : -EFAULT;
-
-	iov_iter_advance(iter, bytes);
-
-	while (bytes) {
-		unsigned n = min_t(unsigned, PAGE_SIZE - offset, bytes);
-		sg_set_page(sg++, pages[npages++], n, offset);
-		bytes -= n;
-		offset = 0;
+	if (pages_nr > VHOST_SCSI_PREALLOC_UPAGES) {
+		pr_err("vhost_scsi_map_to_sgl() pages_nr: %u greater than"
+		       " preallocated VHOST_SCSI_PREALLOC_UPAGES: %u\n",
+			pages_nr, VHOST_SCSI_PREALLOC_UPAGES);
+		return -ENOBUFS;
 	}
-	return npages;
+
+	ret = get_user_pages_fast((unsigned long)ptr, pages_nr, write, pages);
+	/* No pages were pinned */
+	if (ret < 0)
+		goto out;
+	/* Less pages pinned than wanted */
+	if (ret != pages_nr) {
+		for (i = 0; i < ret; i++)
+			put_page(pages[i]);
+		ret = -EFAULT;
+		goto out;
+	}
+
+	while (len > 0) {
+		offset = (uintptr_t)ptr & ~PAGE_MASK;
+		nbytes = min_t(unsigned int, PAGE_SIZE - offset, len);
+		sg_set_page(sg, pages[npages], nbytes, offset);
+		ptr += nbytes;
+		len -= nbytes;
+		sg++;
+		npages++;
+	}
+
+out:
+	return ret;
 }
 
 static int
@@ -669,11 +698,15 @@ vhost_scsi_iov_to_sgl(struct vhost_scsi_cmd *cmd, bool write,
 		      struct iov_iter *iter,
 		      struct scatterlist *sg, int sg_count)
 {
+	size_t off = iter->iov_offset;
 	struct scatterlist *p = sg;
-	int ret;
+	int i, ret;
 
-	while (iov_iter_count(iter)) {
-		ret = vhost_scsi_map_to_sgl(cmd, iter, sg, write);
+	for (i = 0; i < iter->nr_segs; i++) {
+		void __user *base = iter->iov[i].iov_base + off;
+		size_t len = iter->iov[i].iov_len - off;
+
+		ret = vhost_scsi_map_to_sgl(cmd, base, len, sg, write);
 		if (ret < 0) {
 			while (p < sg) {
 				struct page *page = sg_page(p++);
@@ -683,6 +716,7 @@ vhost_scsi_iov_to_sgl(struct vhost_scsi_cmd *cmd, bool write,
 			return ret;
 		}
 		sg += ret;
+		off = 0;
 	}
 	return 0;
 }
@@ -816,7 +850,7 @@ vhost_scsi_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 	struct iov_iter out_iter, in_iter, prot_iter, data_iter;
 	u64 tag;
 	u32 exp_data_len, data_direction;
-	unsigned int out = 0, in = 0;
+	unsigned out, in;
 	int head, ret, prot_bytes, c = 0;
 	size_t req_size, rsp_size = sizeof(struct virtio_scsi_cmd_resp);
 	size_t out_size, in_size;
@@ -895,7 +929,8 @@ vhost_scsi_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 		 */
 		iov_iter_init(&out_iter, WRITE, vq->iov, out, out_size);
 
-		if (unlikely(!copy_from_iter_full(req, req_size, &out_iter))) {
+		ret = copy_from_iter(req, req_size, &out_iter);
+		if (unlikely(ret != req_size)) {
 			vq_err(vq, "Faulted on copy_from_iter\n");
 			vhost_scsi_send_bad_target(vs, vq, head, out);
 			continue;
@@ -907,7 +942,7 @@ vhost_scsi_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 			continue;
 		}
 
-		tpg = READ_ONCE(vs_tpg[*target]);
+		tpg = ACCESS_ONCE(vs_tpg[*target]);
 		if (unlikely(!tpg)) {
 			/* Target does not exist, fail the request */
 			vhost_scsi_send_bad_target(vs, vq, head, out);
@@ -1379,14 +1414,14 @@ static int vhost_scsi_open(struct inode *inode, struct file *f)
 	struct vhost_virtqueue **vqs;
 	int r = -ENOMEM, i;
 
-	vs = kzalloc(sizeof(*vs), GFP_KERNEL | __GFP_NOWARN | __GFP_RETRY_MAYFAIL);
+	vs = kzalloc(sizeof(*vs), GFP_KERNEL | __GFP_NOWARN | __GFP_REPEAT);
 	if (!vs) {
 		vs = vzalloc(sizeof(*vs));
 		if (!vs)
 			goto err_vs;
 	}
 
-	vqs = kmalloc_array(VHOST_SCSI_MAX_VQ, sizeof(*vqs), GFP_KERNEL);
+	vqs = kmalloc(VHOST_SCSI_MAX_VQ * sizeof(*vqs), GFP_KERNEL);
 	if (!vqs)
 		goto err_vqs;
 
@@ -1404,7 +1439,7 @@ static int vhost_scsi_open(struct inode *inode, struct file *f)
 		vqs[i] = &vs->vqs[i].vq;
 		vs->vqs[i].vq.handle_kick = vhost_scsi_handle_kick;
 	}
-	vhost_dev_init(&vs->dev, vqs, VHOST_SCSI_MAX_VQ, UIO_MAXIOV,
+	vhost_dev_init(&vs->dev, vqs, VHOST_SCSI_MAX_VQ,
 		       VHOST_SCSI_WEIGHT, 0);
 
 	vhost_scsi_init_inflight(vs, NULL);
@@ -1428,7 +1463,7 @@ static int vhost_scsi_release(struct inode *inode, struct file *f)
 	mutex_unlock(&vs->dev.mutex);
 	vhost_scsi_clear_endpoint(vs, &t);
 	vhost_dev_stop(&vs->dev);
-	vhost_dev_cleanup(&vs->dev);
+	vhost_dev_cleanup(&vs->dev, false);
 	/* Jobs can re-queue themselves in evt kick handler. Do extra flush. */
 	vhost_scsi_flush(vs);
 	kfree(vs->dev.vqs);
@@ -1694,25 +1729,22 @@ static int vhost_scsi_nexus_cb(struct se_portal_group *se_tpg,
 	for (i = 0; i < VHOST_SCSI_DEFAULT_TAGS; i++) {
 		tv_cmd = &((struct vhost_scsi_cmd *)se_sess->sess_cmd_map)[i];
 
-		tv_cmd->tvc_sgl = kcalloc(VHOST_SCSI_PREALLOC_SGLS,
-					  sizeof(struct scatterlist),
-					  GFP_KERNEL);
+		tv_cmd->tvc_sgl = kzalloc(sizeof(struct scatterlist) *
+					VHOST_SCSI_PREALLOC_SGLS, GFP_KERNEL);
 		if (!tv_cmd->tvc_sgl) {
 			pr_err("Unable to allocate tv_cmd->tvc_sgl\n");
 			goto out;
 		}
 
-		tv_cmd->tvc_upages = kcalloc(VHOST_SCSI_PREALLOC_UPAGES,
-					     sizeof(struct page *),
-					     GFP_KERNEL);
+		tv_cmd->tvc_upages = kzalloc(sizeof(struct page *) *
+				VHOST_SCSI_PREALLOC_UPAGES, GFP_KERNEL);
 		if (!tv_cmd->tvc_upages) {
 			pr_err("Unable to allocate tv_cmd->tvc_upages\n");
 			goto out;
 		}
 
-		tv_cmd->tvc_prot_sgl = kcalloc(VHOST_SCSI_PREALLOC_PROT_SGLS,
-					       sizeof(struct scatterlist),
-					       GFP_KERNEL);
+		tv_cmd->tvc_prot_sgl = kzalloc(sizeof(struct scatterlist) *
+				VHOST_SCSI_PREALLOC_PROT_SGLS, GFP_KERNEL);
 		if (!tv_cmd->tvc_prot_sgl) {
 			pr_err("Unable to allocate tv_cmd->tvc_prot_sgl\n");
 			goto out;
@@ -1727,6 +1759,7 @@ out:
 static int vhost_scsi_make_nexus(struct vhost_scsi_tpg *tpg,
 				const char *name)
 {
+	struct se_portal_group *se_tpg;
 	struct vhost_scsi_nexus *tv_nexus;
 
 	mutex_lock(&tpg->tv_tpg_mutex);
@@ -1735,8 +1768,9 @@ static int vhost_scsi_make_nexus(struct vhost_scsi_tpg *tpg,
 		pr_debug("tpg->tpg_nexus already exists\n");
 		return -EEXIST;
 	}
+	se_tpg = &tpg->se_tpg;
 
-	tv_nexus = kzalloc(sizeof(*tv_nexus), GFP_KERNEL);
+	tv_nexus = kzalloc(sizeof(struct vhost_scsi_nexus), GFP_KERNEL);
 	if (!tv_nexus) {
 		mutex_unlock(&tpg->tv_tpg_mutex);
 		pr_err("Unable to allocate struct vhost_scsi_nexus\n");
@@ -1747,7 +1781,7 @@ static int vhost_scsi_make_nexus(struct vhost_scsi_tpg *tpg,
 	 * struct se_node_acl for the vhost_scsi struct se_portal_group with
 	 * the SCSI Initiator port name of the passed configfs group 'name'.
 	 */
-	tv_nexus->tvn_se_sess = target_setup_session(&tpg->se_tpg,
+	tv_nexus->tvn_se_sess = target_alloc_session(&tpg->se_tpg,
 					VHOST_SCSI_DEFAULT_TAGS,
 					sizeof(struct vhost_scsi_cmd),
 					TARGET_PROT_DIN_PASS | TARGET_PROT_DOUT_PASS,
@@ -1806,7 +1840,7 @@ static int vhost_scsi_drop_nexus(struct vhost_scsi_tpg *tpg)
 	/*
 	 * Release the SCSI I_T Nexus to the emulated vhost Target Port
 	 */
-	target_remove_session(se_sess);
+	transport_deregister_session(tv_nexus->tvn_se_sess);
 	tpg->tpg_nexus = NULL;
 	mutex_unlock(&tpg->tv_tpg_mutex);
 
@@ -1921,7 +1955,9 @@ static struct configfs_attribute *vhost_scsi_tpg_attrs[] = {
 };
 
 static struct se_portal_group *
-vhost_scsi_make_tpg(struct se_wwn *wwn, const char *name)
+vhost_scsi_make_tpg(struct se_wwn *wwn,
+		   struct config_group *group,
+		   const char *name)
 {
 	struct vhost_scsi_tport *tport = container_of(wwn,
 			struct vhost_scsi_tport, tport_wwn);
@@ -1935,7 +1971,7 @@ vhost_scsi_make_tpg(struct se_wwn *wwn, const char *name)
 	if (kstrtou16(name + 5, 10, &tpgt) || tpgt >= VHOST_SCSI_MAX_TARGET)
 		return ERR_PTR(-EINVAL);
 
-	tpg = kzalloc(sizeof(*tpg), GFP_KERNEL);
+	tpg = kzalloc(sizeof(struct vhost_scsi_tpg), GFP_KERNEL);
 	if (!tpg) {
 		pr_err("Unable to allocate struct vhost_scsi_tpg");
 		return ERR_PTR(-ENOMEM);
@@ -1989,7 +2025,7 @@ vhost_scsi_make_tport(struct target_fabric_configfs *tf,
 	/* if (vhost_scsi_parse_wwn(name, &wwpn, 1) < 0)
 		return ERR_PTR(-EINVAL); */
 
-	tport = kzalloc(sizeof(*tport), GFP_KERNEL);
+	tport = kzalloc(sizeof(struct vhost_scsi_tport), GFP_KERNEL);
 	if (!tport) {
 		pr_err("Unable to allocate struct vhost_scsi_tport");
 		return ERR_PTR(-ENOMEM);
@@ -2064,7 +2100,7 @@ static struct configfs_attribute *vhost_scsi_wwn_attrs[] = {
 	NULL,
 };
 
-static const struct target_core_fabric_ops vhost_scsi_ops = {
+static struct target_core_fabric_ops vhost_scsi_ops = {
 	.module				= THIS_MODULE,
 	.name				= "vhost",
 	.get_fabric_name		= vhost_scsi_get_fabric_name,

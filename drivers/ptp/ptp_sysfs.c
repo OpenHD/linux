@@ -28,7 +28,7 @@ static ssize_t clock_name_show(struct device *dev,
 	struct ptp_clock *ptp = dev_get_drvdata(dev);
 	return snprintf(page, PAGE_SIZE-1, "%s\n", ptp->info->name);
 }
-static DEVICE_ATTR_RO(clock_name);
+static DEVICE_ATTR(clock_name, 0444, clock_name_show, NULL);
 
 #define PTP_SHOW_INT(name, var)						\
 static ssize_t var##_show(struct device *dev,				\
@@ -276,12 +276,13 @@ int ptp_populate_pin_groups(struct ptp_clock *ptp)
 	if (!n_pins)
 		return 0;
 
-	ptp->pin_dev_attr = kcalloc(n_pins, sizeof(*ptp->pin_dev_attr),
+	ptp->pin_dev_attr = kzalloc(n_pins * sizeof(*ptp->pin_dev_attr),
 				    GFP_KERNEL);
 	if (!ptp->pin_dev_attr)
 		goto no_dev_attr;
 
-	ptp->pin_attr = kcalloc(1 + n_pins, sizeof(*ptp->pin_attr), GFP_KERNEL);
+	ptp->pin_attr = kzalloc((1 + n_pins) * sizeof(struct attribute *),
+				GFP_KERNEL);
 	if (!ptp->pin_attr)
 		goto no_pin_attr;
 

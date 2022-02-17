@@ -19,7 +19,6 @@
 #include <linux/sched.h>
 #include <linux/firmware.h>
 #include <linux/export.h>
-#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
@@ -270,7 +269,7 @@ void sst_dsp_dma_put_channel(struct sst_dsp *dsp)
 }
 EXPORT_SYMBOL_GPL(sst_dsp_dma_put_channel);
 
-static int sst_dma_new(struct sst_dsp *sst)
+int sst_dma_new(struct sst_dsp *sst)
 {
 	struct sst_pdata *sst_pdata = sst->pdata;
 	struct sst_dma *dma;
@@ -320,8 +319,9 @@ err_dma_dev:
 	devm_kfree(sst->dev, dma);
 	return ret;
 }
+EXPORT_SYMBOL(sst_dma_new);
 
-static void sst_dma_free(struct sst_dma *dma)
+void sst_dma_free(struct sst_dma *dma)
 {
 
 	if (dma == NULL)
@@ -334,6 +334,7 @@ static void sst_dma_free(struct sst_dma *dma)
 		dw_remove(dma->chip);
 
 }
+EXPORT_SYMBOL(sst_dma_free);
 
 /* create new generic firmware object */
 struct sst_fw *sst_fw_new(struct sst_dsp *dsp, 

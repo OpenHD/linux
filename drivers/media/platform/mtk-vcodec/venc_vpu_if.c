@@ -79,8 +79,10 @@ static int vpu_enc_send_msg(struct venc_vpu_inst *vpu, void *msg,
 
 	status = vpu_ipi_send(vpu->dev, vpu->id, msg, len);
 	if (status) {
+		uint32_t msg_id = *(uint32_t *)msg;
+
 		mtk_vcodec_err(vpu, "vpu_ipi_send msg_id %x len %d fail %d",
-			       *(uint32_t *)msg, len, status);
+			       msg_id, len, status);
 		return -EINVAL;
 	}
 	if (vpu->failure)

@@ -1,10 +1,23 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 2008 Rodolfo Giometti <giometti@linux.it>
  * Copyright (c) 2008 Eurotech S.p.A. <info@eurtech.it>
  *
  * This code is *strongly* based on EHCI-HCD code by David Brownell since
  * the chip is a quasi-EHCI compatible.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/module.h>
@@ -2275,7 +2288,9 @@ restart:
 
 		while (q.ptr != NULL) {
 			union ehci_shadow temp;
+			int live;
 
+			live = HC_IS_RUNNING(oxu_to_hcd(oxu)->state);
 			switch (type) {
 			case Q_TYPE_QH:
 				/* handle any completions */
@@ -2539,9 +2554,9 @@ static irqreturn_t oxu_irq(struct usb_hcd *hcd)
 	return ret;
 }
 
-static void oxu_watchdog(struct timer_list *t)
+static void oxu_watchdog(unsigned long param)
 {
-	struct oxu_hcd	*oxu = from_timer(oxu, t, watchdog);
+	struct oxu_hcd	*oxu = (struct oxu_hcd *) param;
 	unsigned long flags;
 
 	spin_lock_irqsave(&oxu->lock, flags);
@@ -2577,7 +2592,7 @@ static int oxu_hcd_init(struct usb_hcd *hcd)
 
 	spin_lock_init(&oxu->lock);
 
-	timer_setup(&oxu->watchdog, oxu_watchdog, 0);
+	setup_timer(&oxu->watchdog, oxu_watchdog, (unsigned long)oxu);
 
 	/*
 	 * hw default: 1K periodic list heads, one per frame.
@@ -2695,7 +2710,7 @@ static int oxu_run(struct usb_hcd *hcd)
 
 	/* hcc_params controls whether oxu->regs->segment must (!!!)
 	 * be used; it constrains QH/ITD/SITD and QTD locations.
-	 * dma_pool consistent memory always uses segment zero.
+	 * pci_pool consistent memory always uses segment zero.
 	 * streaming mappings for I/O buffers, like pci_map_single(),
 	 * can return segments above 4GB, if the device allows.
 	 *
@@ -3027,7 +3042,7 @@ idle_timeout:
 			qh_put(qh);
 			break;
 		}
-		/* fall through */
+		/* else FALL THROUGH */
 	default:
 nogood:
 		/* caller was supposed to have unlinked any requests;
@@ -3719,8 +3734,10 @@ static struct usb_hcd *oxu_create(struct platform_device *pdev,
 	oxu->is_otg = otg;
 
 	ret = usb_add_hcd(hcd, irq, IRQF_SHARED);
-	if (ret < 0)
+	if (ret < 0) {
+		usb_put_hcd(hcd);
 		return ERR_PTR(ret);
+	}
 
 	device_wakeup_enable(hcd->self.controller);
 	return hcd;

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/pcmcia/sa1100_jornada720.c
  *

@@ -53,7 +53,7 @@
  * - Multiqueue RX/TX
  */
 
-#define PE_MIN_MTU	(ETH_ZLEN + ETH_HLEN)
+#define PE_MIN_MTU	64
 #define PE_MAX_MTU	9000
 #define PE_DEF_MTU	ETH_DATA_LEN
 
@@ -212,7 +212,9 @@ static int pasemi_get_mac_addr(struct pasemi_mac *mac)
 		return -ENOENT;
 	}
 
-	if (!mac_pton(maddr, addr)) {
+	if (sscanf(maddr, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+		   &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])
+	    != ETH_ALEN) {
 		dev_warn(&pdev->dev,
 			 "can't parse mac address, not configuring\n");
 		return -EINVAL;
@@ -390,9 +392,8 @@ static int pasemi_mac_setup_rx_resources(const struct net_device *dev)
 	spin_lock_init(&ring->lock);
 
 	ring->size = RX_RING_SIZE;
-	ring->ring_info = kcalloc(RX_RING_SIZE,
-				  sizeof(struct pasemi_mac_buffer),
-				  GFP_KERNEL);
+	ring->ring_info = kzalloc(sizeof(struct pasemi_mac_buffer) *
+				  RX_RING_SIZE, GFP_KERNEL);
 
 	if (!ring->ring_info)
 		goto out_ring_info;
@@ -474,9 +475,8 @@ pasemi_mac_setup_tx_resources(const struct net_device *dev)
 	spin_lock_init(&ring->lock);
 
 	ring->size = TX_RING_SIZE;
-	ring->ring_info = kcalloc(TX_RING_SIZE,
-				  sizeof(struct pasemi_mac_buffer),
-				  GFP_KERNEL);
+	ring->ring_info = kzalloc(sizeof(struct pasemi_mac_buffer) *
+				  TX_RING_SIZE, GFP_KERNEL);
 	if (!ring->ring_info)
 		goto out_ring_info;
 
@@ -943,9 +943,9 @@ static irqreturn_t pasemi_mac_rx_intr(int irq, void *data)
 
 #define TX_CLEAN_INTERVAL HZ
 
-static void pasemi_mac_tx_timer(struct timer_list *t)
+static void pasemi_mac_tx_timer(unsigned long data)
 {
-	struct pasemi_mac_txring *txring = from_timer(txring, t, clean_timer);
+	struct pasemi_mac_txring *txring = (struct pasemi_mac_txring *)data;
 	struct pasemi_mac *mac = txring->mac;
 
 	pasemi_mac_clean_tx(txring);
@@ -1089,16 +1089,20 @@ static int pasemi_mac_open(struct net_device *dev)
 
 	mac->tx = pasemi_mac_setup_tx_resources(dev);
 
-	if (!mac->tx)
+	if (!mac->tx) {
+		ret = -ENOMEM;
 		goto out_tx_ring;
+	}
 
 	/* We might already have allocated rings in case mtu was changed
 	 * before interface was brought up.
 	 */
 	if (dev->mtu > 1500 && !mac->num_cs) {
 		pasemi_mac_setup_csrings(mac);
-		if (!mac->num_cs)
+		if (!mac->num_cs) {
+			ret = -ENOMEM;
 			goto out_tx_ring;
+		}
 	}
 
 	/* Zero out rmon counters */
@@ -1199,7 +1203,8 @@ static int pasemi_mac_open(struct net_device *dev)
 	if (dev->phydev)
 		phy_start(dev->phydev);
 
-	timer_setup(&mac->tx->clean_timer, pasemi_mac_tx_timer, 0);
+	setup_timer(&mac->tx->clean_timer, pasemi_mac_tx_timer,
+		    (unsigned long)mac->tx);
 	mod_timer(&mac->tx->clean_timer, jiffies + HZ);
 
 	return 0;
@@ -1574,7 +1579,7 @@ static int pasemi_mac_poll(struct napi_struct *napi, int budget)
 	pkts = pasemi_mac_clean_rx(rx_ring(mac), budget);
 	if (pkts < budget) {
 		/* all done, no more packets present */
-		napi_complete_done(napi, pkts);
+		napi_complete(napi);
 
 		pasemi_mac_restart_rx_intr(mac);
 		pasemi_mac_restart_tx_intr(mac);
@@ -1610,6 +1615,9 @@ static int pasemi_mac_change_mtu(struct net_device *dev, int new_mtu)
 	int running;
 	int ret = 0;
 
+	if (new_mtu < PE_MIN_MTU || new_mtu > PE_MAX_MTU)
+		return -EINVAL;
+
 	running = netif_running(dev);
 
 	if (running) {
@@ -1631,7 +1639,7 @@ static int pasemi_mac_change_mtu(struct net_device *dev, int new_mtu)
 	}
 
 	/* Setup checksum channels if large MTU and none already allocated */
-	if (new_mtu > PE_DEF_MTU && !mac->num_cs) {
+	if (new_mtu > 1500 && !mac->num_cs) {
 		pasemi_mac_setup_csrings(mac);
 		if (!mac->num_cs) {
 			ret = -ENOMEM;
@@ -1753,11 +1761,6 @@ pasemi_mac_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	dev->netdev_ops = &pasemi_netdev_ops;
 	dev->mtu = PE_DEF_MTU;
-
-	/* MTU range: 64 - 9000 */
-	dev->min_mtu = PE_MIN_MTU;
-	dev->max_mtu = PE_MAX_MTU;
-
 	/* 1500 MTU + ETH_HLEN + VLAN_HLEN + 2 64B cachelines */
 	mac->bufsz = dev->mtu + ETH_HLEN + ETH_FCS_LEN + LOCAL_SKB_ALIGN + 128;
 

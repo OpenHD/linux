@@ -34,6 +34,8 @@
 #include "reset.h"
 #include "gdsc.h"
 
+#define F(f, s, h, m, n) { (f), (s), (2 * (h) - 1), (m), (n) }
+
 enum {
 	P_XO,
 	P_MMPLL0,
@@ -265,7 +267,6 @@ static struct pll_vco mmpll_t_vco[] = {
 
 static struct clk_alpha_pll mmpll0_early = {
 	.offset = 0x0,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
 	.clkr = {
@@ -282,7 +283,6 @@ static struct clk_alpha_pll mmpll0_early = {
 
 static struct clk_alpha_pll_postdiv mmpll0 = {
 	.offset = 0x0,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll0",
@@ -295,7 +295,6 @@ static struct clk_alpha_pll_postdiv mmpll0 = {
 
 static struct clk_alpha_pll mmpll1_early = {
 	.offset = 0x30,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
 	.clkr = {
@@ -312,7 +311,6 @@ static struct clk_alpha_pll mmpll1_early = {
 
 static struct clk_alpha_pll_postdiv mmpll1 = {
 	.offset = 0x30,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll1",
@@ -325,7 +323,6 @@ static struct clk_alpha_pll_postdiv mmpll1 = {
 
 static struct clk_alpha_pll mmpll2_early = {
 	.offset = 0x4100,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_gfx_vco,
 	.num_vco = ARRAY_SIZE(mmpll_gfx_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -338,7 +335,6 @@ static struct clk_alpha_pll mmpll2_early = {
 
 static struct clk_alpha_pll_postdiv mmpll2 = {
 	.offset = 0x4100,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll2",
@@ -351,7 +347,6 @@ static struct clk_alpha_pll_postdiv mmpll2 = {
 
 static struct clk_alpha_pll mmpll3_early = {
 	.offset = 0x60,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -364,7 +359,6 @@ static struct clk_alpha_pll mmpll3_early = {
 
 static struct clk_alpha_pll_postdiv mmpll3 = {
 	.offset = 0x60,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll3",
@@ -377,7 +371,6 @@ static struct clk_alpha_pll_postdiv mmpll3 = {
 
 static struct clk_alpha_pll mmpll4_early = {
 	.offset = 0x90,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_t_vco,
 	.num_vco = ARRAY_SIZE(mmpll_t_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -390,7 +383,6 @@ static struct clk_alpha_pll mmpll4_early = {
 
 static struct clk_alpha_pll_postdiv mmpll4 = {
 	.offset = 0x90,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 2,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll4",
@@ -403,7 +395,6 @@ static struct clk_alpha_pll_postdiv mmpll4 = {
 
 static struct clk_alpha_pll mmpll5_early = {
 	.offset = 0xc0,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -416,7 +407,6 @@ static struct clk_alpha_pll mmpll5_early = {
 
 static struct clk_alpha_pll_postdiv mmpll5 = {
 	.offset = 0xc0,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll5",
@@ -429,7 +419,6 @@ static struct clk_alpha_pll_postdiv mmpll5 = {
 
 static struct clk_alpha_pll mmpll8_early = {
 	.offset = 0x4130,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_gfx_vco,
 	.num_vco = ARRAY_SIZE(mmpll_gfx_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -442,7 +431,6 @@ static struct clk_alpha_pll mmpll8_early = {
 
 static struct clk_alpha_pll_postdiv mmpll8 = {
 	.offset = 0x4130,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 4,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll8",
@@ -455,7 +443,6 @@ static struct clk_alpha_pll_postdiv mmpll8 = {
 
 static struct clk_alpha_pll mmpll9_early = {
 	.offset = 0x4200,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.vco_table = mmpll_t_vco,
 	.num_vco = ARRAY_SIZE(mmpll_t_vco),
 	.clkr.hw.init = &(struct clk_init_data){
@@ -468,7 +455,6 @@ static struct clk_alpha_pll mmpll9_early = {
 
 static struct clk_alpha_pll_postdiv mmpll9 = {
 	.offset = 0x4200,
-	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.width = 2,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "mmpll9",
@@ -1243,7 +1229,7 @@ static struct clk_branch mmss_mmagic_ahb_clk = {
 			.name = "mmss_mmagic_ahb_clk",
 			.parent_names = (const char *[]){ "ahb_clk_src" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1258,7 +1244,7 @@ static struct clk_branch mmss_mmagic_cfg_ahb_clk = {
 			.name = "mmss_mmagic_cfg_ahb_clk",
 			.parent_names = (const char *[]){ "ahb_clk_src" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1317,7 +1303,7 @@ static struct clk_branch mmagic_camss_axi_clk = {
 			.name = "mmagic_camss_axi_clk",
 			.parent_names = (const char *[]){ "axi_clk_src" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1332,7 +1318,7 @@ static struct clk_branch mmagic_camss_noc_cfg_ahb_clk = {
 			.name = "mmagic_camss_noc_cfg_ahb_clk",
 			.parent_names = (const char *[]){ "gcc_mmss_noc_cfg_ahb_clk" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1437,7 +1423,7 @@ static struct clk_branch mmagic_mdss_axi_clk = {
 			.name = "mmagic_mdss_axi_clk",
 			.parent_names = (const char *[]){ "axi_clk_src" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1452,7 +1438,7 @@ static struct clk_branch mmagic_mdss_noc_cfg_ahb_clk = {
 			.name = "mmagic_mdss_noc_cfg_ahb_clk",
 			.parent_names = (const char *[]){ "gcc_mmss_noc_cfg_ahb_clk" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1527,7 +1513,7 @@ static struct clk_branch mmagic_video_axi_clk = {
 			.name = "mmagic_video_axi_clk",
 			.parent_names = (const char *[]){ "axi_clk_src" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -1542,7 +1528,7 @@ static struct clk_branch mmagic_video_noc_cfg_ahb_clk = {
 			.name = "mmagic_video_noc_cfg_ahb_clk",
 			.parent_names = (const char *[]){ "gcc_mmss_noc_cfg_ahb_clk" },
 			.num_parents = 1,
-			.flags = CLK_SET_RATE_PARENT | CLK_IS_CRITICAL,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -2908,7 +2894,6 @@ static struct gdsc mmagic_bimc_gdsc = {
 		.name = "mmagic_bimc",
 	},
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = ALWAYS_ON,
 };
 
 static struct gdsc mmagic_video_gdsc = {
@@ -2918,7 +2903,7 @@ static struct gdsc mmagic_video_gdsc = {
 		.name = "mmagic_video",
 	},
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = VOTABLE | ALWAYS_ON,
+	.flags = VOTABLE,
 };
 
 static struct gdsc mmagic_mdss_gdsc = {
@@ -2928,7 +2913,7 @@ static struct gdsc mmagic_mdss_gdsc = {
 		.name = "mmagic_mdss",
 	},
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = VOTABLE | ALWAYS_ON,
+	.flags = VOTABLE,
 };
 
 static struct gdsc mmagic_camss_gdsc = {
@@ -2938,7 +2923,7 @@ static struct gdsc mmagic_camss_gdsc = {
 		.name = "mmagic_camss",
 	},
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = VOTABLE | ALWAYS_ON,
+	.flags = VOTABLE,
 };
 
 static struct gdsc venus_gdsc = {
@@ -2959,9 +2944,7 @@ static struct gdsc venus_core0_gdsc = {
 	.pd = {
 		.name = "venus_core0",
 	},
-	.parent = &venus_gdsc.pd,
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = HW_CTRL,
 };
 
 static struct gdsc venus_core1_gdsc = {
@@ -2971,9 +2954,7 @@ static struct gdsc venus_core1_gdsc = {
 	.pd = {
 		.name = "venus_core1",
 	},
-	.parent = &venus_gdsc.pd,
 	.pwrsts = PWRSTS_OFF_ON,
-	.flags = HW_CTRL,
 };
 
 static struct gdsc camss_gdsc = {
@@ -3051,28 +3032,6 @@ static struct gdsc mdss_gdsc = {
 	},
 	.parent = &mmagic_mdss_gdsc.pd,
 	.pwrsts = PWRSTS_OFF_ON,
-};
-
-static struct gdsc gpu_gdsc = {
-	.gdscr = 0x4034,
-	.gds_hw_ctrl = 0x4038,
-	.pd = {
-		.name = "gpu",
-	},
-	.pwrsts = PWRSTS_OFF_ON,
-	.flags = VOTABLE,
-};
-
-static struct gdsc gpu_gx_gdsc = {
-	.gdscr = 0x4024,
-	.clamp_io_ctrl = 0x4300,
-	.cxcs = (unsigned int []){ 0x4028 },
-	.cxc_count = 1,
-	.pd = {
-		.name = "gpu_gx",
-	},
-	.pwrsts = PWRSTS_OFF_ON,
-	.flags = CLAMP_IO,
 };
 
 static struct clk_regmap *mmcc_msm8996_clocks[] = {
@@ -3264,8 +3223,6 @@ static struct gdsc *mmcc_msm8996_gdscs[] = {
 	[CPP_GDSC] = &cpp_gdsc,
 	[FD_GDSC] = &fd_gdsc,
 	[MDSS_GDSC] = &mdss_gdsc,
-	[GPU_GDSC] = &gpu_gdsc,
-	[GPU_GX_GDSC] = &gpu_gx_gdsc,
 };
 
 static const struct qcom_reset_map mmcc_msm8996_resets[] = {

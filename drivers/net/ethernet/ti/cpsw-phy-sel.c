@@ -170,13 +170,10 @@ void cpsw_phy_sel(struct device *dev, phy_interface_t phy_mode, int slave)
 	struct device_node *node;
 	struct cpsw_phy_sel_priv *priv;
 
-	node = of_parse_phandle(dev->of_node, "cpsw-phy-sel", 0);
+	node = of_get_child_by_name(dev->of_node, "cpsw-phy-sel");
 	if (!node) {
-		node = of_get_child_by_name(dev->of_node, "cpsw-phy-sel");
-		if (!node) {
-			dev_err(dev, "Phy mode driver DT not found\n");
-			return;
-		}
+		dev_err(dev, "Phy mode driver DT not found\n");
+		return;
 	}
 
 	dev = bus_find_device(&platform_bus_type, NULL, node, match);

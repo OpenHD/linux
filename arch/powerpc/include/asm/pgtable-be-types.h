@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_PGTABLE_BE_TYPES_H
 #define _ASM_POWERPC_PGTABLE_BE_TYPES_H
 
@@ -77,7 +76,7 @@ typedef struct { unsigned long pgprot; } pgprot_t;
  * With hash config 64k pages additionally define a bigger "real PTE" type that
  * gathers the "second half" part of the PTE for pseudo 64k pages
  */
-#if defined(CONFIG_PPC_64K_PAGES) && defined(CONFIG_PPC_BOOK3S_64)
+#if defined(CONFIG_PPC_64K_PAGES) && defined(CONFIG_PPC_STD_MMU_64)
 typedef struct { pte_t pte; unsigned long hidx; } real_pte_t;
 #else
 typedef struct { pte_t pte; } real_pte_t;
@@ -104,14 +103,6 @@ static inline bool pmd_xchg(pmd_t *pmdp, pmd_t old, pmd_t new)
 					     (__force unsigned long)pmd_raw(new));
 
 	return pmd_raw(old) == prev;
-}
-
-typedef struct { __be64 pdbe; } hugepd_t;
-#define __hugepd(x) ((hugepd_t) { cpu_to_be64(x) })
-
-static inline unsigned long hpd_val(hugepd_t x)
-{
-	return be64_to_cpu(x.pdbe);
 }
 
 #endif /* _ASM_POWERPC_PGTABLE_BE_TYPES_H */

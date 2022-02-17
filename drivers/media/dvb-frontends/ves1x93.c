@@ -30,7 +30,7 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "ves1x93.h"
 
 
@@ -454,7 +454,7 @@ static int ves1x93_i2c_gate_ctrl(struct dvb_frontend* fe, int enable)
 	}
 }
 
-static const struct dvb_frontend_ops ves1x93_ops;
+static struct dvb_frontend_ops ves1x93_ops;
 
 struct dvb_frontend* ves1x93_attach(const struct ves1x93_config* config,
 				    struct i2c_adapter* i2c)
@@ -512,14 +512,14 @@ error:
 	return NULL;
 }
 
-static const struct dvb_frontend_ops ves1x93_ops = {
+static struct dvb_frontend_ops ves1x93_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name			= "VLSI VES1x93 DVB-S",
-		.frequency_min_hz	=   950 * MHz,
-		.frequency_max_hz	=  2150 * MHz,
-		.frequency_stepsize_hz	=   125 * kHz,
-		.frequency_tolerance_hz	= 29500 * kHz,
+		.frequency_min		= 950000,
+		.frequency_max		= 2150000,
+		.frequency_stepsize	= 125,		 /* kHz for QPSK frontends */
+		.frequency_tolerance	= 29500,
 		.symbol_rate_min	= 1000000,
 		.symbol_rate_max	= 45000000,
 	/*	.symbol_rate_tolerance	=	???,*/

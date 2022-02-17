@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * s390 specific pci instructions
  *
@@ -42,20 +41,20 @@ static inline u8 __mpcifc(u64 req, struct zpci_fib *fib, u8 *status)
 	return cc;
 }
 
-u8 zpci_mod_fc(u64 req, struct zpci_fib *fib, u8 *status)
+int zpci_mod_fc(u64 req, struct zpci_fib *fib)
 {
-	u8 cc;
+	u8 cc, status;
 
 	do {
-		cc = __mpcifc(req, fib, status);
+		cc = __mpcifc(req, fib, &status);
 		if (cc == 2)
 			msleep(ZPCI_INSN_BUSY_DELAY);
 	} while (cc == 2);
 
 	if (cc)
-		zpci_err_insn(cc, *status, req, 0);
+		zpci_err_insn(cc, status, req, 0);
 
-	return cc;
+	return (cc) ? -EIO : 0;
 }
 
 /* Refresh PCI Translations */
@@ -88,9 +87,6 @@ int zpci_refresh_trans(u64 fn, u64 addr, u64 range)
 
 	if (cc)
 		zpci_err_insn(cc, status, addr, range);
-
-	if (cc == 1 && (status == 4 || status == 16))
-		return -ENOMEM;
 
 	return (cc) ? -EIO : 0;
 }

@@ -81,6 +81,13 @@ static int __must_check wl12xx_sdio_raw_read(struct device *child, int addr,
 
 	sdio_claim_host(func);
 
+	if (unlikely(dump)) {
+		printk(KERN_DEBUG "wlcore_sdio: READ from 0x%04x\n", addr);
+		print_hex_dump(KERN_DEBUG, "wlcore_sdio: READ ",
+				DUMP_PREFIX_OFFSET, 16, 1,
+				buf, len, false);
+	}
+
 	if (unlikely(addr == HW_ACCESS_ELP_CTRL_REG)) {
 		((u8 *)buf)[0] = sdio_f0_readb(func, addr, &ret);
 		dev_dbg(child->parent, "sdio read 52 addr 0x%x, byte 0x%02x\n",
@@ -99,13 +106,6 @@ static int __must_check wl12xx_sdio_raw_read(struct device *child, int addr,
 
 	if (WARN_ON(ret))
 		dev_err(child->parent, "sdio read failed (%d)\n", ret);
-
-	if (unlikely(dump)) {
-		printk(KERN_DEBUG "wlcore_sdio: READ from 0x%04x\n", addr);
-		print_hex_dump(KERN_DEBUG, "wlcore_sdio: READ ",
-			       DUMP_PREFIX_OFFSET, 16, 1,
-			       buf, len, false);
-	}
 
 	return ret;
 }
@@ -155,29 +155,30 @@ static int wl12xx_sdio_power_on(struct wl12xx_sdio_glue *glue)
 	struct mmc_card *card = func->card;
 
 	ret = pm_runtime_get_sync(&card->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(&card->dev);
-		dev_err(glue->dev, "%s: failed to get_sync(%d)\n",
-			__func__, ret);
-
-		return ret;
+	if (ret) {
+		/*
+		 * Runtime PM might be temporarily disabled, or the device
+		 * might have a positive reference counter. Make sure it is
+		 * really powered on.
+		 */
+		ret = mmc_power_restore_host(card->host);
+		if (ret < 0) {
+			pm_runtime_put_sync(&card->dev);
+			goto out;
+		}
 	}
 
 	sdio_claim_host(func);
-	/*
-	 * To guarantee that the SDIO card is power cycled, as required to make
-	 * the FW programming to succeed, let's do a brute force HW reset.
-	 */
-	mmc_hw_reset(card->host);
-
 	sdio_enable_func(func);
 	sdio_release_host(func);
 
-	return 0;
+out:
+	return ret;
 }
 
 static int wl12xx_sdio_power_off(struct wl12xx_sdio_glue *glue)
 {
+	int ret;
 	struct sdio_func *func = dev_to_sdio_func(glue->dev);
 	struct mmc_card *card = func->card;
 
@@ -185,9 +186,16 @@ static int wl12xx_sdio_power_off(struct wl12xx_sdio_glue *glue)
 	sdio_disable_func(func);
 	sdio_release_host(func);
 
+	/* Power off the card manually in case it wasn't powered off above */
+	ret = mmc_power_save_host(card->host);
+	if (ret < 0)
+		goto out;
+
 	/* Let runtime PM know the card is powered off */
-	pm_runtime_put(&card->dev);
-	return 0;
+	pm_runtime_put_sync(&card->dev);
+
+out:
+	return ret;
 }
 
 static int wl12xx_sdio_set_power(struct device *child, bool enable)
@@ -222,7 +230,6 @@ static const struct wilink_family_data wl128x_data = {
 static const struct wilink_family_data wl18xx_data = {
 	.name = "wl18xx",
 	.cfg_name = "ti-connectivity/wl18xx-conf.bin",
-	.nvs_name = "ti-connectivity/wl1271-nvs.bin",
 };
 
 static const struct of_device_id wlcore_sdio_of_match_table[] = {
@@ -230,7 +237,6 @@ static const struct of_device_id wlcore_sdio_of_match_table[] = {
 	{ .compatible = "ti,wl1273", .data = &wl127x_data },
 	{ .compatible = "ti,wl1281", .data = &wl128x_data },
 	{ .compatible = "ti,wl1283", .data = &wl128x_data },
-	{ .compatible = "ti,wl1285", .data = &wl128x_data },
 	{ .compatible = "ti,wl1801", .data = &wl18xx_data },
 	{ .compatible = "ti,wl1805", .data = &wl18xx_data },
 	{ .compatible = "ti,wl1807", .data = &wl18xx_data },
@@ -466,7 +472,7 @@ static void __exit wl1271_exit(void)
 module_init(wl1271_init);
 module_exit(wl1271_exit);
 
-module_param(dump, bool, 0600);
+module_param(dump, bool, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(dump, "Enable sdio read/write dumps.");
 
 MODULE_LICENSE("GPL");

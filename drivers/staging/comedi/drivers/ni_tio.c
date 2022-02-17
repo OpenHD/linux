@@ -1,8 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Support for NI general purpose counters
  *
  * Copyright (C) 2006 Frank Mori Hess <fmhess@users.sourceforge.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 /*
@@ -443,9 +452,8 @@ static void ni_tio_set_sync_mode(struct ni_gpct *counter)
 	unsigned int bits = 0;
 	unsigned int reg;
 	unsigned int mode;
-	unsigned int clk_src = 0;
-	u64 ps = 0;
-	int ret;
+	unsigned int clk_src;
+	u64 ps;
 	bool force_alt_sync;
 
 	/* only m series and 660x variants have counting mode registers */
@@ -475,12 +483,9 @@ static void ni_tio_set_sync_mode(struct ni_gpct *counter)
 		break;
 	}
 
-	ret = ni_tio_generic_clock_src_select(counter, &clk_src);
-	if (ret)
-		return;
-	ret = ni_tio_clock_period_ps(counter, clk_src, &ps);
-	if (ret)
-		return;
+	ni_tio_generic_clock_src_select(counter, &clk_src);
+	ni_tio_clock_period_ps(counter, clk_src, &ps);
+
 	/*
 	 * It's not clear what we should do if clock_period is unknown, so we
 	 * are not using the alt sync bit in that case.
@@ -804,7 +809,7 @@ static int ni_tio_get_clock_src(struct ni_gpct *counter,
 				unsigned int *clock_source,
 				unsigned int *period_ns)
 {
-	u64 temp64 = 0;
+	u64 temp64;
 	int ret;
 
 	ret = ni_tio_generic_clock_src_select(counter, clock_source);

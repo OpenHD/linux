@@ -21,7 +21,7 @@
 
 #include <asm/dcr.h>
 
-#include "edac_module.h"
+#include "edac_core.h"
 #include "ppc4xx_edac.h"
 
 /*
@@ -1063,6 +1063,7 @@ static int ppc4xx_edac_mc_init(struct mem_ctl_info *mci,
 	/* Initialize strings */
 
 	mci->mod_name		= PPC4XX_EDAC_MODULE_NAME;
+	mci->mod_ver		= PPC4XX_EDAC_MODULE_REVISION;
 	mci->ctl_name		= ppc4xx_edac_match->compatible,
 	mci->dev_name		= np->full_name;
 
@@ -1266,8 +1267,8 @@ static int ppc4xx_edac_probe(struct platform_device *op)
 	memcheck = (mcopt1 & SDRAM_MCOPT1_MCHK_MASK);
 
 	if (memcheck == SDRAM_MCOPT1_MCHK_NON) {
-		ppc4xx_edac_printk(KERN_INFO, "%pOF: No ECC memory detected or "
-				   "ECC is disabled.\n", np);
+		ppc4xx_edac_printk(KERN_INFO, "%s: No ECC memory detected or "
+				   "ECC is disabled.\n", np->full_name);
 		status = -ENODEV;
 		goto done;
 	}
@@ -1286,9 +1287,9 @@ static int ppc4xx_edac_probe(struct platform_device *op)
 	mci = edac_mc_alloc(ppc4xx_edac_instance, ARRAY_SIZE(layers), layers,
 			    sizeof(struct ppc4xx_edac_pdata));
 	if (mci == NULL) {
-		ppc4xx_edac_printk(KERN_ERR, "%pOF: "
+		ppc4xx_edac_printk(KERN_ERR, "%s: "
 				   "Failed to allocate EDAC MC instance!\n",
-				   np);
+				   np->full_name);
 		status = -ENOMEM;
 		goto done;
 	}

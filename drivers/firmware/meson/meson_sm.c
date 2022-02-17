@@ -17,10 +17,8 @@
 #include <linux/arm-smccc.h>
 #include <linux/bug.h>
 #include <linux/io.h>
-#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/platform_device.h>
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/sizes.h>
@@ -129,7 +127,6 @@ EXPORT_SYMBOL(meson_sm_call);
  * meson_sm_call_read - retrieve data from secure-monitor
  *
  * @buffer:	Buffer to store the retrieved data
- * @bsize:	Size of the buffer
  * @cmd_index:	Index of the SMC32 function ID
  * @arg0:	SMC32 Argument 0
  * @arg1:	SMC32 Argument 1
@@ -138,14 +135,11 @@ EXPORT_SYMBOL(meson_sm_call);
  * @arg4:	SMC32 Argument 4
  *
  * Return:	size of read data on success, a negative value on error
- *		When 0 is returned there is no guarantee about the amount of
- *		data read and bsize bytes are copied in buffer.
  */
-int meson_sm_call_read(void *buffer, unsigned int bsize, unsigned int cmd_index,
-		       u32 arg0, u32 arg1, u32 arg2, u32 arg3, u32 arg4)
+int meson_sm_call_read(void *buffer, unsigned int cmd_index, u32 arg0,
+		       u32 arg1, u32 arg2, u32 arg3, u32 arg4)
 {
 	u32 size;
-	int ret;
 
 	if (!fw.chip)
 		return -ENOENT;
@@ -153,24 +147,16 @@ int meson_sm_call_read(void *buffer, unsigned int bsize, unsigned int cmd_index,
 	if (!fw.chip->cmd_shmem_out_base)
 		return -EINVAL;
 
-	if (bsize > fw.chip->shmem_size)
-		return -EINVAL;
-
 	if (meson_sm_call(cmd_index, &size, arg0, arg1, arg2, arg3, arg4) < 0)
 		return -EINVAL;
 
-	if (size > bsize)
+	if (!size || size > fw.chip->shmem_size)
 		return -EINVAL;
-
-	ret = size;
-
-	if (!size)
-		size = bsize;
 
 	if (buffer)
 		memcpy(buffer, fw.sm_shmem_out_base, size);
 
-	return ret;
+	return size;
 }
 EXPORT_SYMBOL(meson_sm_call_read);
 
@@ -219,11 +205,21 @@ static const struct of_device_id meson_sm_ids[] = {
 	{ /* sentinel */ },
 };
 
-static int __init meson_sm_probe(struct platform_device *pdev)
+int __init meson_sm_init(void)
 {
 	const struct meson_sm_chip *chip;
+	const struct of_device_id *matched_np;
+	struct device_node *np;
 
-	chip = of_match_device(meson_sm_ids, &pdev->dev)->data;
+	np = of_find_matching_node_and_match(NULL, meson_sm_ids, &matched_np);
+	if (!np)
+		return -ENODEV;
+
+	chip = matched_np->data;
+	if (!chip) {
+		pr_err("unable to setup secure-monitor data\n");
+		goto out;
+	}
 
 	if (chip->cmd_shmem_in_base) {
 		fw.sm_shmem_in_base = meson_sm_map_shmem(chip->cmd_shmem_in_base,
@@ -249,11 +245,4 @@ out_in_base:
 out:
 	return -EINVAL;
 }
-
-static struct platform_driver meson_sm_driver = {
-	.driver = {
-		.name = "meson-sm",
-		.of_match_table = of_match_ptr(meson_sm_ids),
-	},
-};
-module_platform_driver_probe(meson_sm_driver, meson_sm_probe);
+device_initcall(meson_sm_init);

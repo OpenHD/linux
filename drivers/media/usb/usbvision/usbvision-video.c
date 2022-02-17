@@ -17,6 +17,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  * Let's call the version 0.... until compression decoding is completely
  * implemented.
  *
@@ -72,6 +76,7 @@
 #define DRIVER_NAME "usbvision"
 #define DRIVER_ALIAS "USBVision"
 #define DRIVER_DESC "USBVision USB Video Device Driver for Linux"
+#define DRIVER_LICENSE "GPL"
 #define USBVISION_VERSION_STRING "0.9.11"
 
 #define	ENABLE_HEXDUMP	0	/* Enable if you need it */
@@ -140,7 +145,7 @@ MODULE_PARM_DESC(radio_nr, "Set radio device number (/dev/radioX).  Default: -1 
 /* Misc stuff */
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE("GPL");
+MODULE_LICENSE(DRIVER_LICENSE);
 MODULE_VERSION(USBVISION_VERSION_STRING);
 MODULE_ALIAS(DRIVER_ALIAS);
 
@@ -909,7 +914,7 @@ static ssize_t usbvision_read(struct file *file, char __user *buf,
 	PDEBUG(DBG_IO, "%s: %ld bytes, noblock=%d", __func__,
 	       (unsigned long)count, noblock);
 
-	if (!USBVISION_IS_OPERATIONAL(usbvision) || !buf)
+	if (!USBVISION_IS_OPERATIONAL(usbvision) || (buf == NULL))
 		return -EFAULT;
 
 	/* This entry point is compatible with the mmap routines
@@ -1246,7 +1251,7 @@ static void usbvision_vdev_init(struct usb_usbvision *usbvision,
 {
 	struct usb_device *usb_dev = usbvision->dev;
 
-	if (!usb_dev) {
+	if (usb_dev == NULL) {
 		dev_err(&usbvision->dev->dev,
 			"%s: usbvision->dev is not set\n", __func__);
 		return;
@@ -1331,8 +1336,8 @@ static struct usb_usbvision *usbvision_alloc(struct usb_device *dev,
 {
 	struct usb_usbvision *usbvision;
 
-	usbvision = kzalloc(sizeof(*usbvision), GFP_KERNEL);
-	if (!usbvision)
+	usbvision = kzalloc(sizeof(struct usb_usbvision), GFP_KERNEL);
+	if (usbvision == NULL)
 		return NULL;
 
 	usbvision->dev = dev;
@@ -1346,8 +1351,9 @@ static struct usb_usbvision *usbvision_alloc(struct usb_device *dev,
 
 	/* prepare control urb for control messages during interrupts */
 	usbvision->ctrl_urb = usb_alloc_urb(USBVISION_URB_FRAMES, GFP_KERNEL);
-	if (!usbvision->ctrl_urb)
+	if (usbvision->ctrl_urb == NULL)
 		goto err_unreg;
+	init_waitqueue_head(&usbvision->ctrl_urb_wq);
 
 	return usbvision;
 
@@ -1392,7 +1398,7 @@ static void usbvision_configure_video(struct usb_usbvision *usbvision)
 {
 	int model;
 
-	if (!usbvision)
+	if (usbvision == NULL)
 		return;
 
 	model = usbvision->dev_model;
@@ -1439,8 +1445,8 @@ static int usbvision_probe(struct usb_interface *intf,
 	int model, i, ret;
 
 	PDEBUG(DBG_PROBE, "VID=%#04x, PID=%#04x, ifnum=%u",
-				le16_to_cpu(dev->descriptor.idVendor),
-				le16_to_cpu(dev->descriptor.idProduct), ifnum);
+				dev->descriptor.idVendor,
+				dev->descriptor.idProduct, ifnum);
 
 	model = devid->driver_info;
 	if (model < 0 || model >= usbvision_device_data_size) {
@@ -1463,8 +1469,8 @@ static int usbvision_probe(struct usb_interface *intf,
 	}
 
 	if (interface->desc.bNumEndpoints < 2) {
-		dev_err(&intf->dev, "interface %d has %d endpoints, but must have minimum 2\n",
-			ifnum, interface->desc.bNumEndpoints);
+		dev_err(&intf->dev, "interface %d has %d endpoints, but must"
+		    " have minimum 2\n", ifnum, interface->desc.bNumEndpoints);
 		ret = -ENODEV;
 		goto err_usb;
 	}
@@ -1486,7 +1492,7 @@ static int usbvision_probe(struct usb_interface *intf,
 	}
 
 	usbvision = usbvision_alloc(dev, intf);
-	if (!usbvision) {
+	if (usbvision == NULL) {
 		dev_err(&intf->dev, "%s: couldn't allocate USBVision struct\n", __func__);
 		ret = -ENOMEM;
 		goto err_usb;
@@ -1505,9 +1511,9 @@ static int usbvision_probe(struct usb_interface *intf,
 
 	usbvision->num_alt = uif->num_altsetting;
 	PDEBUG(DBG_PROBE, "Alternate settings: %i", usbvision->num_alt);
-	usbvision->alt_max_pkt_size = kmalloc_array(32, usbvision->num_alt,
-						    GFP_KERNEL);
-	if (!usbvision->alt_max_pkt_size) {
+	usbvision->alt_max_pkt_size = kmalloc(32 * usbvision->num_alt, GFP_KERNEL);
+	if (usbvision->alt_max_pkt_size == NULL) {
+		dev_err(&intf->dev, "usbvision: out of memory!\n");
 		ret = -ENOMEM;
 		goto err_pkt;
 	}
@@ -1579,7 +1585,7 @@ static void usbvision_disconnect(struct usb_interface *intf)
 
 	PDEBUG(DBG_PROBE, "");
 
-	if (!usbvision) {
+	if (usbvision == NULL) {
 		pr_err("%s: usb_get_intfdata() failed\n", __func__);
 		return;
 	}

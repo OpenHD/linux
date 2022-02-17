@@ -14,10 +14,13 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/ioctl.h>
-#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/videodev2.h>
@@ -187,51 +190,27 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	switch (cmd) {
 	case VIDIOC_QUERYCTRL:
-		/*
-		 * TODO: this really should be folded into v4l2_queryctrl (this
-		 * currently returns -EINVAL for NULL control handlers).
-		 * However, v4l2_queryctrl() is still called directly by
-		 * drivers as well and until that has been addressed I believe
-		 * it is safer to do the check here. The same is true for the
-		 * other control ioctls below.
-		 */
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_queryctrl(vfh->ctrl_handler, arg);
 
 	case VIDIOC_QUERY_EXT_CTRL:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_query_ext_ctrl(vfh->ctrl_handler, arg);
 
 	case VIDIOC_QUERYMENU:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_querymenu(vfh->ctrl_handler, arg);
 
 	case VIDIOC_G_CTRL:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_g_ctrl(vfh->ctrl_handler, arg);
 
 	case VIDIOC_S_CTRL:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_s_ctrl(vfh, vfh->ctrl_handler, arg);
 
 	case VIDIOC_G_EXT_CTRLS:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_g_ext_ctrls(vfh->ctrl_handler, arg);
 
 	case VIDIOC_S_EXT_CTRLS:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_s_ext_ctrls(vfh, vfh->ctrl_handler, arg);
 
 	case VIDIOC_TRY_EXT_CTRLS:
-		if (!vfh->ctrl_handler)
-			return -ENOTTY;
 		return v4l2_try_ext_ctrls(vfh->ctrl_handler, arg);
 
 	case VIDIOC_DQEVENT:
@@ -263,19 +242,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			return -EPERM;
 		return v4l2_subdev_call(sd, core, s_register, p);
 	}
-	case VIDIOC_DBG_G_CHIP_INFO:
-	{
-		struct v4l2_dbg_chip_info *p = arg;
-
-		if (p->match.type != V4L2_CHIP_MATCH_SUBDEV || p->match.addr)
-			return -EINVAL;
-		if (sd->ops->core && sd->ops->core->s_register)
-			p->flags |= V4L2_CHIP_FL_WRITABLE;
-		if (sd->ops->core && sd->ops->core->g_register)
-			p->flags |= V4L2_CHIP_FL_READABLE;
-		strlcpy(p->name, sd->name, sizeof(p->name));
-		return 0;
-	}
 #endif
 
 	case VIDIOC_LOG_STATUS: {
@@ -297,8 +263,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (rval)
 			return rval;
 
-		memset(format->reserved, 0, sizeof(format->reserved));
-		memset(format->format.reserved, 0, sizeof(format->format.reserved));
 		return v4l2_subdev_call(sd, pad, get_fmt, subdev_fh->pad, format);
 	}
 
@@ -309,8 +273,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (rval)
 			return rval;
 
-		memset(format->reserved, 0, sizeof(format->reserved));
-		memset(format->format.reserved, 0, sizeof(format->format.reserved));
 		return v4l2_subdev_call(sd, pad, set_fmt, subdev_fh->pad, format);
 	}
 
@@ -322,7 +284,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (rval)
 			return rval;
 
-		memset(crop->reserved, 0, sizeof(crop->reserved));
 		memset(&sel, 0, sizeof(sel));
 		sel.which = crop->which;
 		sel.pad = crop->pad;
@@ -340,7 +301,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		struct v4l2_subdev_crop *crop = arg;
 		struct v4l2_subdev_selection sel;
 
-		memset(crop->reserved, 0, sizeof(crop->reserved));
 		rval = check_crop(sd, crop);
 		if (rval)
 			return rval;
@@ -369,7 +329,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (code->pad >= sd->entity.num_pads)
 			return -EINVAL;
 
-		memset(code->reserved, 0, sizeof(code->reserved));
 		return v4l2_subdev_call(sd, pad, enum_mbus_code, subdev_fh->pad,
 					code);
 	}
@@ -384,7 +343,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (fse->pad >= sd->entity.num_pads)
 			return -EINVAL;
 
-		memset(fse->reserved, 0, sizeof(fse->reserved));
 		return v4l2_subdev_call(sd, pad, enum_frame_size, subdev_fh->pad,
 					fse);
 	}
@@ -395,7 +353,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (fi->pad >= sd->entity.num_pads)
 			return -EINVAL;
 
-		memset(fi->reserved, 0, sizeof(fi->reserved));
 		return v4l2_subdev_call(sd, video, g_frame_interval, arg);
 	}
 
@@ -405,7 +362,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (fi->pad >= sd->entity.num_pads)
 			return -EINVAL;
 
-		memset(fi->reserved, 0, sizeof(fi->reserved));
 		return v4l2_subdev_call(sd, video, s_frame_interval, arg);
 	}
 
@@ -419,7 +375,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (fie->pad >= sd->entity.num_pads)
 			return -EINVAL;
 
-		memset(fie->reserved, 0, sizeof(fie->reserved));
 		return v4l2_subdev_call(sd, pad, enum_frame_interval, subdev_fh->pad,
 					fie);
 	}
@@ -431,7 +386,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (rval)
 			return rval;
 
-		memset(sel->reserved, 0, sizeof(sel->reserved));
 		return v4l2_subdev_call(
 			sd, pad, get_selection, subdev_fh->pad, sel);
 	}
@@ -443,7 +397,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		if (rval)
 			return rval;
 
-		memset(sel->reserved, 0, sizeof(sel->reserved));
 		return v4l2_subdev_call(
 			sd, pad, set_selection, subdev_fh->pad, sel);
 	}
@@ -494,28 +447,6 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	case VIDIOC_SUBDEV_S_DV_TIMINGS:
 		return v4l2_subdev_call(sd, video, s_dv_timings, arg);
-
-	case VIDIOC_SUBDEV_G_STD:
-		return v4l2_subdev_call(sd, video, g_std, arg);
-
-	case VIDIOC_SUBDEV_S_STD: {
-		v4l2_std_id *std = arg;
-
-		return v4l2_subdev_call(sd, video, s_std, *std);
-	}
-
-	case VIDIOC_SUBDEV_ENUMSTD: {
-		struct v4l2_standard *p = arg;
-		v4l2_std_id id;
-
-		if (v4l2_subdev_call(sd, video, g_tvnorms, &id))
-			return -EINVAL;
-
-		return v4l_video_std_enumstd(p, id);
-	}
-
-	case VIDIOC_SUBDEV_QUERYSTD:
-		return v4l2_subdev_call(sd, video, querystd, arg);
 #endif
 	default:
 		return v4l2_subdev_call(sd, core, ioctl, cmd, arg);
@@ -524,25 +455,10 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 	return 0;
 }
 
-static long subdev_do_ioctl_lock(struct file *file, unsigned int cmd, void *arg)
-{
-	struct video_device *vdev = video_devdata(file);
-	struct mutex *lock = vdev->lock;
-	long ret = -ENODEV;
-
-	if (lock && mutex_lock_interruptible(lock))
-		return -ERESTARTSYS;
-	if (video_is_registered(vdev))
-		ret = subdev_do_ioctl(file, cmd, arg);
-	if (lock)
-		mutex_unlock(lock);
-	return ret;
-}
-
 static long subdev_ioctl(struct file *file, unsigned int cmd,
 	unsigned long arg)
 {
-	return video_usercopy(file, cmd, arg, subdev_do_ioctl_lock);
+	return video_usercopy(file, cmd, arg, subdev_do_ioctl);
 }
 
 #ifdef CONFIG_COMPAT
@@ -556,19 +472,19 @@ static long subdev_compat_ioctl32(struct file *file, unsigned int cmd,
 }
 #endif
 
-static __poll_t subdev_poll(struct file *file, poll_table *wait)
+static unsigned int subdev_poll(struct file *file, poll_table *wait)
 {
 	struct video_device *vdev = video_devdata(file);
 	struct v4l2_subdev *sd = vdev_to_v4l2_subdev(vdev);
 	struct v4l2_fh *fh = file->private_data;
 
 	if (!(sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS))
-		return EPOLLERR;
+		return POLLERR;
 
 	poll_wait(file, &fh->wait, wait);
 
 	if (v4l2_event_pending(fh))
-		return EPOLLPRI;
+		return POLLPRI;
 
 	return 0;
 }
@@ -665,14 +581,13 @@ v4l2_subdev_alloc_pad_config(struct v4l2_subdev *sd)
 	if (!sd->entity.num_pads)
 		return NULL;
 
-	cfg = kvmalloc_array(sd->entity.num_pads, sizeof(*cfg),
-			     GFP_KERNEL | __GFP_ZERO);
+	cfg = kcalloc(sd->entity.num_pads, sizeof(*cfg), GFP_KERNEL);
 	if (!cfg)
 		return NULL;
 
 	ret = v4l2_subdev_call(sd, pad, init_cfg, cfg);
 	if (ret < 0 && ret != -ENOIOCTLCMD) {
-		kvfree(cfg);
+		kfree(cfg);
 		return NULL;
 	}
 
@@ -682,7 +597,7 @@ EXPORT_SYMBOL_GPL(v4l2_subdev_alloc_pad_config);
 
 void v4l2_subdev_free_pad_config(struct v4l2_subdev_pad_config *cfg)
 {
-	kvfree(cfg);
+	kfree(cfg);
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_free_pad_config);
 #endif /* CONFIG_MEDIA_CONTROLLER */

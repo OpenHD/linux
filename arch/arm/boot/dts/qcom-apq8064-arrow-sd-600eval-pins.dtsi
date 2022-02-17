@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 &tlmm_pinmux {
 	card_detect: card-detect {
 		mux {

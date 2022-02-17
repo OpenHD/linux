@@ -30,7 +30,7 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "tda8083.h"
 
 
@@ -421,7 +421,7 @@ static void tda8083_release(struct dvb_frontend* fe)
 	kfree(state);
 }
 
-static const struct dvb_frontend_ops tda8083_ops;
+static struct dvb_frontend_ops tda8083_ops;
 
 struct dvb_frontend* tda8083_attach(const struct tda8083_config* config,
 				    struct i2c_adapter* i2c)
@@ -449,13 +449,14 @@ error:
 	return NULL;
 }
 
-static const struct dvb_frontend_ops tda8083_ops = {
+static struct dvb_frontend_ops tda8083_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name			= "Philips TDA8083 DVB-S",
-		.frequency_min_hz	=  920 * MHz,     /* TDA8060 */
-		.frequency_max_hz	= 2200 * MHz,    /* TDA8060 */
-		.frequency_stepsize_hz	=  125 * kHz,
+		.frequency_min		= 920000,     /* TDA8060 */
+		.frequency_max		= 2200000,    /* TDA8060 */
+		.frequency_stepsize	= 125,   /* kHz for QPSK frontends */
+	/*      .frequency_tolerance	= ???,*/
 		.symbol_rate_min	= 12000000,
 		.symbol_rate_max	= 30000000,
 	/*      .symbol_rate_tolerance	= ???,*/

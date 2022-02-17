@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* cfg80211 Interface for prism2_usb module */
 #include "hfa384x.h"
 #include "prism2mgmt.h"
@@ -101,7 +100,7 @@ static int prism2_domibset_pstr32(struct wlandevice *wlandev,
 /* The interface functions, called by the cfg80211 layer */
 static int prism2_change_virtual_intf(struct wiphy *wiphy,
 				      struct net_device *dev,
-				      enum nl80211_iftype type,
+				      enum nl80211_iftype type, u32 *flags,
 				      struct vif_params *params)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
@@ -148,26 +147,40 @@ static int prism2_add_key(struct wiphy *wiphy, struct net_device *dev,
 	struct wlandevice *wlandev = dev->ml_priv;
 	u32 did;
 
+	int err = 0;
+	int result = 0;
+
 	if (key_index >= NUM_WEPKEYS)
 		return -EINVAL;
 
-	if (params->cipher != WLAN_CIPHER_SUITE_WEP40 &&
-	    params->cipher != WLAN_CIPHER_SUITE_WEP104) {
+	switch (params->cipher) {
+	case WLAN_CIPHER_SUITE_WEP40:
+	case WLAN_CIPHER_SUITE_WEP104:
+		result = prism2_domibset_uint32(wlandev,
+						DIDmib_dot11smt_dot11PrivacyTable_dot11WEPDefaultKeyID,
+						key_index);
+		if (result)
+			goto exit;
+
+		/* send key to driver */
+		did = DIDmib_dot11smt_dot11WEPDefaultKeysTable_key(key_index + 1);
+
+		result = prism2_domibset_pstr32(wlandev, did,
+						params->key_len, params->key);
+		if (result)
+			goto exit;
+		break;
+
+	default:
 		pr_debug("Unsupported cipher suite\n");
-		return -EFAULT;
+		result = 1;
 	}
 
-	if (prism2_domibset_uint32(wlandev,
-				   DIDmib_dot11smt_dot11PrivacyTable_dot11WEPDefaultKeyID,
-				   key_index))
-		return -EFAULT;
+exit:
+	if (result)
+		err = -EFAULT;
 
-	/* send key to driver */
-	did = DIDmib_dot11smt_dot11WEPDefaultKeysTable_key(key_index + 1);
-
-	if (prism2_domibset_pstr32(wlandev, did, params->key_len, params->key))
-		return -EFAULT;
-	return 0;
+	return err;
 }
 
 static int prism2_get_key(struct wiphy *wiphy, struct net_device *dev,
@@ -268,9 +281,9 @@ static int prism2_get_station(struct wiphy *wiphy, struct net_device *dev,
 
 	if (result == 0) {
 		sinfo->txrate.legacy = quality.txrate.data;
-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
+		sinfo->filled |= BIT(NL80211_STA_INFO_TX_BITRATE);
 		sinfo->signal = quality.level.data;
-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
+		sinfo->filled |= BIT(NL80211_STA_INFO_SIGNAL);
 	}
 
 	return result;
@@ -310,7 +323,7 @@ static int prism2_scan(struct wiphy *wiphy,
 
 	priv->scan_request = request;
 
-	memset(&msg1, 0x00, sizeof(msg1));
+	memset(&msg1, 0x00, sizeof(struct p80211msg_dot11req_scan));
 	msg1.msgcode = DIDmsg_dot11req_scan;
 	msg1.bsstype.data = P80211ENUM_bsstype_any;
 
@@ -362,13 +375,13 @@ static int prism2_scan(struct wiphy *wiphy,
 		ie_buf[0] = WLAN_EID_SSID;
 		ie_buf[1] = msg2.ssid.data.len;
 		ie_len = ie_buf[1] + 2;
-		memcpy(&ie_buf[2], &msg2.ssid.data.data, msg2.ssid.data.len);
+		memcpy(&ie_buf[2], &(msg2.ssid.data.data), msg2.ssid.data.len);
 		freq = ieee80211_channel_to_frequency(msg2.dschannel.data,
 						      NL80211_BAND_2GHZ);
 		bss = cfg80211_inform_bss(wiphy,
 			ieee80211_get_channel(wiphy, freq),
 			CFG80211_BSS_FTYPE_UNKNOWN,
-			(const u8 *)&msg2.bssid.data.data,
+			(const u8 *)&(msg2.bssid.data.data),
 			msg2.timestamp.data, msg2.capinfo.data,
 			msg2.beaconperiod.data,
 			ie_buf,
@@ -470,8 +483,8 @@ static int prism2_connect(struct wiphy *wiphy, struct net_device *dev,
 		msg_join.authtype.data = P80211ENUM_authalg_sharedkey;
 	else
 		netdev_warn(dev,
-			    "Unhandled authorisation type for connect (%d)\n",
-			    sme->auth_type);
+			"Unhandled authorisation type for connect (%d)\n",
+			sme->auth_type);
 
 	/* Set the encryption - we only support wep */
 	if (is_wep) {
@@ -651,11 +664,8 @@ void prism2_disconnected(struct wlandevice *wlandev)
 
 void prism2_roamed(struct wlandevice *wlandev)
 {
-	struct cfg80211_roam_info roam_info = {
-		.bssid = wlandev->bssid,
-	};
-
-	cfg80211_roamed(wlandev->netdev, &roam_info, GFP_KERNEL);
+	cfg80211_roamed(wlandev->netdev, NULL, wlandev->bssid,
+		NULL, 0, NULL, 0, GFP_KERNEL);
 }
 
 /* Structures for declaring wiphy interface */

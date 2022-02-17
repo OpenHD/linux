@@ -23,6 +23,7 @@ Example:
 	pmic@5b {
 		compatible = "active-semi,act8945a";
 		reg = <0x5b>;
+		status = "okay";
 
 		active-semi,vsel-high;
 

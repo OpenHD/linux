@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_QSPINLOCK_PARAVIRT_H
 #define __ASM_QSPINLOCK_PARAVIRT_H
 
@@ -43,7 +42,7 @@ asm    (".pushsection .text;"
 	"push  %rdx;"
 	"mov   $0x1,%eax;"
 	"xor   %edx,%edx;"
-	LOCK_PREFIX "cmpxchg %dl,(%rdi);"
+	"lock cmpxchg %dl,(%rdi);"
 	"cmp   $0x1,%al;"
 	"jne   .slowpath;"
 	"pop   %rdx;"

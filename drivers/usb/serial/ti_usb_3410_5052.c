@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * TI 3410/5052 USB Serial Driver
  *
@@ -7,6 +6,11 @@
  * This driver is based on the Linux io_ti driver, which is
  *   Copyright (C) 2000-2002 Inside Out Networks
  *   Copyright (C) 2001-2002 Greg Kroah-Hartman
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * For questions or problems with this driver, contact Texas Instruments
  * technical support, or Al Borchers <alborchers@steinerpoint.com>, or
@@ -423,7 +427,6 @@ static struct usb_serial_driver ti_1port_device = {
 	.description		= "TI USB 3410 1 port adapter",
 	.id_table		= ti_id_table_3410,
 	.num_ports		= 1,
-	.num_bulk_out		= 1,
 	.attach			= ti_startup,
 	.release		= ti_release,
 	.port_probe		= ti_port_probe,
@@ -456,7 +459,6 @@ static struct usb_serial_driver ti_2port_device = {
 	.description		= "TI USB 5052 2 port adapter",
 	.id_table		= ti_id_table_5052,
 	.num_ports		= 2,
-	.num_bulk_out		= 1,
 	.attach			= ti_startup,
 	.release		= ti_release,
 	.port_probe		= ti_port_probe,
@@ -921,12 +923,20 @@ static void ti_set_termios(struct tty_struct *tty,
 {
 	struct ti_port *tport = usb_get_serial_port_data(port);
 	struct ti_uart_config *config;
+	tcflag_t cflag, iflag;
 	int baud;
 	int status;
 	int port_number = port->port_number;
 	unsigned int mcr;
 	u16 wbaudrate;
 	u16 wflags = 0;
+
+	cflag = tty->termios.c_cflag;
+	iflag = tty->termios.c_iflag;
+
+	dev_dbg(&port->dev, "%s - cflag %08x, iflag %08x\n", __func__, cflag, iflag);
+	dev_dbg(&port->dev, "%s - old clfag %08x, old iflag %08x\n", __func__,
+		old_termios->c_cflag, old_termios->c_iflag);
 
 	config = kmalloc(sizeof(*config), GFP_KERNEL);
 	if (!config)
@@ -1211,7 +1221,6 @@ static void ti_bulk_in_callback(struct urb *urb)
 	struct usb_serial_port *port = tport->tp_port;
 	struct device *dev = &urb->dev->dev;
 	int status = urb->status;
-	unsigned long flags;
 	int retval = 0;
 
 	switch (status) {
@@ -1244,20 +1253,20 @@ static void ti_bulk_in_callback(struct urb *urb)
 				__func__);
 		else
 			ti_recv(port, urb->transfer_buffer, urb->actual_length);
-		spin_lock_irqsave(&tport->tp_lock, flags);
+		spin_lock(&tport->tp_lock);
 		port->icount.rx += urb->actual_length;
-		spin_unlock_irqrestore(&tport->tp_lock, flags);
+		spin_unlock(&tport->tp_lock);
 	}
 
 exit:
 	/* continue to read unless stopping */
-	spin_lock_irqsave(&tport->tp_lock, flags);
+	spin_lock(&tport->tp_lock);
 	if (tport->tp_read_urb_state == TI_READ_URB_RUNNING)
 		retval = usb_submit_urb(urb, GFP_ATOMIC);
 	else if (tport->tp_read_urb_state == TI_READ_URB_STOPPING)
 		tport->tp_read_urb_state = TI_READ_URB_STOPPED;
 
-	spin_unlock_irqrestore(&tport->tp_lock, flags);
+	spin_unlock(&tport->tp_lock);
 	if (retval)
 		dev_err(dev, "%s - resubmit read urb failed, %d\n",
 			__func__, retval);
@@ -1419,6 +1428,9 @@ static int ti_get_serial_info(struct ti_port *tport,
 	struct usb_serial_port *port = tport->tp_port;
 	struct serial_struct ret_serial;
 	unsigned cwait;
+
+	if (!ret_arg)
+		return -EFAULT;
 
 	cwait = port->port.closing_wait;
 	if (cwait != ASYNC_CLOSING_WAIT_NONE)

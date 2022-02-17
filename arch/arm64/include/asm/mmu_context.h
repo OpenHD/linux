@@ -19,12 +19,8 @@
 #ifndef __ASM_MMU_CONTEXT_H
 #define __ASM_MMU_CONTEXT_H
 
-#ifndef __ASSEMBLY__
-
 #include <linux/compiler.h>
 #include <linux/sched.h>
-#include <linux/sched/hotplug.h>
-#include <linux/mm_types.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
@@ -49,7 +45,7 @@ static inline void contextidr_thread_switch(struct task_struct *next)
  */
 static inline void cpu_set_reserved_ttbr0(void)
 {
-	unsigned long ttbr = phys_to_ttbr(__pa_symbol(empty_zero_page));
+	unsigned long ttbr = __pa_symbol(empty_zero_page);
 
 	write_sysreg(ttbr, ttbr0_el1);
 	isb();
@@ -68,20 +64,11 @@ static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
  * physical memory, in which case it will be smaller.
  */
 extern u64 idmap_t0sz;
-extern u64 idmap_ptrs_per_pgd;
 
 static inline bool __cpu_uses_extended_idmap(void)
 {
-	return unlikely(idmap_t0sz != TCR_T0SZ(VA_BITS));
-}
-
-/*
- * True if the extended ID map requires an extra level of translation table
- * to be configured.
- */
-static inline bool __cpu_uses_extended_idmap_level(void)
-{
-	return ARM64_HW_PGTABLE_LEVELS(64 - idmap_t0sz) > CONFIG_PGTABLE_LEVELS;
+	return (!IS_ENABLED(CONFIG_ARM64_VA_BITS_48) &&
+		unlikely(idmap_t0sz != TCR_T0SZ(VA_BITS)));
 }
 
 /*
@@ -141,13 +128,13 @@ static inline void cpu_install_idmap(void)
  * Atomically replaces the active TTBR1_EL1 PGD with a new VA-compatible PGD,
  * avoiding the possibility of conflicting TLB entries being allocated.
  */
-static inline void cpu_replace_ttbr1(pgd_t *pgdp)
+static inline void __nocfi cpu_replace_ttbr1(pgd_t *pgd)
 {
 	typedef void (ttbr_replace_func)(phys_addr_t);
 	extern ttbr_replace_func idmap_cpu_replace_ttbr1;
 	ttbr_replace_func *replace_phys;
 
-	phys_addr_t pgd_phys = virt_to_phys(pgdp);
+	phys_addr_t pgd_phys = virt_to_phys(pgd);
 
 	replace_phys = (void *)__pa_symbol(idmap_cpu_replace_ttbr1);
 
@@ -241,6 +228,4 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
 
-#endif /* !__ASSEMBLY__ */
-
-#endif /* !__ASM_MMU_CONTEXT_H */
+#endif

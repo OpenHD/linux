@@ -19,7 +19,7 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/rtnetlink.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -122,6 +122,7 @@ static int cryptomgr_schedule_probe(struct crypto_larval *larval)
 		int notnum = 0;
 
 		name = ++p;
+		len = 0;
 
 		for (; isalnum(*p) || *p == '-' || *p == '_'; p++)
 			notnum |= !isdigit(*p);
@@ -172,9 +173,6 @@ static int cryptomgr_schedule_probe(struct crypto_larval *larval)
 			goto err_free_param;
 	}
 
-	if (!i)
-		goto err_free_param;
-
 	param->tb[i + 1] = NULL;
 
 	param->type.attr.rta_len = sizeof(param->type);
@@ -192,8 +190,6 @@ static int cryptomgr_schedule_probe(struct crypto_larval *larval)
 	thread = kthread_run(cryptomgr_probe, param, "cryptomgr_probe");
 	if (IS_ERR(thread))
 		goto err_put_larval;
-
-	wait_for_completion_interruptible(&larval->completion);
 
 	return NOTIFY_STOP;
 
@@ -246,8 +242,12 @@ static int cryptomgr_schedule_test(struct crypto_alg *alg)
 	memcpy(param->alg, alg->cra_name, sizeof(param->alg));
 	type = alg->cra_flags;
 
-	/* Do not test internal algorithms. */
-	if (type & CRYPTO_ALG_INTERNAL)
+	/* This piece of crap needs to disappear into per-type test hooks. */
+	if (!((type ^ CRYPTO_ALG_TYPE_BLKCIPHER) &
+	      CRYPTO_ALG_TYPE_BLKCIPHER_MASK) && !(type & CRYPTO_ALG_GENIV) &&
+	    ((alg->cra_flags & CRYPTO_ALG_TYPE_MASK) ==
+	     CRYPTO_ALG_TYPE_BLKCIPHER ? alg->cra_blkcipher.ivsize :
+					 alg->cra_ablkcipher.ivsize))
 		type |= CRYPTO_ALG_TESTED;
 
 	param->type = type;

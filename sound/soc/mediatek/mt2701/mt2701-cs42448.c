@@ -1,10 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * mt2701-cs42448.c  --  MT2701 CS42448 ALSA SoC machine driver
  *
  * Copyright (c) 2016 MediaTek Inc.
  * Author: Ir Lian <ir.lian@mediatek.com>
- *	   Garlic Tseng <garlic.tseng@mediatek.com>
+ *              Garlic Tseng <garlic.tseng@mediatek.com>
+ *
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -98,7 +107,7 @@ static const struct snd_kcontrol_new mt2701_cs42448_controls[] = {
 
 static const unsigned int mt2701_cs42448_sampling_rates[] = {48000};
 
-static const struct snd_pcm_hw_constraint_list mt2701_cs42448_constraints_rates = {
+static struct snd_pcm_hw_constraint_list mt2701_cs42448_constraints_rates = {
 		.count = ARRAY_SIZE(mt2701_cs42448_sampling_rates),
 		.list = mt2701_cs42448_sampling_rates,
 		.mask = 0,
@@ -120,7 +129,7 @@ static int mt2701_cs42448_fe_ops_startup(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static const struct snd_soc_ops mt2701_cs42448_48k_fe_ops = {
+static struct snd_soc_ops mt2701_cs42448_48k_fe_ops = {
 	.startup = mt2701_cs42448_fe_ops_startup,
 };
 

@@ -1,7 +1,7 @@
 /*
  * AMD Cryptographic Coprocessor (CCP) driver
  *
- * Copyright (C) 2013,2017 Advanced Micro Devices, Inc.
+ * Copyright (C) 2013,2016 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
@@ -359,7 +359,8 @@ static void ccp_irq_bh(unsigned long data)
 
 static irqreturn_t ccp_irq_handler(int irq, void *data)
 {
-	struct ccp_device *ccp = (struct ccp_device *)data;
+	struct device *dev = data;
+	struct ccp_device *ccp = dev_get_drvdata(dev);
 
 	ccp_disable_queue_interrupts(ccp);
 	if (ccp->use_tasklet)
@@ -453,11 +454,15 @@ static int ccp_init(struct ccp_device *ccp)
 	iowrite32(ccp->qim, ccp->io_regs + IRQ_STATUS_REG);
 
 	/* Request an irq */
-	ret = sp_request_ccp_irq(ccp->sp, ccp_irq_handler, ccp->name, ccp);
+	ret = ccp->get_irq(ccp);
 	if (ret) {
 		dev_err(dev, "unable to allocate an IRQ\n");
 		goto e_pool;
 	}
+
+	/* Initialize the queues used to wait for KSB space and suspend */
+	init_waitqueue_head(&ccp->sb_queue);
+	init_waitqueue_head(&ccp->suspend_queue);
 
 	/* Initialize the ISR tasklet? */
 	if (ccp->use_tasklet)
@@ -510,7 +515,7 @@ e_kthread:
 		if (ccp->cmd_q[i].kthread)
 			kthread_stop(ccp->cmd_q[i].kthread);
 
-	sp_free_ccp_irq(ccp->sp, ccp);
+	ccp->free_irq(ccp);
 
 e_pool:
 	for (i = 0; i < ccp->cmd_q_count; i++)
@@ -549,7 +554,7 @@ static void ccp_destroy(struct ccp_device *ccp)
 		if (ccp->cmd_q[i].kthread)
 			kthread_stop(ccp->cmd_q[i].kthread);
 
-	sp_free_ccp_irq(ccp->sp, ccp);
+	ccp->free_irq(ccp);
 
 	for (i = 0; i < ccp->cmd_q_count; i++)
 		dma_pool_destroy(ccp->cmd_q[i].dma_pool);
@@ -572,7 +577,6 @@ static void ccp_destroy(struct ccp_device *ccp)
 static const struct ccp_actions ccp3_actions = {
 	.aes = ccp_perform_aes,
 	.xts_aes = ccp_perform_xts_aes,
-	.des3 = NULL,
 	.sha = ccp_perform_sha,
 	.rsa = ccp_perform_rsa,
 	.passthru = ccp_perform_passthru,
@@ -585,17 +589,10 @@ static const struct ccp_actions ccp3_actions = {
 	.irqhandler = ccp_irq_handler,
 };
 
-const struct ccp_vdata ccpv3_platform = {
-	.version = CCP_VERSION(3, 0),
-	.setup = NULL,
-	.perform = &ccp3_actions,
-	.offset = 0,
-};
-
 const struct ccp_vdata ccpv3 = {
 	.version = CCP_VERSION(3, 0),
 	.setup = NULL,
 	.perform = &ccp3_actions,
+	.bar = 2,
 	.offset = 0x20000,
-	.rsamax = CCP_RSA_MAX_WIDTH,
 };

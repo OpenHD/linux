@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
+ * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/errno.h>
@@ -360,7 +360,7 @@ out:
 		bdisp_job_finish(ctx, VB2_BUF_STATE_ERROR);
 }
 
-static const struct v4l2_m2m_ops bdisp_m2m_ops = {
+static struct v4l2_m2m_ops bdisp_m2m_ops = {
 	.device_run     = bdisp_device_run,
 	.job_abort      = bdisp_job_abort,
 };
@@ -632,8 +632,8 @@ static int bdisp_open(struct file *file)
 
 error_ctrls:
 	bdisp_ctrls_delete(ctx);
-	v4l2_fh_del(&ctx->fh);
 error_fh:
+	v4l2_fh_del(&ctx->fh);
 	v4l2_fh_exit(&ctx->fh);
 	bdisp_hw_free_nodes(ctx);
 mem_ctx:
@@ -722,7 +722,7 @@ static int bdisp_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 static int bdisp_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct bdisp_ctx *ctx = fh_to_ctx(fh);
-	struct v4l2_pix_format *pix;
+	struct v4l2_pix_format *pix = &f->fmt.pix;
 	struct bdisp_frame *frame  = ctx_get_frame(ctx, f->type);
 
 	if (IS_ERR(frame)) {
@@ -1296,10 +1296,6 @@ static int bdisp_probe(struct platform_device *pdev)
 	if (!bdisp)
 		return -ENOMEM;
 
-	ret = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
-
 	bdisp->pdev = pdev;
 	bdisp->dev = dev;
 	platform_set_drvdata(pdev, bdisp);
@@ -1340,7 +1336,6 @@ static int bdisp_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(dev, "failed to get IRQ resource\n");
-		ret = -EINVAL;
 		goto err_clk;
 	}
 
@@ -1371,7 +1366,7 @@ static int bdisp_probe(struct platform_device *pdev)
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
 		dev_err(dev, "failed to set PM\n");
-		goto err_dbg;
+		goto err_pm;
 	}
 
 	/* Filters */
@@ -1399,7 +1394,6 @@ err_filter:
 	bdisp_hw_free_filters(bdisp->dev);
 err_pm:
 	pm_runtime_put(dev);
-err_dbg:
 	bdisp_debugfs_remove(bdisp);
 err_v4l2:
 	v4l2_device_unregister(&bdisp->v4l2_dev);

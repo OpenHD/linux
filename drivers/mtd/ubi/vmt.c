@@ -139,7 +139,6 @@ static void vol_release(struct device *dev)
 	struct ubi_volume *vol = container_of(dev, struct ubi_volume, dev);
 
 	ubi_eba_replace_table(vol, NULL);
-	ubi_fastmap_destroy_checkmap(vol);
 	kfree(vol);
 }
 
@@ -156,10 +155,11 @@ static void vol_release(struct device *dev)
  */
 int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 {
-	int i, err, vol_id = req->vol_id;
+	int i, err, vol_id = req->vol_id, do_free = 1;
 	struct ubi_volume *vol;
 	struct ubi_vtbl_record vtbl_rec;
 	struct ubi_eba_table *eba_tbl = NULL;
+	dev_t dev;
 
 	if (ubi->ro_mode)
 		return -EROFS;
@@ -167,15 +167,6 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	vol = kzalloc(sizeof(struct ubi_volume), GFP_KERNEL);
 	if (!vol)
 		return -ENOMEM;
-
-	device_initialize(&vol->dev);
-	vol->dev.release = vol_release;
-	vol->dev.parent = &ubi->dev;
-	vol->dev.class = &ubi_class;
-	vol->dev.groups = volume_dev_groups;
-
-	if (req->flags & UBI_VOL_SKIP_CRC_CHECK_FLG)
-		vol->skip_check = 1;
 
 	spin_lock(&ubi->volumes_lock);
 	if (vol_id == UBI_VOL_NUM_AUTO) {
@@ -283,13 +274,24 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	/* Register character device for the volume */
 	cdev_init(&vol->cdev, &ubi_vol_cdev_operations);
 	vol->cdev.owner = THIS_MODULE;
-
-	vol->dev.devt = MKDEV(MAJOR(ubi->cdev.dev), vol_id + 1);
-	dev_set_name(&vol->dev, "%s_%d", ubi->ubi_name, vol->vol_id);
-	err = cdev_device_add(&vol->cdev, &vol->dev);
+	dev = MKDEV(MAJOR(ubi->cdev.dev), vol_id + 1);
+	err = cdev_add(&vol->cdev, dev, 1);
 	if (err) {
-		ubi_err(ubi, "cannot add device");
+		ubi_err(ubi, "cannot add character device");
 		goto out_mapping;
+	}
+
+	vol->dev.release = vol_release;
+	vol->dev.parent = &ubi->dev;
+	vol->dev.devt = dev;
+	vol->dev.class = &ubi_class;
+	vol->dev.groups = volume_dev_groups;
+
+	dev_set_name(&vol->dev, "%s_%d", ubi->ubi_name, vol->vol_id);
+	err = device_register(&vol->dev);
+	if (err) {
+		ubi_err(ubi, "cannot register device");
+		goto out_cdev;
 	}
 
 	/* Fill volume table record */
@@ -302,10 +304,6 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 		vtbl_rec.vol_type = UBI_VID_DYNAMIC;
 	else
 		vtbl_rec.vol_type = UBI_VID_STATIC;
-
-	if (vol->skip_check)
-		vtbl_rec.flags |= UBI_VTBL_SKIP_CRC_CHECK_FLG;
-
 	memcpy(vtbl_rec.name, vol->name, vol->name_len);
 
 	err = ubi_change_vtbl_record(ubi, vol_id, &vtbl_rec);
@@ -321,21 +319,32 @@ out_sysfs:
 	 * We have registered our device, we should not free the volume
 	 * description object in this function in case of an error - it is
 	 * freed by the release function.
+	 *
+	 * Get device reference to prevent the release function from being
+	 * called just after sysfs has been closed.
 	 */
-	cdev_device_del(&vol->cdev, &vol->dev);
+	do_free = 0;
+	get_device(&vol->dev);
+	device_unregister(&vol->dev);
+out_cdev:
+	cdev_del(&vol->cdev);
 out_mapping:
 	spin_lock(&ubi->volumes_lock);
 	ubi->volumes[vol_id] = NULL;
 	ubi->vol_count -= 1;
 	spin_unlock(&ubi->volumes_lock);
-	ubi_eba_destroy_table(eba_tbl);
+	if (do_free)
+		ubi_eba_destroy_table(eba_tbl);
 out_acc:
 	spin_lock(&ubi->volumes_lock);
 	ubi->rsvd_pebs -= vol->reserved_pebs;
 	ubi->avail_pebs += vol->reserved_pebs;
 out_unlock:
 	spin_unlock(&ubi->volumes_lock);
-	put_device(&vol->dev);
+	if (do_free)
+		kfree(vol);
+	else
+		put_device(&vol->dev);
 	ubi_err(ubi, "cannot create volume %d, error %d", vol_id, err);
 	return err;
 }
@@ -387,8 +396,8 @@ int ubi_remove_volume(struct ubi_volume_desc *desc, int no_vtbl)
 			goto out_err;
 	}
 
-	cdev_device_del(&vol->cdev, &vol->dev);
-	put_device(&vol->dev);
+	cdev_del(&vol->cdev);
+	device_unregister(&vol->dev);
 
 	spin_lock(&ubi->volumes_lock);
 	ubi->rsvd_pebs -= reserved_pebs;
@@ -738,11 +747,6 @@ static int self_check_volume(struct ubi_device *ubi, int vol_id)
 		}
 		if (vol->used_bytes != n) {
 			ubi_err(ubi, "bad used_bytes");
-			goto fail;
-		}
-
-		if (vol->skip_check) {
-			ubi_err(ubi, "bad skip_check");
 			goto fail;
 		}
 	} else {

@@ -2,14 +2,14 @@
 
 .. _audio_fwrite:
 
-=========================
-Digital TV audio write()
-=========================
+=================
+DVB audio write()
+=================
 
 Name
 ----
 
-Digital TV audio write()
+DVB audio write()
 
 .. attention:: This ioctl is deprecated
 

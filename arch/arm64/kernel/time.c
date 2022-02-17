@@ -41,6 +41,7 @@
 
 #include <asm/thread_info.h>
 #include <asm/stacktrace.h>
+#include <asm/mach/time.h>
 
 unsigned long profile_pc(struct pt_regs *regs)
 {
@@ -50,6 +51,7 @@ unsigned long profile_pc(struct pt_regs *regs)
 		return regs->pc;
 
 	frame.fp = regs->regs[29];
+	frame.sp = regs->sp;
 	frame.pc = regs->pc;
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	frame.graph = current->curr_ret_stack;
@@ -64,12 +66,43 @@ unsigned long profile_pc(struct pt_regs *regs)
 }
 EXPORT_SYMBOL(profile_pc);
 
+static void dummy_clock_access(struct timespec *ts)
+{
+	ts->tv_sec = 0;
+	ts->tv_nsec = 0;
+}
+
+static clock_access_fn __read_persistent_clock = dummy_clock_access;
+static clock_access_fn __read_boot_clock = dummy_clock_access;
+
+void read_persistent_clock(struct timespec *ts)
+{
+	__read_persistent_clock(ts);
+}
+
+int __init register_persistent_clock(clock_access_fn read_boot,
+				     clock_access_fn read_persistent)
+{
+	/* Only allow the clockaccess functions to be registered once */
+	if (__read_persistent_clock == dummy_clock_access &&
+	    __read_boot_clock == dummy_clock_access) {
+		if (read_boot)
+			__read_boot_clock = read_boot;
+		if (read_persistent)
+			__read_persistent_clock = read_persistent;
+
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 void __init time_init(void)
 {
 	u32 arch_timer_rate;
 
 	of_clk_init(NULL);
-	timer_probe();
+	clocksource_probe();
 
 	tick_setup_hrtimer_broadcast();
 

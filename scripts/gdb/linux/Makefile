@@ -1,7 +1,6 @@
-# SPDX-License-Identifier: GPL-2.0
 always := gdb-scripts
 
-SRCTREE := $(abspath $(srctree))
+SRCTREE := $(shell cd $(srctree) && /bin/pwd)
 
 $(obj)/gdb-scripts:
 ifneq ($(KBUILD_SRC),)

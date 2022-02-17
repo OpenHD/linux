@@ -56,9 +56,6 @@ static int gpio_banks;
 #define DRIVE_STRENGTH_SHIFT	5
 #define DRIVE_STRENGTH_MASK		0x3
 #define DRIVE_STRENGTH   (DRIVE_STRENGTH_MASK << DRIVE_STRENGTH_SHIFT)
-#define OUTPUT		(1 << 7)
-#define OUTPUT_VAL_SHIFT	8
-#define OUTPUT_VAL	(0x1 << OUTPUT_VAL_SHIFT)
 #define DEBOUNCE	(1 << 16)
 #define DEBOUNCE_VAL_SHIFT	17
 #define DEBOUNCE_VAL	(0x3fff << DEBOUNCE_VAL_SHIFT)
@@ -269,8 +266,7 @@ static int at91_dt_node_to_map(struct pinctrl_dev *pctldev,
 	}
 
 	map_num += grp->npins;
-	new_map = devm_kcalloc(pctldev->dev, map_num, sizeof(*new_map),
-			       GFP_KERNEL);
+	new_map = devm_kzalloc(pctldev->dev, sizeof(*new_map) * map_num, GFP_KERNEL);
 	if (!new_map)
 		return -ENOMEM;
 
@@ -377,19 +373,6 @@ static void at91_mux_set_pullup(void __iomem *pio, unsigned mask, bool on)
 		writel_relaxed(mask, pio + PIO_PPDDR);
 
 	writel_relaxed(mask, pio + (on ? PIO_PUER : PIO_PUDR));
-}
-
-static bool at91_mux_get_output(void __iomem *pio, unsigned int pin, bool *val)
-{
-	*val = (readl_relaxed(pio + PIO_ODSR) >> pin) & 0x1;
-	return (readl_relaxed(pio + PIO_OSR) >> pin) & 0x1;
-}
-
-static void at91_mux_set_output(void __iomem *pio, unsigned int mask,
-				bool is_on, bool val)
-{
-	writel_relaxed(mask, pio + (val ? PIO_SODR : PIO_CODR));
-	writel_relaxed(mask, pio + (is_on ? PIO_OER : PIO_ODR));
 }
 
 static unsigned at91_mux_get_multidrive(void __iomem *pio, unsigned pin)
@@ -865,7 +848,6 @@ static int at91_pinconf_get(struct pinctrl_dev *pctldev,
 	void __iomem *pio;
 	unsigned pin;
 	int div;
-	bool out;
 
 	*config = 0;
 	dev_dbg(info->dev, "%s:%d, pin_id=%d", __func__, __LINE__, pin_id);
@@ -893,8 +875,6 @@ static int at91_pinconf_get(struct pinctrl_dev *pctldev,
 	if (info->ops->get_drivestrength)
 		*config |= (info->ops->get_drivestrength(pio, pin)
 				<< DRIVE_STRENGTH_SHIFT);
-	if (at91_mux_get_output(pio, pin, &out))
-		*config |= OUTPUT | (out << OUTPUT_VAL_SHIFT);
 
 	return 0;
 }
@@ -927,8 +907,6 @@ static int at91_pinconf_set(struct pinctrl_dev *pctldev,
 		if (config & PULL_UP && config & PULL_DOWN)
 			return -EINVAL;
 
-		at91_mux_set_output(pio, mask, config & OUTPUT,
-				    (config & OUTPUT_VAL) >> OUTPUT_VAL_SHIFT);
 		at91_mux_set_pullup(pio, mask, config & PULL_UP);
 		at91_mux_set_multidrive(pio, mask, config & MULTI_DRIVE);
 		if (info->ops->set_deglitch)
@@ -1050,10 +1028,11 @@ static int at91_pinctrl_mux_mask(struct at91_pinctrl *info,
 	}
 	info->nmux = size / gpio_banks;
 
-	info->mux_mask = devm_kcalloc(info->dev, size, sizeof(u32),
-				      GFP_KERNEL);
-	if (!info->mux_mask)
+	info->mux_mask = devm_kzalloc(info->dev, sizeof(u32) * size, GFP_KERNEL);
+	if (!info->mux_mask) {
+		dev_err(info->dev, "could not alloc mux_mask\n");
 		return -ENOMEM;
+	}
 
 	ret = of_property_read_u32_array(np, "atmel,mux-mask",
 					  info->mux_mask, size);
@@ -1089,12 +1068,10 @@ static int at91_pinctrl_parse_groups(struct device_node *np,
 	}
 
 	grp->npins = size / 4;
-	pin = grp->pins_conf = devm_kcalloc(info->dev,
-					    grp->npins,
-					    sizeof(struct at91_pmx_pin),
-					    GFP_KERNEL);
-	grp->pins = devm_kcalloc(info->dev, grp->npins, sizeof(unsigned int),
-				 GFP_KERNEL);
+	pin = grp->pins_conf = devm_kzalloc(info->dev, grp->npins * sizeof(struct at91_pmx_pin),
+				GFP_KERNEL);
+	grp->pins = devm_kzalloc(info->dev, grp->npins * sizeof(unsigned int),
+				GFP_KERNEL);
 	if (!grp->pins_conf || !grp->pins)
 		return -ENOMEM;
 
@@ -1133,8 +1110,8 @@ static int at91_pinctrl_parse_functions(struct device_node *np,
 		dev_err(info->dev, "no groups defined\n");
 		return -EINVAL;
 	}
-	func->groups = devm_kcalloc(info->dev,
-			func->ngroups, sizeof(char *), GFP_KERNEL);
+	func->groups = devm_kzalloc(info->dev,
+			func->ngroups * sizeof(char *), GFP_KERNEL);
 	if (!func->groups)
 		return -ENOMEM;
 
@@ -1196,16 +1173,12 @@ static int at91_pinctrl_probe_dt(struct platform_device *pdev,
 
 	dev_dbg(&pdev->dev, "nfunctions = %d\n", info->nfunctions);
 	dev_dbg(&pdev->dev, "ngroups = %d\n", info->ngroups);
-	info->functions = devm_kcalloc(&pdev->dev,
-					info->nfunctions,
-					sizeof(struct at91_pmx_func),
+	info->functions = devm_kzalloc(&pdev->dev, info->nfunctions * sizeof(struct at91_pmx_func),
 					GFP_KERNEL);
 	if (!info->functions)
 		return -ENOMEM;
 
-	info->groups = devm_kcalloc(&pdev->dev,
-					info->ngroups,
-					sizeof(struct at91_pin_group),
+	info->groups = devm_kzalloc(&pdev->dev, info->ngroups * sizeof(struct at91_pin_group),
 					GFP_KERNEL);
 	if (!info->groups)
 		return -ENOMEM;
@@ -1264,9 +1237,7 @@ static int at91_pinctrl_probe(struct platform_device *pdev)
 	at91_pinctrl_desc.name = dev_name(&pdev->dev);
 	at91_pinctrl_desc.npins = gpio_banks * MAX_NB_GPIO_PER_BANK;
 	at91_pinctrl_desc.pins = pdesc =
-		devm_kcalloc(&pdev->dev,
-			     at91_pinctrl_desc.npins, sizeof(*pdesc),
-			     GFP_KERNEL);
+		devm_kzalloc(&pdev->dev, sizeof(*pdesc) * at91_pinctrl_desc.npins, GFP_KERNEL);
 
 	if (!at91_pinctrl_desc.pins)
 		return -ENOMEM;
@@ -1601,7 +1572,7 @@ static void gpio_irq_handler(struct irq_desc *desc)
 
 		for_each_set_bit(n, &isr, BITS_PER_LONG) {
 			generic_handle_irq(irq_find_mapping(
-					   gpio_chip->irq.domain, n));
+					   gpio_chip->irqdomain, n));
 		}
 	}
 	chained_irq_exit(chip, desc);
@@ -1773,7 +1744,7 @@ static int at91_gpio_probe(struct platform_device *pdev)
 			chip->ngpio = ngpio;
 	}
 
-	names = devm_kcalloc(&pdev->dev, chip->ngpio, sizeof(char *),
+	names = devm_kzalloc(&pdev->dev, sizeof(char *) * chip->ngpio,
 			     GFP_KERNEL);
 
 	if (!names) {

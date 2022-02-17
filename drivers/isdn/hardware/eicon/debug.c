@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "platform.h"
 #include "pc.h"
 #include "di_defs.h"
@@ -2050,7 +2049,7 @@ static int diva_dbg_cmp_key(const char *ref, const char *key) {
 /*
   In case trace filter starts with "C" character then
   all following characters are interpreted as command.
-  Following commands are available:
+  Followings commands are available:
   - single, trace single call at time, independent from CPN/CiPN
 */
 static int diva_mnt_cmp_nmbr(const char *nmbr) {

@@ -20,7 +20,8 @@
 #include <asm/inst.h>
 #include <asm/frame.h>
 
-.section	.rodata.cst16.bswap_mask, "aM", @progbits, 16
+.data
+
 .align 16
 .Lbswap_mask:
 	.octa 0x000102030405060708090a0b0c0d0e0f

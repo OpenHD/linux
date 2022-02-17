@@ -293,7 +293,7 @@ static bool l2x0_pmu_group_is_valid(struct perf_event *event)
 	else if (!is_software_event(leader))
 		return false;
 
-	for_each_sibling_event(sibling, leader) {
+	list_for_each_entry(sibling, &leader->sibling_list, group_entry) {
 		if (sibling->pmu == pmu)
 			num_hw++;
 		else if (!is_software_event(sibling))
@@ -563,7 +563,7 @@ static __init int l2x0_pmu_init(void)
 
 	cpumask_set_cpu(0, &pmu_cpu);
 	ret = cpuhp_setup_state_nocalls(CPUHP_AP_PERF_ARM_L2X0_ONLINE,
-					"perf/arm/l2x0:online", NULL,
+					"AP_PERF_ARM_L2X0_ONLINE", NULL,
 					l2x0_pmu_offline_cpu);
 	if (ret)
 		goto out_pmu;

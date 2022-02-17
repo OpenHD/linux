@@ -91,7 +91,7 @@ int cw1200_hw_scan(struct ieee80211_hw *hw,
 	}
 
 	if (req->ie_len)
-		skb_put_data(frame.skb, req->ie, req->ie_len);
+		memcpy(skb_put(frame.skb, req->ie_len), req->ie, req->ie_len);
 
 	ret = wsm_set_template_frame(priv, &frame);
 	if (!ret) {
@@ -232,9 +232,9 @@ void cw1200_scan_work(struct work_struct *work)
 			scan.type = WSM_SCAN_TYPE_BACKGROUND;
 			scan.flags = WSM_SCAN_FLAG_FORCE_BACKGROUND;
 		}
-		scan.ch = kcalloc(it - priv->scan.curr,
-				  sizeof(struct wsm_scan_ch),
-				  GFP_KERNEL);
+		scan.ch = kzalloc(
+			sizeof(struct wsm_scan_ch) * (it - priv->scan.curr),
+			GFP_KERNEL);
 		if (!scan.ch) {
 			priv->scan.status = -ENOMEM;
 			goto fail;

@@ -122,8 +122,8 @@ struct PP_StateSoftwareAlgorithmBlock {
  * Type to hold a temperature range.
  */
 struct PP_TemperatureRange {
-	int min;
-	int max;
+	uint32_t min;
+	uint32_t max;
 };
 
 struct PP_StateValidationBlock {
@@ -154,6 +154,15 @@ struct pp_power_state {
 	struct PP_StateSoftwareAlgorithmBlock      software;
 	struct PP_UVD_CLOCKS                       uvd_clocks;
 	struct pp_hw_power_state  hardware;
+};
+
+
+/*Structure to hold a VCE state entry*/
+struct pp_vce_state {
+	uint32_t evclk;
+	uint32_t ecclk;
+	uint32_t sclk;
+	uint32_t mclk;
 };
 
 enum PP_MMProfilingState {

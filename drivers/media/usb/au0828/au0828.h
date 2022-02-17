@@ -13,6 +13,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -33,12 +37,12 @@
 #include <media/media-device.h>
 
 /* DVB */
-#include <media/demux.h>
-#include <media/dmxdev.h>
-#include <media/dvb_demux.h>
-#include <media/dvb_frontend.h>
-#include <media/dvb_net.h>
-#include <media/dvbdev.h>
+#include "demux.h"
+#include "dmxdev.h"
+#include "dvb_demux.h"
+#include "dvb_frontend.h"
+#include "dvb_net.h"
+#include "dvbdev.h"
 
 #include "au0828-reg.h"
 #include "au0828-cards.h"
@@ -190,13 +194,11 @@ struct au0828_dev {
 	struct i2c_adapter		i2c_adap;
 	struct i2c_algorithm		i2c_algo;
 	struct i2c_client		i2c_client;
-	u32				i2c_rc;
+	u32 				i2c_rc;
 
 	/* Digital */
 	struct au0828_dvb		dvb;
 	struct work_struct              restart_streaming;
-	struct timer_list               bulk_timeout;
-	int                             bulk_timeout_running;
 
 #ifdef CONFIG_VIDEO_AU0828_V4L2
 	/* Analog */
@@ -293,8 +295,8 @@ struct au0828_dev {
 /* ----------------------------------------------------------- */
 #define au0828_read(dev, reg) au0828_readreg(dev, reg)
 #define au0828_write(dev, reg, value) au0828_writereg(dev, reg, value)
-#define au0828_andor(dev, reg, mask, value)				\
-	 au0828_writereg(dev, reg,					\
+#define au0828_andor(dev, reg, mask, value) 				\
+	 au0828_writereg(dev, reg, 					\
 	(au0828_readreg(dev, reg) & ~(mask)) | ((value) & (mask)))
 
 #define au0828_set(dev, reg, bit) au0828_andor(dev, (reg), (bit), (bit))
@@ -358,7 +360,7 @@ void au0828_dvb_suspend(struct au0828_dev *dev);
 void au0828_dvb_resume(struct au0828_dev *dev);
 
 /* au0828-vbi.c */
-extern const struct vb2_ops au0828_vbi_qops;
+extern struct vb2_ops au0828_vbi_qops;
 
 #define dprintk(level, fmt, arg...)\
 	do { if (au0828_debug & level)\

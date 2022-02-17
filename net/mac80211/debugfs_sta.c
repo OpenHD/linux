@@ -154,18 +154,12 @@ static ssize_t sta_aqm_read(struct file *file, char __user *userbuf,
 
 	p += scnprintf(p,
 		       bufsz+buf-p,
-		       "target %uus interval %uus ecn %s\n",
-		       codel_time_to_us(sta->cparams.target),
-		       codel_time_to_us(sta->cparams.interval),
-		       sta->cparams.ecn ? "yes" : "no");
-	p += scnprintf(p,
-		       bufsz+buf-p,
-		       "tid ac backlog-bytes backlog-packets new-flows drops marks overlimit collisions tx-bytes tx-packets flags\n");
+		       "tid ac backlog-bytes backlog-packets new-flows drops marks overlimit collisions tx-bytes tx-packets\n");
 
 	for (i = 0; i < IEEE80211_NUM_TIDS; i++) {
 		txqi = to_txq_info(sta->sta.txq[i]);
 		p += scnprintf(p, bufsz+buf-p,
-			       "%d %d %u %u %u %u %u %u %u %u %u 0x%lx(%s%s%s)\n",
+			       "%d %d %u %u %u %u %u %u %u %u %u\n",
 			       txqi->txq.tid,
 			       txqi->txq.ac,
 			       txqi->tin.backlog_bytes,
@@ -176,11 +170,7 @@ static ssize_t sta_aqm_read(struct file *file, char __user *userbuf,
 			       txqi->tin.overlimit,
 			       txqi->tin.collisions,
 			       txqi->tin.tx_bytes,
-			       txqi->tin.tx_packets,
-			       txqi->flags,
-			       txqi->flags & (1<<IEEE80211_TXQ_STOP) ? "STOP" : "RUN",
-			       txqi->flags & (1<<IEEE80211_TXQ_AMPDU) ? " AMPDU" : "",
-			       txqi->flags & (1<<IEEE80211_TXQ_NO_AMSDU) ? " NO-AMSDU" : "");
+			       txqi->tin.tx_packets);
 	}
 
 	rcu_read_unlock();
@@ -209,18 +199,13 @@ static ssize_t sta_agg_status_read(struct file *file, char __user *userbuf,
 		       "TID\t\tRX\tDTKN\tSSN\t\tTX\tDTKN\tpending\n");
 
 	for (i = 0; i < IEEE80211_NUM_TIDS; i++) {
-		bool tid_rx_valid;
-
 		tid_rx = rcu_dereference(sta->ampdu_mlme.tid_rx[i]);
 		tid_tx = rcu_dereference(sta->ampdu_mlme.tid_tx[i]);
-		tid_rx_valid = test_bit(i, sta->ampdu_mlme.agg_session_valid);
 
 		p += scnprintf(p, sizeof(buf) + buf - p, "%02d", i);
-		p += scnprintf(p, sizeof(buf) + buf - p, "\t\t%x",
-			       tid_rx_valid);
+		p += scnprintf(p, sizeof(buf) + buf - p, "\t\t%x", !!tid_rx);
 		p += scnprintf(p, sizeof(buf) + buf - p, "\t%#.2x",
-			       tid_rx_valid ?
-					sta->ampdu_mlme.tid_rx_token[i] : 0);
+				tid_rx ? sta->ampdu_mlme.tid_rx_token[i] : 0);
 		p += scnprintf(p, sizeof(buf) + buf - p, "\t%#.3x",
 				tid_rx ? tid_rx->ssn : 0);
 
@@ -424,7 +409,7 @@ static ssize_t sta_vht_capa_read(struct file *file, char __user *userbuf,
 		default:
 			p += scnprintf(p, sizeof(buf) + buf - p,
 				       "\t\tMAX-MPDU-UNKNOWN\n");
-		}
+		};
 		switch (vhtc->cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK) {
 		case 0:
 			p += scnprintf(p, sizeof(buf) + buf - p,
@@ -442,7 +427,7 @@ static ssize_t sta_vht_capa_read(struct file *file, char __user *userbuf,
 			p += scnprintf(p, sizeof(buf) + buf - p,
 				       "\t\tUNKNOWN-MHZ: 0x%x\n",
 				       (vhtc->cap >> 2) & 0x3);
-		}
+		};
 		PFLAG(RXLDPC, "RXLDPC");
 		PFLAG(SHORT_GI_80, "SHORT-GI-80");
 		PFLAG(SHORT_GI_160, "SHORT-GI-160");
@@ -532,7 +517,6 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
 		return;
 
 	DEBUGFS_ADD(flags);
-	DEBUGFS_ADD(aid);
 	DEBUGFS_ADD(num_ps_buf_frames);
 	DEBUGFS_ADD(last_seq_ctrl);
 	DEBUGFS_ADD(agg_status);

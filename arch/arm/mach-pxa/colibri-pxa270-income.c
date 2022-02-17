@@ -17,13 +17,12 @@
 #include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
-#include <linux/leds.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
-#include <linux/platform_data/i2c-pxa.h>
+#include <linux/i2c/pxa-i2c.h>
 
 #include <asm/irq.h>
 #include <asm/mach-types.h>

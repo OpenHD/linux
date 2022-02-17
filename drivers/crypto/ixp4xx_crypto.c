@@ -23,7 +23,6 @@
 #include <crypto/ctr.h>
 #include <crypto/des.h>
 #include <crypto/aes.h>
-#include <crypto/hmac.h>
 #include <crypto/sha.h>
 #include <crypto/algapi.h>
 #include <crypto/internal/aead.h>
@@ -91,6 +90,8 @@
 #define CTL_FLAG_PERFORM_AEAD	0x0008
 #define CTL_FLAG_MASK		0x000f
 
+#define HMAC_IPAD_VALUE   0x36
+#define HMAC_OPAD_VALUE   0x5C
 #define HMAC_PAD_BLOCKLEN SHA1_BLOCK_SIZE
 
 #define MD5_DIGEST_SIZE   16
@@ -260,11 +261,12 @@ static int setup_crypt_desc(void)
 {
 	struct device *dev = &pdev->dev;
 	BUILD_BUG_ON(sizeof(struct crypt_ctl) != 64);
-	crypt_virt = dma_zalloc_coherent(dev,
-					 NPE_QLEN * sizeof(struct crypt_ctl),
-					 &crypt_phys, GFP_ATOMIC);
+	crypt_virt = dma_alloc_coherent(dev,
+			NPE_QLEN * sizeof(struct crypt_ctl),
+			&crypt_phys, GFP_ATOMIC);
 	if (!crypt_virt)
 		return -ENOMEM;
+	memset(crypt_virt, 0, NPE_QLEN * sizeof(struct crypt_ctl));
 	return 0;
 }
 
@@ -530,9 +532,10 @@ static void release_ixp_crypto(struct device *dev)
 
 	if (crypt_virt) {
 		dma_free_coherent(dev,
-			NPE_QLEN_TOTAL * sizeof( struct crypt_ctl),
+			NPE_QLEN * sizeof(struct crypt_ctl),
 			crypt_virt, crypt_phys);
 	}
+	return;
 }
 
 static void reset_sa_dir(struct ix_sa_dir *dir)
@@ -803,7 +806,7 @@ static struct buffer_desc *chainup_buffers(struct device *dev,
 		void *ptr;
 
 		nbytes -= len;
-		ptr = sg_virt(sg);
+		ptr = page_address(sg_page(sg)) + sg->offset;
 		next_buf = dma_pool_alloc(buffer_pool, flags, &next_buf_phys);
 		if (!next_buf) {
 			buf = NULL;
@@ -1167,11 +1170,9 @@ static int aead_setkey(struct crypto_aead *tfm, const u8 *key,
 	ctx->authkey_len = keys.authkeylen;
 	ctx->enckey_len = keys.enckeylen;
 
-	memzero_explicit(&keys, sizeof(keys));
 	return aead_setup(tfm, crypto_aead_authsize(tfm));
 badkey:
 	crypto_aead_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
-	memzero_explicit(&keys, sizeof(keys));
 	return -EINVAL;
 }
 

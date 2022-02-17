@@ -220,7 +220,7 @@
 #define DEVICE_NAME "mcp251x"
 
 static int mcp251x_enable_dma; /* Enable SPI DMA. Default: 0 (Off) */
-module_param(mcp251x_enable_dma, int, 0444);
+module_param(mcp251x_enable_dma, int, S_IRUGO);
 MODULE_PARM_DESC(mcp251x_enable_dma, "Enable SPI DMA. Default: 0 (Off)");
 
 static const struct can_bittiming_const mcp251x_bittiming_const = {
@@ -612,7 +612,8 @@ static int mcp251x_do_set_bittiming(struct net_device *net)
 	return 0;
 }
 
-static int mcp251x_setup(struct net_device *net, struct spi_device *spi)
+static int mcp251x_setup(struct net_device *net, struct mcp251x_priv *priv,
+			 struct spi_device *spi)
 {
 	mcp251x_do_set_bittiming(net);
 
@@ -685,6 +686,17 @@ static int mcp251x_power_enable(struct regulator *reg, int enable)
 		return regulator_enable(reg);
 	else
 		return regulator_disable(reg);
+}
+
+static void mcp251x_open_clean(struct net_device *net)
+{
+	struct mcp251x_priv *priv = netdev_priv(net);
+	struct spi_device *spi = priv->spi;
+
+	free_irq(spi->irq, priv);
+	mcp251x_hw_sleep(spi);
+	mcp251x_power_enable(priv->transceiver, 0);
+	close_candev(net);
 }
 
 static int mcp251x_stop(struct net_device *net)
@@ -772,8 +784,7 @@ static void mcp251x_restart_work_handler(struct work_struct *ws)
 	mutex_lock(&priv->mcp_lock);
 	if (priv->after_suspend) {
 		mcp251x_hw_reset(spi);
-		mcp251x_setup(net, spi);
-		priv->force_quit = 0;
+		mcp251x_setup(net, priv, spi);
 		if (priv->after_suspend & AFTER_SUSPEND_RESTART) {
 			mcp251x_set_normal_mode(spi);
 		} else if (priv->after_suspend & AFTER_SUSPEND_UP) {
@@ -785,6 +796,7 @@ static void mcp251x_restart_work_handler(struct work_struct *ws)
 			mcp251x_hw_sleep(spi);
 		}
 		priv->after_suspend = 0;
+		priv->force_quit = 0;
 	}
 
 	if (priv->restart_tx) {
@@ -948,50 +960,41 @@ static int mcp251x_open(struct net_device *net)
 	priv->tx_skb = NULL;
 	priv->tx_len = 0;
 
-	if (spi->dev.of_node)
-	    flags = 0;
-
 	ret = request_threaded_irq(spi->irq, NULL, mcp251x_can_ist,
 				   flags | IRQF_ONESHOT, DEVICE_NAME, priv);
 	if (ret) {
 		dev_err(&spi->dev, "failed to acquire irq %d\n", spi->irq);
-		goto out_close;
+		mcp251x_power_enable(priv->transceiver, 0);
+		close_candev(net);
+		goto open_unlock;
 	}
 
 	priv->wq = alloc_workqueue("mcp251x_wq", WQ_FREEZABLE | WQ_MEM_RECLAIM,
 				   0);
-	if (!priv->wq) {
-		ret = -ENOMEM;
-		goto out_clean;
-	}
 	INIT_WORK(&priv->tx_work, mcp251x_tx_work_handler);
 	INIT_WORK(&priv->restart_work, mcp251x_restart_work_handler);
 
 	ret = mcp251x_hw_reset(spi);
-	if (ret)
-		goto out_free_wq;
-	ret = mcp251x_setup(net, spi);
-	if (ret)
-		goto out_free_wq;
+	if (ret) {
+		mcp251x_open_clean(net);
+		goto open_unlock;
+	}
+	ret = mcp251x_setup(net, priv, spi);
+	if (ret) {
+		mcp251x_open_clean(net);
+		goto open_unlock;
+	}
 	ret = mcp251x_set_normal_mode(spi);
-	if (ret)
-		goto out_free_wq;
+	if (ret) {
+		mcp251x_open_clean(net);
+		goto open_unlock;
+	}
 
 	can_led_event(net, CAN_LED_EVENT_OPEN);
 
 	netif_wake_queue(net);
-	mutex_unlock(&priv->mcp_lock);
 
-	return 0;
-
-out_free_wq:
-	destroy_workqueue(priv->wq);
-out_clean:
-	free_irq(spi->irq, priv);
-	mcp251x_hw_sleep(spi);
-out_close:
-	mcp251x_power_enable(priv->transceiver, 0);
-	close_candev(net);
+open_unlock:
 	mutex_unlock(&priv->mcp_lock);
 	return ret;
 }

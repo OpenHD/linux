@@ -16,6 +16,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/slab.h>
@@ -55,10 +59,11 @@ static s32 abssub(s32 a, s32 b)
 		return b - a;
 };
 
-static void stv6110_release(struct dvb_frontend *fe)
+static int stv6110_release(struct dvb_frontend *fe)
 {
 	kfree(fe->tuner_priv);
 	fe->tuner_priv = NULL;
+	return 0;
 }
 
 static int stv6110_write_regs(struct dvb_frontend *fe, u8 buf[],
@@ -371,9 +376,9 @@ static int stv6110_get_bandwidth(struct dvb_frontend *fe, u32 *bandwidth)
 static const struct dvb_tuner_ops stv6110_tuner_ops = {
 	.info = {
 		.name = "ST STV6110",
-		.frequency_min_hz  =  950 * MHz,
-		.frequency_max_hz  = 2150 * MHz,
-		.frequency_step_hz =    1 * MHz,
+		.frequency_min = 950000,
+		.frequency_max = 2150000,
+		.frequency_step = 1000,
 	},
 	.init = stv6110_init,
 	.release = stv6110_release,

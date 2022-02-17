@@ -44,7 +44,6 @@
 #include <linux/io.h>
 #include <linux/log2.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/watchdog.h>
@@ -162,7 +161,7 @@ static int pdc_wdt_restart(struct watchdog_device *wdt_dev,
 	return 0;
 }
 
-static const struct watchdog_info pdc_wdt_info = {
+static struct watchdog_info pdc_wdt_info = {
 	.identity	= "IMG PDC Watchdog",
 	.options	= WDIOF_SETTIMEOUT |
 			  WDIOF_KEEPALIVEPING |

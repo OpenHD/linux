@@ -331,7 +331,7 @@ static int h_memstick_read_dev_id(struct memstick_dev *card,
 	struct ms_id_register id_reg;
 
 	if (!(*mrq)) {
-		memstick_init_req(&card->current_mrq, MS_TPC_READ_REG, &id_reg,
+		memstick_init_req(&card->current_mrq, MS_TPC_READ_REG, NULL,
 				  sizeof(struct ms_id_register));
 		*mrq = &card->current_mrq;
 		return 0;
@@ -469,7 +469,6 @@ static void memstick_check(struct work_struct *work)
 			host->card = card;
 			if (device_register(&card->dev)) {
 				put_device(&card->dev);
-				kfree(host->card);
 				host->card = NULL;
 			}
 		} else

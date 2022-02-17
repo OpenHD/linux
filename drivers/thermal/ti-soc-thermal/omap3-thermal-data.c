@@ -48,6 +48,9 @@ omap34xx_mpu_temp_sensor_registers = {
 static struct temp_sensor_data omap34xx_mpu_temp_sensor_data = {
 	.min_freq = 32768,
 	.max_freq = 32768,
+	.max_temp = 125000,
+	.min_temp = -40000,
+	.hyst_val = 5000,
 };
 
 /*
@@ -88,6 +91,8 @@ const struct ti_bandgap_data omap34xx_data = {
 		.registers = &omap34xx_mpu_temp_sensor_registers,
 		.ts_data = &omap34xx_mpu_temp_sensor_data,
 		.domain = "cpu",
+		.slope = 0,
+		.constant = 20000,
 		.slope_pcb = 0,
 		.constant_pcb = 20000,
 		.register_cooling = NULL,
@@ -116,6 +121,9 @@ omap36xx_mpu_temp_sensor_registers = {
 static struct temp_sensor_data omap36xx_mpu_temp_sensor_data = {
 	.min_freq = 32768,
 	.max_freq = 32768,
+	.max_temp = 125000,
+	.min_temp = -40000,
+	.hyst_val = 5000,
 };
 
 /*
@@ -156,6 +164,8 @@ const struct ti_bandgap_data omap36xx_data = {
 		.registers = &omap36xx_mpu_temp_sensor_registers,
 		.ts_data = &omap36xx_mpu_temp_sensor_data,
 		.domain = "cpu",
+		.slope = 0,
+		.constant = 20000,
 		.slope_pcb = 0,
 		.constant_pcb = 20000,
 		.register_cooling = NULL,

@@ -1,11 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <linux/kernel.h>
-#include <linux/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/param.h>
@@ -20,10 +17,7 @@
 #include "symbol.h"
 #include "strlist.h"
 #include "intlist.h"
-#include "namespaces.h"
 #include "header.h"
-#include "path.h"
-#include "sane_ctype.h"
 
 #include <elf.h>
 #include <limits.h>
@@ -40,13 +34,13 @@ char **vmlinux_path;
 struct symbol_conf symbol_conf = {
 	.use_modules		= true,
 	.try_vmlinux_path	= true,
+	.annotate_src		= true,
 	.demangle		= true,
 	.demangle_kernel	= false,
 	.cumulate_callchain	= true,
 	.show_hist_headers	= true,
 	.symfs			= "",
 	.event_group		= true,
-	.inline_name		= true,
 };
 
 static enum dso_binary_type binary_type_symtab[] = {
@@ -55,7 +49,6 @@ static enum dso_binary_type binary_type_symtab[] = {
 	DSO_BINARY_TYPE__JAVA_JIT,
 	DSO_BINARY_TYPE__DEBUGLINK,
 	DSO_BINARY_TYPE__BUILD_ID_CACHE,
-	DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO,
 	DSO_BINARY_TYPE__FEDORA_DEBUGINFO,
 	DSO_BINARY_TYPE__UBUNTU_DEBUGINFO,
 	DSO_BINARY_TYPE__BUILDID_DEBUGINFO,
@@ -65,15 +58,24 @@ static enum dso_binary_type binary_type_symtab[] = {
 	DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE,
 	DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE_COMP,
 	DSO_BINARY_TYPE__OPENEMBEDDED_DEBUGINFO,
+	DSO_BINARY_TYPE__MIXEDUP_UBUNTU_DEBUGINFO,
 	DSO_BINARY_TYPE__NOT_FOUND,
 };
 
 #define DSO_BINARY_TYPE__SYMTAB_CNT ARRAY_SIZE(binary_type_symtab)
 
-static bool symbol_type__filter(char symbol_type)
+bool symbol_type__is_a(char symbol_type, enum map_type map_type)
 {
 	symbol_type = toupper(symbol_type);
-	return symbol_type == 'T' || symbol_type == 'W' || symbol_type == 'D' || symbol_type == 'B';
+
+	switch (map_type) {
+	case MAP__FUNCTION:
+		return symbol_type == 'T' || symbol_type == 'W';
+	case MAP__VARIABLE:
+		return symbol_type == 'D';
+	default:
+		return false;
+	}
 }
 
 static int prefix_underscores_count(const char *str)
@@ -84,27 +86,6 @@ static int prefix_underscores_count(const char *str)
 		tail++;
 
 	return tail - str;
-}
-
-void __weak arch__symbols__fixup_end(struct symbol *p, struct symbol *c)
-{
-	p->end = c->start;
-}
-
-const char * __weak arch__normalize_symbol_name(const char *name)
-{
-	return name;
-}
-
-int __weak arch__compare_symbol_names(const char *namea, const char *nameb)
-{
-	return strcmp(namea, nameb);
-}
-
-int __weak arch__compare_symbol_names_n(const char *namea, const char *nameb,
-					unsigned int n)
-{
-	return strncmp(namea, nameb, n);
 }
 
 int __weak arch__choose_best_symbol(struct symbol *syma,
@@ -217,7 +198,7 @@ void symbols__fixup_end(struct rb_root *symbols)
 		curr = rb_entry(nd, struct symbol, rb_node);
 
 		if (prev->end == prev->start && prev->end != curr->start)
-			arch__symbols__fixup_end(prev, curr);
+			prev->end = curr->start;
 	}
 
 	/* Last entry */
@@ -225,12 +206,12 @@ void symbols__fixup_end(struct rb_root *symbols)
 		curr->end = roundup(curr->start, 4096) + 4096;
 }
 
-void map_groups__fixup_end(struct map_groups *mg)
+void __map_groups__fixup_end(struct map_groups *mg, enum map_type type)
 {
-	struct maps *maps = &mg->maps;
+	struct maps *maps = &mg->maps[type];
 	struct map *next, *curr;
 
-	down_write(&maps->lock);
+	pthread_rwlock_wrlock(&maps->lock);
 
 	curr = maps__first(maps);
 	if (curr == NULL)
@@ -250,10 +231,10 @@ void map_groups__fixup_end(struct map_groups *mg)
 		curr->end = ~0ULL;
 
 out_unlock:
-	up_write(&maps->lock);
+	pthread_rwlock_unlock(&maps->lock);
 }
 
-struct symbol *symbol__new(u64 start, u64 len, u8 binding, u8 type, const char *name)
+struct symbol *symbol__new(u64 start, u64 len, u8 binding, const char *name)
 {
 	size_t namelen = strlen(name) + 1;
 	struct symbol *sym = calloc(1, (symbol_conf.priv_size +
@@ -271,7 +252,6 @@ struct symbol *symbol__new(u64 start, u64 len, u8 binding, u8 type, const char *
 
 	sym->start   = start;
 	sym->end     = len ? start + len : start;
-	sym->type    = type;
 	sym->binding = binding;
 	sym->namelen = namelen - 1;
 
@@ -419,26 +399,8 @@ static void symbols__sort_by_name(struct rb_root *symbols,
 	}
 }
 
-int symbol__match_symbol_name(const char *name, const char *str,
-			      enum symbol_tag_include includes)
-{
-	const char *versioning;
-
-	if (includes == SYMBOL_TAG_INCLUDE__DEFAULT_ONLY &&
-	    (versioning = strstr(name, "@@"))) {
-		int len = strlen(str);
-
-		if (len < versioning - name)
-			len = versioning - name;
-
-		return arch__compare_symbol_names_n(name, str, len);
-	} else
-		return arch__compare_symbol_names(name, str);
-}
-
 static struct symbol *symbols__find_by_name(struct rb_root *symbols,
-					    const char *name,
-					    enum symbol_tag_include includes)
+					    const char *name)
 {
 	struct rb_node *n;
 	struct symbol_name_rb_node *s = NULL;
@@ -452,11 +414,11 @@ static struct symbol *symbols__find_by_name(struct rb_root *symbols,
 		int cmp;
 
 		s = rb_entry(n, struct symbol_name_rb_node, rb_node);
-		cmp = symbol__match_symbol_name(s->sym.name, name, includes);
+		cmp = arch__compare_symbol_names(name, s->sym.name);
 
-		if (cmp > 0)
+		if (cmp < 0)
 			n = n->rb_left;
-		else if (cmp < 0)
+		else if (cmp > 0)
 			n = n->rb_right;
 		else
 			break;
@@ -465,57 +427,61 @@ static struct symbol *symbols__find_by_name(struct rb_root *symbols,
 	if (n == NULL)
 		return NULL;
 
-	if (includes != SYMBOL_TAG_INCLUDE__DEFAULT_ONLY)
-		/* return first symbol that has same name (if any) */
-		for (n = rb_prev(n); n; n = rb_prev(n)) {
-			struct symbol_name_rb_node *tmp;
+	/* return first symbol that has same name (if any) */
+	for (n = rb_prev(n); n; n = rb_prev(n)) {
+		struct symbol_name_rb_node *tmp;
 
-			tmp = rb_entry(n, struct symbol_name_rb_node, rb_node);
-			if (arch__compare_symbol_names(tmp->sym.name, s->sym.name))
-				break;
+		tmp = rb_entry(n, struct symbol_name_rb_node, rb_node);
+		if (arch__compare_symbol_names(tmp->sym.name, s->sym.name))
+			break;
 
-			s = tmp;
-		}
+		s = tmp;
+	}
 
 	return &s->sym;
 }
 
 void dso__reset_find_symbol_cache(struct dso *dso)
 {
-	dso->last_find_result.addr   = 0;
-	dso->last_find_result.symbol = NULL;
+	enum map_type type;
+
+	for (type = MAP__FUNCTION; type <= MAP__VARIABLE; ++type) {
+		dso->last_find_result[type].addr   = 0;
+		dso->last_find_result[type].symbol = NULL;
+	}
 }
 
-void dso__insert_symbol(struct dso *dso, struct symbol *sym)
+void dso__insert_symbol(struct dso *dso, enum map_type type, struct symbol *sym)
 {
-	__symbols__insert(&dso->symbols, sym, dso->kernel);
+	__symbols__insert(&dso->symbols[type], sym, dso->kernel);
 
 	/* update the symbol cache if necessary */
-	if (dso->last_find_result.addr >= sym->start &&
-	    (dso->last_find_result.addr < sym->end ||
+	if (dso->last_find_result[type].addr >= sym->start &&
+	    (dso->last_find_result[type].addr < sym->end ||
 	    sym->start == sym->end)) {
-		dso->last_find_result.symbol = sym;
+		dso->last_find_result[type].symbol = sym;
 	}
 }
 
-struct symbol *dso__find_symbol(struct dso *dso, u64 addr)
+struct symbol *dso__find_symbol(struct dso *dso,
+				enum map_type type, u64 addr)
 {
-	if (dso->last_find_result.addr != addr || dso->last_find_result.symbol == NULL) {
-		dso->last_find_result.addr   = addr;
-		dso->last_find_result.symbol = symbols__find(&dso->symbols, addr);
+	if (dso->last_find_result[type].addr != addr) {
+		dso->last_find_result[type].addr   = addr;
+		dso->last_find_result[type].symbol = symbols__find(&dso->symbols[type], addr);
 	}
 
-	return dso->last_find_result.symbol;
+	return dso->last_find_result[type].symbol;
 }
 
-struct symbol *dso__first_symbol(struct dso *dso)
+struct symbol *dso__first_symbol(struct dso *dso, enum map_type type)
 {
-	return symbols__first(&dso->symbols);
+	return symbols__first(&dso->symbols[type]);
 }
 
-struct symbol *dso__last_symbol(struct dso *dso)
+struct symbol *dso__last_symbol(struct dso *dso, enum map_type type)
 {
-	return symbols__last(&dso->symbols);
+	return symbols__last(&dso->symbols[type]);
 }
 
 struct symbol *dso__next_symbol(struct symbol *sym)
@@ -532,22 +498,19 @@ struct symbol *symbol__next_by_name(struct symbol *sym)
 }
 
  /*
-  * Returns first symbol that matched with @name.
+  * Teturns first symbol that matched with @name.
   */
-struct symbol *dso__find_symbol_by_name(struct dso *dso, const char *name)
+struct symbol *dso__find_symbol_by_name(struct dso *dso, enum map_type type,
+					const char *name)
 {
-	struct symbol *s = symbols__find_by_name(&dso->symbol_names, name,
-						 SYMBOL_TAG_INCLUDE__NONE);
-	if (!s)
-		s = symbols__find_by_name(&dso->symbol_names, name,
-					  SYMBOL_TAG_INCLUDE__DEFAULT_ONLY);
-	return s;
+	return symbols__find_by_name(&dso->symbol_names[type], name);
 }
 
-void dso__sort_by_name(struct dso *dso)
+void dso__sort_by_name(struct dso *dso, enum map_type type)
 {
-	dso__set_sorted_by_name(dso);
-	return symbols__sort_by_name(&dso->symbol_names, &dso->symbols);
+	dso__set_sorted_by_name(dso, type);
+	return symbols__sort_by_name(&dso->symbol_names[type],
+				     &dso->symbols[type]);
 }
 
 int modules__parse(const char *filename, void *arg,
@@ -612,6 +575,11 @@ out:
 	return err;
 }
 
+struct process_kallsyms_args {
+	struct map *map;
+	struct dso *dso;
+};
+
 /*
  * These are symbols in the kernel image, so make sure that
  * sym is from a kernel DSO.
@@ -647,10 +615,10 @@ static int map__process_kallsym_symbol(void *arg, const char *name,
 				       char type, u64 start)
 {
 	struct symbol *sym;
-	struct dso *dso = arg;
-	struct rb_root *root = &dso->symbols;
+	struct process_kallsyms_args *a = arg;
+	struct rb_root *root = &a->dso->symbols[a->map->type];
 
-	if (!symbol_type__filter(type))
+	if (!symbol_type__is_a(type, a->map->type))
 		return 0;
 
 	/*
@@ -658,7 +626,7 @@ static int map__process_kallsym_symbol(void *arg, const char *name,
 	 * symbols, setting length to 0, and rely on
 	 * symbols__fixup_end() to fix it up.
 	 */
-	sym = symbol__new(start, 0, kallsyms2elf_binding(type), kallsyms2elf_type(type), name);
+	sym = symbol__new(start, 0, kallsyms2elf_binding(type), name);
 	if (sym == NULL)
 		return -ENOMEM;
 	/*
@@ -675,18 +643,21 @@ static int map__process_kallsym_symbol(void *arg, const char *name,
  * so that we can in the next step set the symbol ->end address and then
  * call kernel_maps__split_kallsyms.
  */
-static int dso__load_all_kallsyms(struct dso *dso, const char *filename)
+static int dso__load_all_kallsyms(struct dso *dso, const char *filename,
+				  struct map *map)
 {
-	return kallsyms__parse(filename, dso, map__process_kallsym_symbol);
+	struct process_kallsyms_args args = { .map = map, .dso = dso, };
+	return kallsyms__parse(filename, &args, map__process_kallsym_symbol);
 }
 
-static int map_groups__split_kallsyms_for_kcore(struct map_groups *kmaps, struct dso *dso)
+static int dso__split_kallsyms_for_kcore(struct dso *dso, struct map *map)
 {
+	struct map_groups *kmaps = map__kmaps(map);
 	struct map *curr_map;
 	struct symbol *pos;
 	int count = 0;
-	struct rb_root old_root = dso->symbols;
-	struct rb_root *root = &dso->symbols;
+	struct rb_root old_root = dso->symbols[map->type];
+	struct rb_root *root = &dso->symbols[map->type];
 	struct rb_node *next = rb_first(root);
 
 	if (!kmaps)
@@ -706,7 +677,7 @@ static int map_groups__split_kallsyms_for_kcore(struct map_groups *kmaps, struct
 		if (module)
 			*module = '\0';
 
-		curr_map = map_groups__find(kmaps, pos->start);
+		curr_map = map_groups__find(kmaps, map->type, pos->start);
 
 		if (!curr_map) {
 			symbol__delete(pos);
@@ -714,11 +685,9 @@ static int map_groups__split_kallsyms_for_kcore(struct map_groups *kmaps, struct
 		}
 
 		pos->start -= curr_map->start - curr_map->pgoff;
-		if (pos->end > curr_map->end)
-			pos->end = curr_map->end;
 		if (pos->end)
 			pos->end -= curr_map->start - curr_map->pgoff;
-		symbols__insert(&curr_map->dso->symbols, pos);
+		symbols__insert(&curr_map->dso->symbols[curr_map->type], pos);
 		++count;
 	}
 
@@ -733,24 +702,21 @@ static int map_groups__split_kallsyms_for_kcore(struct map_groups *kmaps, struct
  * kernel range is broken in several maps, named [kernel].N, as we don't have
  * the original ELF section names vmlinux have.
  */
-static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso, u64 delta,
-				      struct map *initial_map)
+static int dso__split_kallsyms(struct dso *dso, struct map *map, u64 delta)
 {
+	struct map_groups *kmaps = map__kmaps(map);
 	struct machine *machine;
-	struct map *curr_map = initial_map;
+	struct map *curr_map = map;
 	struct symbol *pos;
 	int count = 0, moved = 0;
-	struct rb_root *root = &dso->symbols;
+	struct rb_root *root = &dso->symbols[map->type];
 	struct rb_node *next = rb_first(root);
 	int kernel_range = 0;
-	bool x86_64;
 
 	if (!kmaps)
 		return -1;
 
 	machine = kmaps->machine;
-
-	x86_64 = machine__is(machine, "x86_64");
 
 	while (next) {
 		char *module;
@@ -766,7 +732,7 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 			*module++ = '\0';
 
 			if (strcmp(curr_map->dso->short_name, module)) {
-				if (curr_map != initial_map &&
+				if (curr_map != map &&
 				    dso->kernel == DSO_TYPE_GUEST_KERNEL &&
 				    machine__is_default_guest(machine)) {
 					/*
@@ -776,16 +742,18 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 					 * symbols are in its kmap. Mark it as
 					 * loaded.
 					 */
-					dso__set_loaded(curr_map->dso);
+					dso__set_loaded(curr_map->dso,
+							curr_map->type);
 				}
 
-				curr_map = map_groups__find_by_name(kmaps, module);
+				curr_map = map_groups__find_by_name(kmaps,
+							map->type, module);
 				if (curr_map == NULL) {
 					pr_debug("%s/proc/{kallsyms,modules} "
 					         "inconsistency while looking "
 						 "for \"%s\" module!\n",
 						 machine->root_dir, module);
-					curr_map = initial_map;
+					curr_map = map;
 					goto discard_symbol;
 				}
 
@@ -795,21 +763,11 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 			}
 			/*
 			 * So that we look just like we get from .ko files,
-			 * i.e. not prelinked, relative to initial_map->start.
+			 * i.e. not prelinked, relative to map->start.
 			 */
 			pos->start = curr_map->map_ip(curr_map, pos->start);
 			pos->end   = curr_map->map_ip(curr_map, pos->end);
-		} else if (x86_64 && is_entry_trampoline(pos->name)) {
-			/*
-			 * These symbols are not needed anymore since the
-			 * trampoline maps refer to the text section and it's
-			 * symbols instead. Avoid having to deal with
-			 * relocations, and the assumption that the first symbol
-			 * is the start of kernel text, by simply removing the
-			 * symbols at this point.
-			 */
-			goto discard_symbol;
-		} else if (curr_map != initial_map) {
+		} else if (curr_map != map) {
 			char dso_name[PATH_MAX];
 			struct dso *ndso;
 
@@ -820,7 +778,7 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 			}
 
 			if (count == 0) {
-				curr_map = initial_map;
+				curr_map = map;
 				goto add_symbol;
 			}
 
@@ -839,7 +797,7 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 
 			ndso->kernel = dso->kernel;
 
-			curr_map = map__new2(pos->start, ndso);
+			curr_map = map__new2(pos->start, ndso, map->type);
 			if (curr_map == NULL) {
 				dso__put(ndso);
 				return -1;
@@ -854,9 +812,9 @@ static int map_groups__split_kallsyms(struct map_groups *kmaps, struct dso *dso,
 			pos->end -= delta;
 		}
 add_symbol:
-		if (curr_map != initial_map) {
+		if (curr_map != map) {
 			rb_erase(&pos->rb_node, root);
-			symbols__insert(&curr_map->dso->symbols, pos);
+			symbols__insert(&curr_map->dso->symbols[curr_map->type], pos);
 			++moved;
 		} else
 			++count;
@@ -867,10 +825,10 @@ discard_symbol:
 		symbol__delete(pos);
 	}
 
-	if (curr_map != initial_map &&
+	if (curr_map != map &&
 	    dso->kernel == DSO_TYPE_GUEST_KERNEL &&
 	    machine__is_default_guest(kmaps->machine)) {
-		dso__set_loaded(curr_map->dso);
+		dso__set_loaded(curr_map->dso, curr_map->type);
 	}
 
 	return count + moved;
@@ -1031,12 +989,7 @@ out_delete_from:
 	return ret;
 }
 
-struct map *map_groups__first(struct map_groups *mg)
-{
-	return maps__first(&mg->maps);
-}
-
-static int do_validate_kcore_modules(const char *filename,
+static int do_validate_kcore_modules(const char *filename, struct map *map,
 				  struct map_groups *kmaps)
 {
 	struct rb_root modules = RB_ROOT;
@@ -1047,12 +1000,13 @@ static int do_validate_kcore_modules(const char *filename,
 	if (err)
 		return err;
 
-	old_map = map_groups__first(kmaps);
+	old_map = map_groups__first(kmaps, map->type);
 	while (old_map) {
 		struct map *next = map_groups__next(old_map);
 		struct module_info *mi;
 
-		if (!__map__is_kmodule(old_map)) {
+		if (old_map == map || old_map->start == map->start) {
+			/* The kernel map */
 			old_map = next;
 			continue;
 		}
@@ -1109,7 +1063,7 @@ static int validate_kcore_modules(const char *kallsyms_filename,
 					     kallsyms_filename))
 		return -EINVAL;
 
-	if (do_validate_kcore_modules(modules_filename, kmaps))
+	if (do_validate_kcore_modules(modules_filename, map, kmaps))
 		return -EINVAL;
 
 	return 0;
@@ -1126,9 +1080,8 @@ static int validate_kcore_addresses(const char *kallsyms_filename,
 	if (kmap->ref_reloc_sym && kmap->ref_reloc_sym->name) {
 		u64 start;
 
-		if (kallsyms__get_function_start(kallsyms_filename,
-						 kmap->ref_reloc_sym->name, &start))
-			return -ENOENT;
+		start = kallsyms__get_function_start(kallsyms_filename,
+						     kmap->ref_reloc_sym->name);
 		if (start != kmap->ref_reloc_sym->addr)
 			return -EINVAL;
 	}
@@ -1138,6 +1091,7 @@ static int validate_kcore_addresses(const char *kallsyms_filename,
 
 struct kcore_mapfn_data {
 	struct dso *dso;
+	enum map_type type;
 	struct list_head maps;
 };
 
@@ -1146,7 +1100,7 @@ static int kcore_mapfn(u64 start, u64 len, u64 pgoff, void *data)
 	struct kcore_mapfn_data *md = data;
 	struct map *map;
 
-	map = map__new2(start, md->dso);
+	map = map__new2(start, md->dso, md->type);
 	if (map == NULL)
 		return -ENOMEM;
 
@@ -1162,13 +1116,13 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 			   const char *kallsyms_filename)
 {
 	struct map_groups *kmaps = map__kmaps(map);
+	struct machine *machine;
 	struct kcore_mapfn_data md;
 	struct map *old_map, *new_map, *replacement_map = NULL;
-	struct machine *machine;
 	bool is_64_bit;
 	int err, fd;
 	char kcore_filename[PATH_MAX];
-	u64 stext;
+	struct symbol *sym;
 
 	if (!kmaps)
 		return -EINVAL;
@@ -1176,7 +1130,7 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 	machine = kmaps->machine;
 
 	/* This function requires that the map is the kernel map */
-	if (!__map__is_kernel(map))
+	if (map != machine->vmlinux_maps[map->type])
 		return -EINVAL;
 
 	if (!filename_from_kallsyms_filename(kcore_filename, "kcore",
@@ -1188,6 +1142,7 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 		return -EINVAL;
 
 	md.dso = dso;
+	md.type = map->type;
 	INIT_LIST_HEAD(&md.maps);
 
 	fd = open(kcore_filename, O_RDONLY);
@@ -1198,7 +1153,7 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 	}
 
 	/* Read new maps into temporary lists */
-	err = file__read_maps(fd, map->prot & PROT_EXEC, kcore_mapfn, &md,
+	err = file__read_maps(fd, md.type == MAP__FUNCTION, kcore_mapfn, &md,
 			      &is_64_bit);
 	if (err)
 		goto out_err;
@@ -1210,7 +1165,7 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 	}
 
 	/* Remove old maps */
-	old_map = map_groups__first(kmaps);
+	old_map = map_groups__first(kmaps, map->type);
 	while (old_map) {
 		struct map *next = map_groups__next(old_map);
 
@@ -1218,15 +1173,14 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 			map_groups__remove(kmaps, old_map);
 		old_map = next;
 	}
-	machine->trampolines_mapped = false;
 
-	/* Find the kernel map using the '_stext' symbol */
-	if (!kallsyms__get_function_start(kallsyms_filename, "_stext", &stext)) {
-		list_for_each_entry(new_map, &md.maps, node) {
-			if (stext >= new_map->start && stext < new_map->end) {
-				replacement_map = new_map;
-				break;
-			}
+	/* Find the kernel map using the first symbol */
+	sym = dso__first_symbol(dso, map->type);
+	list_for_each_entry(new_map, &md.maps, node) {
+		if (sym && sym->start >= new_map->start &&
+		    sym->start < new_map->end) {
+			replacement_map = new_map;
+			break;
 		}
 	}
 
@@ -1255,19 +1209,6 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 		map__put(new_map);
 	}
 
-	if (machine__is(machine, "x86_64")) {
-		u64 addr;
-
-		/*
-		 * If one of the corresponding symbols is there, assume the
-		 * entry trampoline maps are too.
-		 */
-		if (!kallsyms__get_function_start(kallsyms_filename,
-						  ENTRY_TRAMPOLINE_NAME,
-						  &addr))
-			machine->trampolines_mapped = true;
-	}
-
 	/*
 	 * Set the data type and long name so that kcore can be read via
 	 * dso__data_read_addr().
@@ -1280,7 +1221,7 @@ static int dso__load_kcore(struct dso *dso, struct map *map,
 
 	close(fd);
 
-	if (map->prot & PROT_EXEC)
+	if (map->type == MAP__FUNCTION)
 		pr_debug("Using %s for kernel object code\n", kcore_filename);
 	else
 		pr_debug("Using %s for kernel data\n", kcore_filename);
@@ -1301,14 +1242,20 @@ out_err:
  * If the kernel is relocated at boot time, kallsyms won't match.  Compute the
  * delta based on the relocation reference symbol.
  */
-static int kallsyms__delta(struct kmap *kmap, const char *filename, u64 *delta)
+static int kallsyms__delta(struct map *map, const char *filename, u64 *delta)
 {
+	struct kmap *kmap = map__kmap(map);
 	u64 addr;
+
+	if (!kmap)
+		return -1;
 
 	if (!kmap->ref_reloc_sym || !kmap->ref_reloc_sym->name)
 		return 0;
 
-	if (kallsyms__get_function_start(filename, kmap->ref_reloc_sym->name, &addr))
+	addr = kallsyms__get_function_start(filename,
+					    kmap->ref_reloc_sym->name);
+	if (!addr)
 		return -1;
 
 	*delta = addr - kmap->ref_reloc_sym->addr;
@@ -1318,23 +1265,19 @@ static int kallsyms__delta(struct kmap *kmap, const char *filename, u64 *delta)
 int __dso__load_kallsyms(struct dso *dso, const char *filename,
 			 struct map *map, bool no_kcore)
 {
-	struct kmap *kmap = map__kmap(map);
 	u64 delta = 0;
 
 	if (symbol__restricted_filename(filename, "/proc/kallsyms"))
 		return -1;
 
-	if (!kmap || !kmap->kmaps)
+	if (dso__load_all_kallsyms(dso, filename, map) < 0)
 		return -1;
 
-	if (dso__load_all_kallsyms(dso, filename) < 0)
+	if (kallsyms__delta(map, filename, &delta))
 		return -1;
 
-	if (kallsyms__delta(kmap, filename, &delta))
-		return -1;
-
-	symbols__fixup_end(&dso->symbols);
-	symbols__fixup_duplicate(&dso->symbols);
+	symbols__fixup_end(&dso->symbols[map->type]);
+	symbols__fixup_duplicate(&dso->symbols[map->type]);
 
 	if (dso->kernel == DSO_TYPE_GUEST_KERNEL)
 		dso->symtab_type = DSO_BINARY_TYPE__GUEST_KALLSYMS;
@@ -1342,9 +1285,9 @@ int __dso__load_kallsyms(struct dso *dso, const char *filename,
 		dso->symtab_type = DSO_BINARY_TYPE__KALLSYMS;
 
 	if (!no_kcore && !dso__load_kcore(dso, map, filename))
-		return map_groups__split_kallsyms_for_kcore(kmap->kmaps, dso);
+		return dso__split_kallsyms_for_kcore(dso, map);
 	else
-		return map_groups__split_kallsyms(kmap->kmaps, dso, delta, map);
+		return dso__split_kallsyms(dso, map, delta);
 }
 
 int dso__load_kallsyms(struct dso *dso, const char *filename,
@@ -1353,14 +1296,14 @@ int dso__load_kallsyms(struct dso *dso, const char *filename,
 	return __dso__load_kallsyms(dso, filename, map, false);
 }
 
-static int dso__load_perf_map(const char *map_path, struct dso *dso)
+static int dso__load_perf_map(struct dso *dso, struct map *map)
 {
 	char *line = NULL;
 	size_t n;
 	FILE *file;
 	int nr_syms = 0;
 
-	file = fopen(map_path, "r");
+	file = fopen(dso->long_name, "r");
 	if (file == NULL)
 		goto out_failure;
 
@@ -1390,12 +1333,12 @@ static int dso__load_perf_map(const char *map_path, struct dso *dso)
 		if (len + 2 >= line_len)
 			continue;
 
-		sym = symbol__new(start, size, STB_GLOBAL, STT_FUNC, line + len);
+		sym = symbol__new(start, size, STB_GLOBAL, line + len);
 
 		if (sym == NULL)
 			goto out_delete_line;
 
-		symbols__insert(&dso->symbols, sym);
+		symbols__insert(&dso->symbols[map->type], sym);
 		nr_syms++;
 	}
 
@@ -1419,6 +1362,7 @@ static bool dso__is_compatible_symtab_type(struct dso *dso, bool kmod,
 	case DSO_BINARY_TYPE__SYSTEM_PATH_DSO:
 	case DSO_BINARY_TYPE__FEDORA_DEBUGINFO:
 	case DSO_BINARY_TYPE__UBUNTU_DEBUGINFO:
+	case DSO_BINARY_TYPE__MIXEDUP_UBUNTU_DEBUGINFO:
 	case DSO_BINARY_TYPE__BUILDID_DEBUGINFO:
 	case DSO_BINARY_TYPE__OPENEMBEDDED_DEBUGINFO:
 		return !kmod && dso->kernel == DSO_TYPE_USER;
@@ -1444,51 +1388,12 @@ static bool dso__is_compatible_symtab_type(struct dso *dso, bool kmod,
 		return kmod && dso->symtab_type == type;
 
 	case DSO_BINARY_TYPE__BUILD_ID_CACHE:
-	case DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO:
 		return true;
 
 	case DSO_BINARY_TYPE__NOT_FOUND:
 	default:
 		return false;
 	}
-}
-
-/* Checks for the existence of the perf-<pid>.map file in two different
- * locations.  First, if the process is a separate mount namespace, check in
- * that namespace using the pid of the innermost pid namespace.  If's not in a
- * namespace, or the file can't be found there, try in the mount namespace of
- * the tracing process using our view of its pid.
- */
-static int dso__find_perf_map(char *filebuf, size_t bufsz,
-			      struct nsinfo **nsip)
-{
-	struct nscookie nsc;
-	struct nsinfo *nsi;
-	struct nsinfo *nnsi;
-	int rc = -1;
-
-	nsi = *nsip;
-
-	if (nsi->need_setns) {
-		snprintf(filebuf, bufsz, "/tmp/perf-%d.map", nsi->nstgid);
-		nsinfo__mountns_enter(nsi, &nsc);
-		rc = access(filebuf, R_OK);
-		nsinfo__mountns_exit(&nsc);
-		if (rc == 0)
-			return rc;
-	}
-
-	nnsi = nsinfo__copy(nsi);
-	if (nnsi) {
-		nsinfo__put(nsi);
-
-		nnsi->need_setns = false;
-		snprintf(filebuf, bufsz, "/tmp/perf-%d.map", nnsi->tgid);
-		*nsip = nnsi;
-		rc = 0;
-	}
-
-	return rc;
 }
 
 int dso__load(struct dso *dso, struct map *map)
@@ -1502,26 +1407,22 @@ int dso__load(struct dso *dso, struct map *map)
 	struct symsrc ss_[2];
 	struct symsrc *syms_ss = NULL, *runtime_ss = NULL;
 	bool kmod;
-	bool perfmap;
 	unsigned char build_id[BUILD_ID_SIZE];
-	struct nscookie nsc;
-	char newmapname[PATH_MAX];
-	const char *map_path = dso->long_name;
 
-	perfmap = strncmp(dso->name, "/tmp/perf-", 10) == 0;
-	if (perfmap) {
-		if (dso->nsinfo && (dso__find_perf_map(newmapname,
-		    sizeof(newmapname), &dso->nsinfo) == 0)) {
-			map_path = newmapname;
-		}
-	}
-
-	nsinfo__mountns_enter(dso->nsinfo, &nsc);
 	pthread_mutex_lock(&dso->lock);
 
 	/* check again under the dso->lock */
-	if (dso__loaded(dso)) {
+	if (dso__loaded(dso, map->type)) {
 		ret = 1;
+		goto out;
+	}
+
+	if (dso->kernel) {
+		if (dso->kernel == DSO_TYPE_KERNEL)
+			ret = dso__load_kernel_sym(dso, map);
+		else if (dso->kernel == DSO_TYPE_GUEST_KERNEL)
+			ret = dso__load_guest_kernel_sym(dso, map);
+
 		goto out;
 	}
 
@@ -1530,32 +1431,21 @@ int dso__load(struct dso *dso, struct map *map)
 	else
 		machine = NULL;
 
-	if (dso->kernel) {
-		if (dso->kernel == DSO_TYPE_KERNEL)
-			ret = dso__load_kernel_sym(dso, map);
-		else if (dso->kernel == DSO_TYPE_GUEST_KERNEL)
-			ret = dso__load_guest_kernel_sym(dso, map);
-
-		if (machine__is(machine, "x86_64"))
-			machine__map_x86_64_entry_trampolines(machine, dso);
-		goto out;
-	}
-
 	dso->adjust_symbols = 0;
 
-	if (perfmap) {
+	if (strncmp(dso->name, "/tmp/perf-", 10) == 0) {
 		struct stat st;
 
-		if (lstat(map_path, &st) < 0)
+		if (lstat(dso->name, &st) < 0)
 			goto out;
 
 		if (!symbol_conf.force && st.st_uid && (st.st_uid != geteuid())) {
 			pr_warning("File %s not owned by current user or root, "
-				   "ignoring it (use -f to override).\n", map_path);
+				   "ignoring it (use -f to override).\n", dso->name);
 			goto out;
 		}
 
-		ret = dso__load_perf_map(map_path, dso);
+		ret = dso__load_perf_map(dso, map);
 		dso->symtab_type = ret > 0 ? DSO_BINARY_TYPE__JAVA_JIT :
 					     DSO_BINARY_TYPE__NOT_FOUND;
 		goto out;
@@ -1579,11 +1469,9 @@ int dso__load(struct dso *dso, struct map *map)
 	 * DSO_BINARY_TYPE__BUILDID_DEBUGINFO to work
 	 */
 	if (!dso->has_build_id &&
-	    is_regular_file(dso->long_name)) {
-	    __symbol__join_symfs(name, PATH_MAX, dso->long_name);
-	    if (filename__read_build_id(name, build_id, BUILD_ID_SIZE) > 0)
+	    is_regular_file(dso->long_name) &&
+	    filename__read_build_id(dso->long_name, build_id, BUILD_ID_SIZE) > 0)
 		dso__set_build_id(dso, build_id);
-	}
 
 	/*
 	 * Iterate over candidate debug images.
@@ -1593,14 +1481,8 @@ int dso__load(struct dso *dso, struct map *map)
 	for (i = 0; i < DSO_BINARY_TYPE__SYMTAB_CNT; i++) {
 		struct symsrc *ss = &ss_[ss_pos];
 		bool next_slot = false;
-		bool is_reg;
-		bool nsexit;
-		int sirc = -1;
 
 		enum dso_binary_type symtab_type = binary_type_symtab[i];
-
-		nsexit = (symtab_type == DSO_BINARY_TYPE__BUILD_ID_CACHE ||
-		    symtab_type == DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO);
 
 		if (!dso__is_compatible_symtab_type(dso, kmod, symtab_type))
 			continue;
@@ -1609,17 +1491,11 @@ int dso__load(struct dso *dso, struct map *map)
 						   root_dir, name, PATH_MAX))
 			continue;
 
-		if (nsexit)
-			nsinfo__mountns_exit(&nsc);
+		if (!is_regular_file(name))
+			continue;
 
-		is_reg = is_regular_file(name);
-		if (is_reg)
-			sirc = symsrc__init(ss, dso, name, symtab_type);
-
-		if (nsexit)
-			nsinfo__mountns_enter(dso->nsinfo, &nsc);
-
-		if (!is_reg || sirc < 0)
+		/* Name is now the name of the next image to try */
+		if (symsrc__init(ss, dso, name, symtab_type) < 0)
 			continue;
 
 		if (!syms_ss && symsrc__has_symtab(ss)) {
@@ -1656,6 +1532,10 @@ int dso__load(struct dso *dso, struct map *map)
 	if (!runtime_ss && syms_ss)
 		runtime_ss = syms_ss;
 
+	if (syms_ss && syms_ss->type == DSO_BINARY_TYPE__BUILD_ID_CACHE)
+		if (dso__build_id_is_kmod(dso, name, PATH_MAX))
+			kmod = true;
+
 	if (syms_ss)
 		ret = dso__load_sym(dso, map, syms_ss, runtime_ss, kmod);
 	else
@@ -1664,7 +1544,7 @@ int dso__load(struct dso *dso, struct map *map)
 	if (ret > 0) {
 		int nr_plt;
 
-		nr_plt = dso__synthesize_plt_symbols(dso, runtime_ss);
+		nr_plt = dso__synthesize_plt_symbols(dso, runtime_ss, map);
 		if (nr_plt > 0)
 			ret += nr_plt;
 	}
@@ -1676,19 +1556,19 @@ out_free:
 	if (ret < 0 && strstr(dso->name, " (deleted)") != NULL)
 		ret = 0;
 out:
-	dso__set_loaded(dso);
+	dso__set_loaded(dso, map->type);
 	pthread_mutex_unlock(&dso->lock);
-	nsinfo__mountns_exit(&nsc);
 
 	return ret;
 }
 
-struct map *map_groups__find_by_name(struct map_groups *mg, const char *name)
+struct map *map_groups__find_by_name(struct map_groups *mg,
+				     enum map_type type, const char *name)
 {
-	struct maps *maps = &mg->maps;
+	struct maps *maps = &mg->maps[type];
 	struct map *map;
 
-	down_read(&maps->lock);
+	pthread_rwlock_rdlock(&maps->lock);
 
 	for (map = maps__first(maps); map; map = map__next(map)) {
 		if (map->dso && strcmp(map->dso->short_name, name) == 0)
@@ -1698,7 +1578,7 @@ struct map *map_groups__find_by_name(struct map_groups *mg, const char *name)
 	map = NULL;
 
 out_unlock:
-	up_read(&maps->lock);
+	pthread_rwlock_unlock(&maps->lock);
 	return map;
 }
 
@@ -1732,7 +1612,7 @@ int dso__load_vmlinux(struct dso *dso, struct map *map,
 		else
 			dso->binary_type = DSO_BINARY_TYPE__VMLINUX;
 		dso__set_long_name(dso, vmlinux, vmlinux_allocated);
-		dso__set_loaded(dso);
+		dso__set_loaded(dso, map->type);
 		pr_debug("Using %s for symbols\n", symfs_vmlinux);
 	}
 
@@ -1754,7 +1634,7 @@ int dso__load_vmlinux_path(struct dso *dso, struct map *map)
 	}
 
 	if (!symbol_conf.ignore_vmlinux_buildid)
-		filename = dso__build_id_filename(dso, NULL, 0, false);
+		filename = dso__build_id_filename(dso, NULL, 0);
 	if (filename != NULL) {
 		err = dso__load_vmlinux(dso, map, filename, true);
 		if (err > 0)
@@ -1970,7 +1850,8 @@ static int dso__load_guest_kernel_sym(struct dso *dso, struct map *map)
 		pr_debug("Using %s for symbols\n", kallsyms_filename);
 	if (err > 0 && !dso__is_kcore(dso)) {
 		dso->binary_type = DSO_BINARY_TYPE__GUEST_KALLSYMS;
-		dso__set_long_name(dso, machine->mmap_name, false);
+		machine__mmap_name(machine, path, sizeof(path));
+		dso__set_long_name(dso, strdup(path), true);
 		map__fixup_start(map);
 		map__fixup_end(map);
 	}
@@ -2091,7 +1972,7 @@ static bool symbol__read_kptr_restrict(void)
 		char line[8];
 
 		if (fgets(line, sizeof(line), fp) != NULL)
-			value = ((geteuid() != 0) || (getuid() != 0)) ?
+			value = (geteuid() != 0) ?
 					(atoi(line) != 0) :
 					(atoi(line) == 2);
 
@@ -2103,12 +1984,14 @@ static bool symbol__read_kptr_restrict(void)
 
 int symbol__annotation_init(void)
 {
-	if (symbol_conf.init_annotation)
-		return 0;
-
 	if (symbol_conf.initialized) {
 		pr_err("Annotation needs to be init before symbol__init()\n");
 		return -1;
+	}
+
+	if (symbol_conf.init_annotation) {
+		pr_warning("Annotation being initialized multiple times\n");
+		return 0;
 	}
 
 	symbol_conf.priv_size += sizeof(struct annotation);
@@ -2159,10 +2042,6 @@ int symbol__init(struct perf_env *env)
 		       symbol_conf.sym_list_str, "symbol") < 0)
 		goto out_free_tid_list;
 
-	if (setup_list(&symbol_conf.bt_stop_list,
-		       symbol_conf.bt_stop_list_str, "symbol") < 0)
-		goto out_free_sym_list;
-
 	/*
 	 * A path to symbols of "/" is identical to ""
 	 * reset here for simplicity.
@@ -2180,8 +2059,6 @@ int symbol__init(struct perf_env *env)
 	symbol_conf.initialized = true;
 	return 0;
 
-out_free_sym_list:
-	strlist__delete(symbol_conf.sym_list);
 out_free_tid_list:
 	intlist__delete(symbol_conf.tid_list);
 out_free_pid_list:
@@ -2197,7 +2074,6 @@ void symbol__exit(void)
 {
 	if (!symbol_conf.initialized)
 		return;
-	strlist__delete(symbol_conf.bt_stop_list);
 	strlist__delete(symbol_conf.sym_list);
 	strlist__delete(symbol_conf.dso_list);
 	strlist__delete(symbol_conf.comm_list);
@@ -2205,7 +2081,6 @@ void symbol__exit(void)
 	intlist__delete(symbol_conf.pid_list);
 	vmlinux_path__exit();
 	symbol_conf.sym_list = symbol_conf.dso_list = symbol_conf.comm_list = NULL;
-	symbol_conf.bt_stop_list = NULL;
 	symbol_conf.initialized = false;
 }
 
@@ -2230,26 +2105,4 @@ int symbol__config_symfs(const struct option *opt __maybe_unused,
 
 	free(bf);
 	return 0;
-}
-
-struct mem_info *mem_info__get(struct mem_info *mi)
-{
-	if (mi)
-		refcount_inc(&mi->refcnt);
-	return mi;
-}
-
-void mem_info__put(struct mem_info *mi)
-{
-	if (mi && refcount_dec_and_test(&mi->refcnt))
-		free(mi);
-}
-
-struct mem_info *mem_info__new(void)
-{
-	struct mem_info *mi = zalloc(sizeof(*mi));
-
-	if (mi)
-		refcount_set(&mi->refcnt, 1);
-	return mi;
 }

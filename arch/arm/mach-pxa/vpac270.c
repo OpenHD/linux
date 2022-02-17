@@ -15,7 +15,6 @@
 #include <linux/irq.h>
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
-#include <linux/leds.h>
 #include <linux/gpio.h>
 #include <linux/usb/gpio_vbus.h>
 #include <linux/mtd/mtd.h>
@@ -27,7 +26,7 @@
 #include <linux/ata_platform.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/max1586.h>
-#include <linux/platform_data/i2c-pxa.h>
+#include <linux/i2c/pxa-i2c.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>

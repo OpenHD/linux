@@ -57,9 +57,11 @@
 #include "sha256_mb_mgr.h"
 
 #define HASH_UPDATE          0x00
-#define HASH_LAST            0x01
-#define HASH_DONE	     0x02
-#define HASH_FINAL	     0x04
+#define HASH_FIRST           0x01
+#define HASH_LAST            0x02
+#define HASH_ENTIRE          0x03
+#define HASH_DONE	     0x04
+#define HASH_FINAL	     0x08
 
 #define HASH_CTX_STS_IDLE       0x00
 #define HASH_CTX_STS_PROCESSING 0x01
@@ -123,7 +125,7 @@ struct sha256_hash_ctx {
 	/* error flag */
 	int error;
 
-	uint64_t	total_length;
+	uint32_t	total_length;
 	const void	*incoming_buffer;
 	uint32_t	incoming_buffer_length;
 	uint8_t		partial_block_buffer[SHA256_BLOCK_SIZE * 2];

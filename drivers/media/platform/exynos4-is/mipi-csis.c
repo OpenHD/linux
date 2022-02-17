@@ -30,7 +30,7 @@
 #include <linux/spinlock.h>
 #include <linux/videodev2.h>
 #include <media/drv-intf/exynos-fimc.h>
-#include <media/v4l2-fwnode.h>
+#include <media/v4l2-of.h>
 #include <media/v4l2-subdev.h>
 
 #include "mipi-csis.h"
@@ -189,7 +189,7 @@ struct csis_drvdata {
  * @irq: requested s5p-mipi-csis irq number
  * @interrupt_mask: interrupt mask of the all used interrupts
  * @flags: the state variable for power and streaming control
- * @clk_frequency: device bus clock frequency
+ * @clock_frequency: device bus clock frequency
  * @hs_settle: HS-RX settle time
  * @num_lanes: number of MIPI-CSI data lanes used
  * @max_num_lanes: maximum number of MIPI-CSI data lanes supported
@@ -513,8 +513,10 @@ static int s5pcsis_s_stream(struct v4l2_subdev *sd, int enable)
 	if (enable) {
 		s5pcsis_clear_counters(state);
 		ret = pm_runtime_get_sync(&state->pdev->dev);
-		if (ret && ret != 1)
+		if (ret && ret != 1) {
+			pm_runtime_put_noidle(&state->pdev->dev);
 			return ret;
+		}
 	}
 
 	mutex_lock(&state->lock);
@@ -649,23 +651,23 @@ static int s5pcsis_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
-static const struct v4l2_subdev_core_ops s5pcsis_core_ops = {
+static struct v4l2_subdev_core_ops s5pcsis_core_ops = {
 	.s_power = s5pcsis_s_power,
 	.log_status = s5pcsis_log_status,
 };
 
-static const struct v4l2_subdev_pad_ops s5pcsis_pad_ops = {
+static struct v4l2_subdev_pad_ops s5pcsis_pad_ops = {
 	.enum_mbus_code = s5pcsis_enum_mbus_code,
 	.get_fmt = s5pcsis_get_fmt,
 	.set_fmt = s5pcsis_set_fmt,
 };
 
-static const struct v4l2_subdev_video_ops s5pcsis_video_ops = {
+static struct v4l2_subdev_video_ops s5pcsis_video_ops = {
 	.s_rx_buffer = s5pcsis_s_rx_buffer,
 	.s_stream = s5pcsis_s_stream,
 };
 
-static const struct v4l2_subdev_ops s5pcsis_subdev_ops = {
+static struct v4l2_subdev_ops s5pcsis_subdev_ops = {
 	.core = &s5pcsis_core_ops,
 	.pad = &s5pcsis_pad_ops,
 	.video = &s5pcsis_video_ops,
@@ -718,7 +720,7 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 			    struct csis_state *state)
 {
 	struct device_node *node = pdev->dev.of_node;
-	struct v4l2_fwnode_endpoint endpoint;
+	struct v4l2_of_endpoint endpoint;
 	int ret;
 
 	if (of_property_read_u32(node, "clock-frequency",
@@ -730,12 +732,12 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 
 	node = of_graph_get_next_endpoint(node, NULL);
 	if (!node) {
-		dev_err(&pdev->dev, "No port node at %pOF\n",
-				pdev->dev.of_node);
+		dev_err(&pdev->dev, "No port node at %s\n",
+				pdev->dev.of_node->full_name);
 		return -EINVAL;
 	}
 	/* Get port node and validate MIPI-CSI channel id. */
-	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node), &endpoint);
+	ret = v4l2_of_parse_endpoint(node, &endpoint);
 	if (ret)
 		goto err;
 
@@ -891,7 +893,8 @@ e_clkput:
 
 static int s5pcsis_pm_suspend(struct device *dev, bool runtime)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct v4l2_subdev *sd = platform_get_drvdata(pdev);
 	struct csis_state *state = sd_to_csis_state(sd);
 	int ret = 0;
 
@@ -920,7 +923,8 @@ static int s5pcsis_pm_suspend(struct device *dev, bool runtime)
 
 static int s5pcsis_pm_resume(struct device *dev, bool runtime)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct v4l2_subdev *sd = platform_get_drvdata(pdev);
 	struct csis_state *state = sd_to_csis_state(sd);
 	int ret = 0;
 

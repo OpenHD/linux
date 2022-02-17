@@ -26,15 +26,15 @@
 #include <linux/spinlock.h>
 #include <linux/io.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/of_platform.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/gpio/driver.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
-#include <linux/bitops.h>
 
 #define GRGPIO_MAX_NGPIO 32
 
@@ -96,11 +96,12 @@ static void grgpio_set_imask(struct grgpio_priv *priv, unsigned int offset,
 			     int val)
 {
 	struct gpio_chip *gc = &priv->gc;
+	unsigned long mask = gc->pin2mask(gc, offset);
 
 	if (val)
-		priv->imask |= BIT(offset);
+		priv->imask |= mask;
 	else
-		priv->imask &= ~BIT(offset);
+		priv->imask &= ~mask;
 	gc->write_reg(priv->regs + GRGPIO_IMASK, priv->imask);
 }
 
@@ -258,17 +259,16 @@ static int grgpio_irq_map(struct irq_domain *d, unsigned int irq,
 	lirq->irq = irq;
 	uirq = &priv->uirqs[lirq->index];
 	if (uirq->refcnt == 0) {
+		spin_unlock_irqrestore(&priv->gc.bgpio_lock, flags);
 		ret = request_irq(uirq->uirq, grgpio_irq_handler, 0,
 				  dev_name(priv->dev), priv);
 		if (ret) {
 			dev_err(priv->dev,
 				"Could not request underlying irq %d\n",
 				uirq->uirq);
-
-			spin_unlock_irqrestore(&priv->gc.bgpio_lock, flags);
-
 			return ret;
 		}
+		spin_lock_irqsave(&priv->gc.bgpio_lock, flags);
 	}
 	uirq->refcnt++;
 
@@ -314,8 +314,11 @@ static void grgpio_irq_unmap(struct irq_domain *d, unsigned int irq)
 	if (index >= 0) {
 		uirq = &priv->uirqs[lirq->index];
 		uirq->refcnt--;
-		if (uirq->refcnt == 0)
+		if (uirq->refcnt == 0) {
+			spin_unlock_irqrestore(&priv->gc.bgpio_lock, flags);
 			free_irq(uirq->uirq, priv);
+			return;
+		}
 	}
 
 	spin_unlock_irqrestore(&priv->gc.bgpio_lock, flags);
@@ -366,7 +369,7 @@ static int grgpio_probe(struct platform_device *ofdev)
 	gc->of_node = np;
 	gc->owner = THIS_MODULE;
 	gc->to_irq = grgpio_to_irq;
-	gc->label = devm_kasprintf(&ofdev->dev, GFP_KERNEL, "%pOF", np);
+	gc->label = np->full_name;
 	gc->base = -1;
 
 	err = of_property_read_u32(np, "nbits", &prop);

@@ -121,9 +121,6 @@
 
 #ifndef __ASSEMBLY__
 
-#include <linux/bug.h>
-#include <asm/processor.h> /* for signal_minsigstksz, used by ARCH_DLINFO */
-
 typedef unsigned long elf_greg_t;
 
 #define ELF_NGREG (sizeof(struct user_pt_regs) / sizeof(elf_greg_t))
@@ -140,27 +137,13 @@ typedef struct user_fpsimd_state elf_fpregset_t;
  */
 #define ELF_PLAT_INIT(_r, load_addr)	(_r)->regs[0] = 0
 
-#define SET_PERSONALITY(ex)						\
-({									\
-	clear_thread_flag(TIF_32BIT);					\
-	current->personality &= ~READ_IMPLIES_EXEC;			\
-})
+#define SET_PERSONALITY(ex)		clear_thread_flag(TIF_32BIT);
 
 /* update AT_VECTOR_SIZE_ARCH if the number of NEW_AUX_ENT entries changes */
 #define ARCH_DLINFO							\
 do {									\
 	NEW_AUX_ENT(AT_SYSINFO_EHDR,					\
 		    (elf_addr_t)current->mm->context.vdso);		\
-									\
-	/*								\
-	 * Should always be nonzero unless there's a kernel bug.	\
-	 * If we haven't determined a sensible value to give to		\
-	 * userspace, omit the entry:					\
-	 */								\
-	if (likely(signal_minsigstksz))					\
-		NEW_AUX_ENT(AT_MINSIGSTKSZ, signal_minsigstksz);	\
-	else								\
-		NEW_AUX_ENT(AT_IGNORE, 0);				\
 } while (0)
 
 #define ARCH_HAS_SETUP_ADDITIONAL_PAGES
@@ -200,15 +183,7 @@ typedef compat_elf_greg_t		compat_elf_gregset_t[COMPAT_ELF_NGREG];
 					 ((x)->e_flags & EF_ARM_EABI_MASK))
 
 #define compat_start_thread		compat_start_thread
-/*
- * Unlike the native SET_PERSONALITY macro, the compat version maintains
- * READ_IMPLIES_EXEC across an execve() since this is the behaviour on
- * arch/arm/.
- */
-#define COMPAT_SET_PERSONALITY(ex)					\
-({									\
-	set_thread_flag(TIF_32BIT);					\
- })
+#define COMPAT_SET_PERSONALITY(ex)	set_thread_flag(TIF_32BIT);
 #define COMPAT_ARCH_DLINFO
 extern int aarch32_setup_vectors_page(struct linux_binprm *bprm,
 				      int uses_interp);

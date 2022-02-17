@@ -64,7 +64,6 @@
 		compatible = "usb-nop-xceiv";
 		reset-gpios = <&gpio5 19 GPIO_ACTIVE_LOW>;	/* gpio_147 */
 		vcc-supply = <&hsusb2_power>;
-		#phy-cells = <0>;
 	};
 
 	sound {
@@ -284,7 +283,7 @@
 
 &mmc1 {
 	vmmc-supply = <&vmmc1>;
-	vqmmc-supply = <&vsim>;
+	vmmc_aux-supply = <&vsim>;
 	bus-width = <8>;
 };
 

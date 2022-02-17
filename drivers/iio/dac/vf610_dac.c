@@ -167,6 +167,7 @@ static int vf610_write_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info vf610_dac_iio_info = {
+	.driver_module = THIS_MODULE,
 	.read_raw = &vf610_read_raw,
 	.write_raw = &vf610_write_raw,
 };
@@ -234,6 +235,7 @@ static int vf610_dac_probe(struct platform_device *pdev)
 	return 0;
 
 error_iio_device_register:
+	vf610_dac_exit(info);
 	clk_disable_unprepare(info->clk);
 
 	return ret;

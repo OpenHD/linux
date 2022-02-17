@@ -17,7 +17,6 @@
 #include <linux/iommu.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
@@ -240,7 +239,6 @@ static void vfio_platform_release(void *device_data)
 				 ret, extra_dbg ? extra_dbg : "");
 			WARN_ON(1);
 		}
-		pm_runtime_put(vdev->device);
 		vfio_platform_regions_cleanup(vdev);
 		vfio_platform_irq_cleanup(vdev);
 	}
@@ -271,10 +269,6 @@ static int vfio_platform_open(void *device_data)
 		if (ret)
 			goto err_irq;
 
-		ret = pm_runtime_get_sync(vdev->device);
-		if (ret < 0)
-			goto err_pm;
-
 		ret = vfio_platform_call_reset(vdev, &extra_dbg);
 		if (ret && vdev->reset_required) {
 			dev_warn(vdev->device, "reset driver is required and reset call failed in open (%d) %s\n",
@@ -289,8 +283,6 @@ static int vfio_platform_open(void *device_data)
 	return 0;
 
 err_rst:
-	pm_runtime_put(vdev->device);
-err_pm:
 	vfio_platform_irq_cleanup(vdev);
 err_irq:
 	vfio_platform_regions_cleanup(vdev);
@@ -372,21 +364,36 @@ static long vfio_platform_ioctl(void *device_data,
 		struct vfio_irq_set hdr;
 		u8 *data = NULL;
 		int ret = 0;
-		size_t data_size = 0;
 
 		minsz = offsetofend(struct vfio_irq_set, count);
 
 		if (copy_from_user(&hdr, (void __user *)arg, minsz))
 			return -EFAULT;
 
-		ret = vfio_set_irqs_validate_and_prepare(&hdr, vdev->num_irqs,
-						 vdev->num_irqs, &data_size);
-		if (ret)
-			return ret;
+		if (hdr.argsz < minsz)
+			return -EINVAL;
 
-		if (data_size) {
-			data = memdup_user((void __user *)(arg + minsz),
-					    data_size);
+		if (hdr.index >= vdev->num_irqs)
+			return -EINVAL;
+
+		if (hdr.flags & ~(VFIO_IRQ_SET_DATA_TYPE_MASK |
+				  VFIO_IRQ_SET_ACTION_TYPE_MASK))
+			return -EINVAL;
+
+		if (!(hdr.flags & VFIO_IRQ_SET_DATA_NONE)) {
+			size_t size;
+
+			if (hdr.flags & VFIO_IRQ_SET_DATA_BOOL)
+				size = sizeof(uint8_t);
+			else if (hdr.flags & VFIO_IRQ_SET_DATA_EVENTFD)
+				size = sizeof(int32_t);
+			else
+				return -EINVAL;
+
+			if (hdr.argsz - minsz < size)
+				return -EINVAL;
+
+			data = memdup_user((void __user *)(arg + minsz), size);
 			if (IS_ERR(data))
 				return PTR_ERR(data);
 		}
@@ -638,7 +645,8 @@ static int vfio_platform_of_probe(struct vfio_platform_device *vdev,
 	ret = device_property_read_string(dev, "compatible",
 					  &vdev->compat);
 	if (ret)
-		pr_err("VFIO: Cannot retrieve compat for %s\n", vdev->name);
+		pr_err("VFIO: cannot retrieve compat for %s\n",
+			vdev->name);
 
 	return ret;
 }
@@ -680,7 +688,7 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 
 	ret = vfio_platform_get_reset(vdev);
 	if (ret && vdev->reset_required) {
-		pr_err("VFIO: No reset function found for device %s\n",
+		pr_err("vfio: no reset function found for device %s\n",
 		       vdev->name);
 		return ret;
 	}
@@ -698,7 +706,6 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 
 	mutex_init(&vdev->igate);
 
-	pm_runtime_enable(vdev->device);
 	return 0;
 
 put_iommu:
@@ -716,7 +723,6 @@ struct vfio_platform_device *vfio_platform_remove_common(struct device *dev)
 	vdev = vfio_del_group_dev(dev);
 
 	if (vdev) {
-		pm_runtime_disable(vdev->device);
 		vfio_platform_put_reset(vdev);
 		vfio_iommu_group_put(dev->iommu_group, dev);
 	}

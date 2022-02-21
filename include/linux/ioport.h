@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ioport.h	Definitions of routines for detecting, reserving and
  *		allocating system resources.
@@ -190,6 +189,7 @@ extern int allocate_resource(struct resource *root, struct resource *new,
 						       resource_size_t),
 			     void *alignf_data);
 struct resource *lookup_resource(struct resource *root, resource_size_t start);
+struct resource *locate_resource(struct resource *root, resource_size_t addr);
 int adjust_resource(struct resource *res, resource_size_t start,
 		    resource_size_t size);
 resource_size_t resource_alignment(struct resource *res);
@@ -265,20 +265,17 @@ extern struct resource * __devm_request_region(struct device *dev,
 extern void __devm_release_region(struct device *dev, struct resource *parent,
 				  resource_size_t start, resource_size_t n);
 extern int iomem_map_sanity_check(resource_size_t addr, unsigned long size);
-extern bool iomem_is_exclusive(u64 addr);
+extern int iomem_is_exclusive(u64 addr);
 
 extern int
 walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 		void *arg, int (*func)(unsigned long, unsigned long, void *));
 extern int
-walk_mem_res(u64 start, u64 end, void *arg,
-	     int (*func)(struct resource *, void *));
-extern int
 walk_system_ram_res(u64 start, u64 end, void *arg,
-		    int (*func)(struct resource *, void *));
+		    int (*func)(u64, u64, void *));
 extern int
 walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,
-		    void *arg, int (*func)(struct resource *, void *));
+		    void *arg, int (*func)(u64, u64, void *));
 
 /* True if any part of r1 overlaps r2 */
 static inline bool resource_overlaps(struct resource *r1, struct resource *r2)

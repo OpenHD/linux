@@ -40,8 +40,8 @@
 
 /* Offsets from lpss->priv */
 #define LPSS_PRIV_RESETS		0x04
-#define LPSS_PRIV_RESETS_IDMA		BIT(2)
-#define LPSS_PRIV_RESETS_FUNC		0x3
+#define LPSS_PRIV_RESETS_FUNC		BIT(2)
+#define LPSS_PRIV_RESETS_IDMA		0x3
 
 #define LPSS_PRIV_ACTIVELTR		0x10
 #define LPSS_PRIV_IDLELTR		0x14
@@ -453,8 +453,6 @@ int intel_lpss_probe(struct device *dev,
 	if (ret)
 		goto err_remove_ltr;
 
-	dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND);
-
 	return 0;
 
 err_remove_ltr:
@@ -483,9 +481,7 @@ EXPORT_SYMBOL_GPL(intel_lpss_remove);
 
 static int resume_lpss_device(struct device *dev, void *data)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND))
-		pm_runtime_resume(dev);
-
+	pm_runtime_resume(dev);
 	return 0;
 }
 
@@ -508,14 +504,6 @@ int intel_lpss_suspend(struct device *dev)
 	/* Save device context */
 	for (i = 0; i < LPSS_PRIV_REG_COUNT; i++)
 		lpss->priv_ctx[i] = readl(lpss->priv + i * 4);
-
-	/*
-	 * If the device type is not UART, then put the controller into
-	 * reset. UART cannot be put into reset since S3/S0ix fail when
-	 * no_console_suspend flag is enabled.
-	 */
-	if (lpss->type != LPSS_DEV_UART)
-		writel(0, lpss->priv + LPSS_PRIV_RESETS);
 
 	return 0;
 }

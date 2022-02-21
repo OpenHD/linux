@@ -74,6 +74,9 @@ struct i2c_ram {
 	char    res1[4];	/* Reserved */
 	ushort  rpbase;		/* Relocation pointer */
 	char    res2[2];	/* Reserved */
+	/* The following elements are only for CPM2 */
+	char    res3[4];	/* Reserved */
+	uint    sdmatmp;	/* Internal */
 };
 
 #define I2COM_START	0x80
@@ -413,7 +416,7 @@ static const struct i2c_algorithm cpm_i2c_algo = {
 };
 
 /* CPM_MAX_READ is also limiting writes according to the code! */
-static const struct i2c_adapter_quirks cpm_i2c_quirks = {
+static struct i2c_adapter_quirks cpm_i2c_quirks = {
 	.max_num_msgs = CPM_MAXBD,
 	.max_read_len = CPM_MAX_READ,
 	.max_write_len = CPM_MAX_READ,

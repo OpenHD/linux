@@ -35,7 +35,6 @@ Arguments
     File descriptor returned by :ref:`open() <func-open>`.
 
 ``argp``
-    Pointer to struct :c:type:`v4l2_dv_timings`.
 
 
 Description
@@ -147,20 +146,8 @@ EBUSY
       - ``flags``
       - Several flags giving more information about the format. See
 	:ref:`dv-bt-flags` for a description of the flags.
-    * - struct :c:type:`v4l2_fract`
-      - ``picture_aspect``
-      - The picture aspect if the pixels are not square. Only valid if the
-        ``V4L2_DV_FL_HAS_PICTURE_ASPECT`` flag is set.
-    * - __u8
-      - ``cea861_vic``
-      - The Video Identification Code according to the CEA-861 standard.
-        Only valid if the ``V4L2_DV_FL_HAS_CEA861_VIC`` flag is set.
-    * - __u8
-      - ``hdmi_vic``
-      - The Video Identification Code according to the HDMI standard.
-        Only valid if the ``V4L2_DV_FL_HAS_HDMI_VIC`` flag is set.
-    * - __u8
-      - ``reserved[46]``
+    * - __u32
+      - ``reserved[14]``
       - Reserved for future extensions. Drivers and applications must set
 	the array to zero.
 
@@ -209,7 +196,7 @@ EBUSY
       - 0
       - BT.656/1120 timings
 
-.. tabularcolumns:: |p{4.5cm}|p{12.8cm}|
+
 
 .. _dv-bt-standards:
 
@@ -232,7 +219,7 @@ EBUSY
 	There are no horizontal syncs/porches at all in this format.
 	Total blanking timings must be set in hsync or vsync fields only.
 
-.. tabularcolumns:: |p{7.0cm}|p{10.5cm}|
+.. tabularcolumns:: |p{6.0cm}|p{11.5cm}|
 
 .. _dv-bt-flags:
 
@@ -267,7 +254,7 @@ EBUSY
 	will also be cleared.
     * - ``V4L2_DV_FL_HALF_LINE``
       - Specific to interlaced formats: if set, then the vertical
-	backporch of field 1 (aka the odd field) is really one half-line
+	frontporch of field 1 (aka the odd field) is really one half-line
 	longer and the vertical backporch of field 2 (aka the even field)
 	is really one half-line shorter, so each field has exactly the
 	same number of half-lines. Whether half-lines can be detected or
@@ -283,14 +270,3 @@ EBUSY
       - Some formats like SMPTE-125M have an interlaced signal with a odd
 	total height. For these formats, if this flag is set, the first
 	field has the extra line. Else, it is the second field.
-    * - ``V4L2_DV_FL_HAS_PICTURE_ASPECT``
-      - If set, then the picture_aspect field is valid. Otherwise assume that
-        the pixels are square, so the picture aspect ratio is the same as the
-	width to height ratio.
-    * - ``V4L2_DV_FL_HAS_CEA861_VIC``
-      - If set, then the cea861_vic field is valid and contains the Video
-        Identification Code as per the CEA-861 standard.
-    * - ``V4L2_DV_FL_HAS_HDMI_VIC``
-      - If set, then the hdmi_vic field is valid and contains the Video
-        Identification Code as per the HDMI standard (HDMI Vendor Specific
-	InfoFrame).

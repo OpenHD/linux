@@ -125,10 +125,13 @@ union recv_frame *r8712_alloc_recvframe(struct __queue *pfree_recv_queue)
 }
 
 /*
- * caller : defrag; recvframe_chk_defrag in recv_thread  (passive)
- * pframequeue: defrag_queue : will be accessed in recv_thread  (passive)
- * using spin_lock to protect
- */
+caller : defrag; recvframe_chk_defrag in recv_thread  (passive)
+pframequeue: defrag_queue : will be accessed in recv_thread  (passive)
+
+using spin_lock to protect
+
+*/
+
 void r8712_free_recvframe_queue(struct  __queue *pframequeue,
 				struct  __queue *pfree_recv_queue)
 {
@@ -258,7 +261,7 @@ union recv_frame *r8712_portctrl(struct _adapter *adapter,
 		/* get ether_type */
 		ptr = ptr + pfhdr->attrib.hdrlen + LLC_HEADER_SIZE;
 		memcpy(&ether_type, ptr, 2);
-		be16_to_cpus(&ether_type);
+		ether_type = ntohs((unsigned short)ether_type);
 
 		if ((psta != NULL) && (psta->ieee8021x_blocked)) {
 			/* blocked
@@ -402,7 +405,7 @@ static sint ap2sta_data_frame(struct _adapter *adapter,
 		}
 
 		/* filter packets that SA is myself or multicast or broadcast */
-		if (!memcmp(myhwaddr, pattrib->src, ETH_ALEN))
+	       if (!memcmp(myhwaddr, pattrib->src, ETH_ALEN))
 			return _FAIL;
 
 		/* da should be for me */
@@ -654,9 +657,8 @@ sint r8712_wlanhdr_to_ethhdr(union recv_frame *precvframe)
 	memcpy(ptr, pattrib->dst, ETH_ALEN);
 	memcpy(ptr + ETH_ALEN, pattrib->src, ETH_ALEN);
 	if (!bsnaphdr) {
-		__be16 be_tmp = htons(len);
-
-		memcpy(ptr + 12, &be_tmp, 2);
+		len = htons(len);
+		memcpy(ptr + 12, &len, 2);
 	}
 	return _SUCCESS;
 }

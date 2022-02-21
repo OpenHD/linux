@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * HID class driver for the Greybus.
  *
  * Copyright 2014 Google Inc.
  * Copyright 2014 Linaro Ltd.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/bitops.h>
@@ -30,6 +31,8 @@ struct gb_hid {
 	unsigned int			bufsize;
 	char				*inbuf;
 };
+
+static DEFINE_MUTEX(gb_hid_open_mutex);
 
 /* Routines to get controller's information over greybus */
 
@@ -343,14 +346,19 @@ static void gb_hid_stop(struct hid_device *hid)
 static int gb_hid_open(struct hid_device *hid)
 {
 	struct gb_hid *ghid = hid->driver_data;
-	int ret;
+	int ret = 0;
 
-	ret = gb_hid_set_power(ghid, GB_HID_TYPE_PWR_ON);
-	if (ret < 0)
-		return ret;
+	mutex_lock(&gb_hid_open_mutex);
+	if (!hid->open++) {
+		ret = gb_hid_set_power(ghid, GB_HID_TYPE_PWR_ON);
+		if (ret < 0)
+			hid->open--;
+		else
+			set_bit(GB_HID_STARTED, &ghid->flags);
+	}
+	mutex_unlock(&gb_hid_open_mutex);
 
-	set_bit(GB_HID_STARTED, &ghid->flags);
-	return 0;
+	return ret;
 }
 
 static void gb_hid_close(struct hid_device *hid)
@@ -358,13 +366,21 @@ static void gb_hid_close(struct hid_device *hid)
 	struct gb_hid *ghid = hid->driver_data;
 	int ret;
 
-	clear_bit(GB_HID_STARTED, &ghid->flags);
+	/*
+	 * Protecting hid->open to make sure we don't restart data acquistion
+	 * due to a resumption we no longer care about..
+	 */
+	mutex_lock(&gb_hid_open_mutex);
+	if (!--hid->open) {
+		clear_bit(GB_HID_STARTED, &ghid->flags);
 
-	/* Save some power */
-	ret = gb_hid_set_power(ghid, GB_HID_TYPE_PWR_OFF);
-	if (ret)
-		dev_err(&ghid->connection->bundle->dev,
-			"failed to power off (%d)\n", ret);
+		/* Save some power */
+		ret = gb_hid_set_power(ghid, GB_HID_TYPE_PWR_OFF);
+		if (ret)
+			dev_err(&ghid->connection->bundle->dev,
+				"failed to power off (%d)\n", ret);
+	}
+	mutex_unlock(&gb_hid_open_mutex);
 }
 
 static int gb_hid_power(struct hid_device *hid, int lvl)

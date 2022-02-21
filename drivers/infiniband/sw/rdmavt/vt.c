@@ -1,5 +1,5 @@
 /*
- * Copyright(c) 2016 - 2018 Intel Corporation.
+ * Copyright(c) 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -47,9 +47,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/dma-mapping.h>
 #include "vt.h"
-#include "cq.h"
 #include "trace.h"
 
 #define RVT_UVERBS_ABI_VERSION 2
@@ -59,18 +57,21 @@ MODULE_DESCRIPTION("RDMA Verbs Transport Library");
 
 static int rvt_init(void)
 {
-	int ret = rvt_driver_cq_init();
-
-	if (ret)
-		pr_err("Error in driver CQ init.\n");
-
-	return ret;
+	/*
+	 * rdmavt does not need to do anything special when it starts up. All it
+	 * needs to do is sit and wait until a driver attempts registration.
+	 */
+	return 0;
 }
 module_init(rvt_init);
 
 static void rvt_cleanup(void)
 {
-	rvt_cq_exit();
+	/*
+	 * Nothing to do at exit time either. The module won't be able to be
+	 * removed until all drivers are gone which means all the dev structs
+	 * are gone so there is really nothing to do.
+	 */
 }
 module_exit(rvt_cleanup);
 
@@ -89,15 +90,13 @@ module_exit(rvt_cleanup);
  */
 struct rvt_dev_info *rvt_alloc_device(size_t size, int nports)
 {
-	struct rvt_dev_info *rdi;
+	struct rvt_dev_info *rdi = ERR_PTR(-ENOMEM);
 
 	rdi = (struct rvt_dev_info *)ib_alloc_device(size);
 	if (!rdi)
 		return rdi;
 
-	rdi->ports = kcalloc(nports,
-			     sizeof(struct rvt_ibport **),
-			     GFP_KERNEL);
+	rdi->ports = kcalloc(nports, sizeof(*rdi->ports), GFP_KERNEL);
 	if (!rdi->ports)
 		ib_dealloc_device(&rdi->ibdev);
 
@@ -164,7 +163,7 @@ static int rvt_query_port(struct ib_device *ibdev, u8 port_num,
 		return -EINVAL;
 
 	rvp = rdi->ports[port_index];
-	/* props being zeroed by the caller, avoid zeroing it here */
+	memset(props, 0, sizeof(*props));
 	props->sm_lid = rvp->sm_lid;
 	props->sm_sl = rvp->sm_sl;
 	props->port_cap_flags = rvp->port_cap_flags;
@@ -200,13 +199,8 @@ static int rvt_modify_port(struct ib_device *ibdev, u8 port_num,
 		return -EINVAL;
 
 	rvp = rdi->ports[port_index];
-	if (port_modify_mask & IB_PORT_OPA_MASK_CHG) {
-		rvp->port_cap3_flags |= props->set_port_cap_mask;
-		rvp->port_cap3_flags &= ~props->clr_port_cap_mask;
-	} else {
-		rvp->port_cap_flags |= props->set_port_cap_mask;
-		rvp->port_cap_flags &= ~props->clr_port_cap_mask;
-	}
+	rvp->port_cap_flags |= props->set_port_cap_mask;
+	rvp->port_cap_flags &= ~props->clr_port_cap_mask;
 
 	if (props->set_port_cap_mask || props->clr_port_cap_mask)
 		rdi->driver_f.cap_mask_chg(rdi, port_num);
@@ -222,8 +216,7 @@ static int rvt_modify_port(struct ib_device *ibdev, u8 port_num,
  * rvt_query_pkey - Return a pkey from the table at a given index
  * @ibdev: Verbs IB dev
  * @port_num: Port number, 1 based from ib core
- * @index: Index into pkey table
- * @pkey: returned pkey from the port pkey table
+ * @intex: Index into pkey table
  *
  * Return: 0 on failure pkey otherwise
  */
@@ -254,7 +247,7 @@ static int rvt_query_pkey(struct ib_device *ibdev, u8 port_num, u16 index,
  * rvt_query_gid - Return a gid from the table
  * @ibdev: Verbs IB dev
  * @port_num: Port number, 1 based from ib core
- * @guid_index: Index in table
+ * @index: = Index in table
  * @gid: Gid to return
  *
  * Return: 0 on success
@@ -296,8 +289,8 @@ static inline struct rvt_ucontext *to_iucontext(struct ib_ucontext
 
 /**
  * rvt_alloc_ucontext - Allocate a user context
- * @ibdev: Verbs IB dev
- * @udata: User data allocated
+ * @ibdev: Vers IB dev
+ * @data: User data allocated
  */
 static struct ib_ucontext *rvt_alloc_ucontext(struct ib_device *ibdev,
 					      struct ib_udata *udata)
@@ -331,14 +324,13 @@ static int rvt_get_port_immutable(struct ib_device *ibdev, u8 port_num,
 	if (port_index < 0)
 		return -EINVAL;
 
-	immutable->core_cap_flags = rdi->dparms.core_cap_flags;
-
-	err = ib_query_port(ibdev, port_num, &attr);
+	err = rvt_query_port(ibdev, port_num, &attr);
 	if (err)
 		return err;
 
 	immutable->pkey_tbl_len = attr.pkey_tbl_len;
 	immutable->gid_tbl_len = attr.gid_tbl_len;
+	immutable->core_cap_flags = rdi->dparms.core_cap_flags;
 	immutable->max_mad_size = rdi->dparms.max_mad_size;
 
 	return 0;
@@ -412,6 +404,7 @@ static noinline int check_support(struct rvt_dev_info *rdi, int verb)
 		 * required for rdmavt to function.
 		 */
 		if ((!rdi->driver_f.port_callback) ||
+		    (!rdi->driver_f.get_card_name) ||
 		    (!rdi->driver_f.get_pci_dev))
 			return -EINVAL;
 		break;
@@ -728,7 +721,7 @@ static noinline int check_support(struct rvt_dev_info *rdi, int verb)
  *
  * Return: 0 on success otherwise an errno.
  */
-int rvt_register_device(struct rvt_dev_info *rdi, u32 driver_id)
+int rvt_register_device(struct rvt_dev_info *rdi)
 {
 	int ret = 0, i;
 
@@ -775,10 +768,15 @@ int rvt_register_device(struct rvt_dev_info *rdi, u32 driver_id)
 	}
 
 	/* Completion queues */
-	spin_lock_init(&rdi->n_cqs_lock);
+	ret = rvt_driver_cq_init(rdi);
+	if (ret) {
+		pr_err("Error in driver CQ init.\n");
+		goto bail_mr;
+	}
 
 	/* DMA Operations */
-	rdi->ibdev.dev.dma_ops = rdi->ibdev.dev.dma_ops ? : &dma_virt_ops;
+	rdi->ibdev.dma_ops =
+		rdi->ibdev.dma_ops ? : &rvt_default_dma_mapping_ops;
 
 	/* Protection Domain */
 	spin_lock_init(&rdi->n_pds_lock);
@@ -823,21 +821,22 @@ int rvt_register_device(struct rvt_dev_info *rdi, u32 driver_id)
 		(1ull << IB_USER_VERBS_CMD_DESTROY_SRQ)         |
 		(1ull << IB_USER_VERBS_CMD_POST_SRQ_RECV);
 	rdi->ibdev.node_type = RDMA_NODE_IB_CA;
-	if (!rdi->ibdev.num_comp_vectors)
-		rdi->ibdev.num_comp_vectors = 1;
+	rdi->ibdev.num_comp_vectors = 1;
 
-	rdi->ibdev.driver_id = driver_id;
 	/* We are now good to announce we exist */
 	ret =  ib_register_device(&rdi->ibdev, rdi->driver_f.port_callback);
 	if (ret) {
 		rvt_pr_err(rdi, "Failed to register driver with ib core.\n");
-		goto bail_mr;
+		goto bail_cq;
 	}
 
 	rvt_create_mad_agents(rdi);
 
 	rvt_pr_info(rdi, "Registration with rdmavt done.\n");
 	return ret;
+
+bail_cq:
+	rvt_cq_exit(rdi);
 
 bail_mr:
 	rvt_mr_exit(rdi);
@@ -862,6 +861,7 @@ void rvt_unregister_device(struct rvt_dev_info *rdi)
 	rvt_free_mad_agents(rdi);
 
 	ib_unregister_device(&rdi->ibdev);
+	rvt_cq_exit(rdi);
 	rvt_mr_exit(rdi);
 	rvt_qp_exit(rdi);
 }

@@ -67,6 +67,24 @@ static const struct pinconf_generic_params max77620_cfg_params[] = {
 	}, {
 		.property = "maxim,suspend-fps-power-down-slot",
 		.param = MAX77620_SUSPEND_FPS_POWER_DOWN_SLOTS,
+	}, {
+		.property = "active-fps-source",
+		.param = MAX77620_ACTIVE_FPS_SOURCE,
+	}, {
+		.property = "active-fps-power-up-slot",
+		.param = MAX77620_ACTIVE_FPS_POWER_ON_SLOTS,
+	}, {
+		.property = "active-fps-power-down-slot",
+		.param = MAX77620_ACTIVE_FPS_POWER_DOWN_SLOTS,
+	}, {
+		.property = "suspend-fps-source",
+		.param = MAX77620_SUSPEND_FPS_SOURCE,
+	}, {
+		.property = "suspend-fps-power-up-slot",
+		.param = MAX77620_SUSPEND_FPS_POWER_ON_SLOTS,
+	}, {
+		.property = "suspend-fps-power-down-slot",
+		.param = MAX77620_SUSPEND_FPS_POWER_DOWN_SLOTS,
 	},
 };
 
@@ -400,7 +418,7 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 	struct device *dev = mpci->dev;
 	struct max77620_fps_config *fps_config;
 	int param;
-	u32 param_val;
+	u16 param_val;
 	unsigned int val;
 	unsigned int pu_val;
 	unsigned int pd_val;
@@ -418,9 +436,11 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret)
-				goto report_update_failure;
-
+			if (ret < 0) {
+				dev_err(dev, "Reg 0x%02x update failed %d\n",
+					MAX77620_REG_GPIO0 + pin, ret);
+				return ret;
+			}
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -431,9 +451,11 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret)
-				goto report_update_failure;
-
+			if (ret < 0) {
+				dev_err(dev, "Reg 0x%02x update failed %d\n",
+					MAX77620_REG_GPIO0 + pin, ret);
+				return ret;
+			}
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -530,11 +552,6 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 	}
 
 	return 0;
-
-report_update_failure:
-	dev_err(dev, "Reg 0x%02x update failed %d\n",
-		MAX77620_REG_GPIO0 + pin, ret);
-	return ret;
 }
 
 static const struct pinconf_ops max77620_pinconf_ops = {

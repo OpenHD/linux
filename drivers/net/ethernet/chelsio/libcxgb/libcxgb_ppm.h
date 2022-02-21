@@ -59,7 +59,7 @@ struct cxgbi_pagepod_hdr {
 #define PPOD_PAGES_MAX			4
 struct cxgbi_pagepod {
 	struct cxgbi_pagepod_hdr hdr;
-	__be64 addr[PPOD_PAGES_MAX + 1];
+	u64 addr[PPOD_PAGES_MAX + 1];
 };
 
 /* ddp tag format

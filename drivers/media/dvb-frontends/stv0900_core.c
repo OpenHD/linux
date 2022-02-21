@@ -17,6 +17,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -1871,13 +1875,14 @@ static int stv0900_get_frontend(struct dvb_frontend *fe,
 	return 0;
 }
 
-static const struct dvb_frontend_ops stv0900_ops = {
+static struct dvb_frontend_ops stv0900_ops = {
 	.delsys = { SYS_DVBS, SYS_DVBS2, SYS_DSS },
 	.info = {
 		.name			= "STV0900 frontend",
-		.frequency_min_hz	=  950 * MHz,
-		.frequency_max_hz	= 2150 * MHz,
-		.frequency_stepsize_hz	=  125 * kHz,
+		.frequency_min		= 950000,
+		.frequency_max		= 2150000,
+		.frequency_stepsize	= 125,
+		.frequency_tolerance	= 0,
 		.symbol_rate_min	= 1000000,
 		.symbol_rate_max	= 45000000,
 		.symbol_rate_tolerance	= 500,
@@ -1928,7 +1933,7 @@ struct dvb_frontend *stv0900_attach(const struct stv0900_config *config,
 	switch (demod) {
 	case 0:
 	case 1:
-		init_params.dmd_ref_clk		= config->xtal;
+		init_params.dmd_ref_clk  	= config->xtal;
 		init_params.demod_mode		= config->demod_mode;
 		init_params.rolloff		= STV0900_35;
 		init_params.path1_ts_clock	= config->path1_mode;

@@ -1,3 +1,4 @@
+generic-y += clkdev.h
 generic-y += div64.h
 generic-y += export.h
 generic-y += irq_regs.h
@@ -7,4 +8,3 @@ generic-y += mcs_spinlock.h
 generic-y += preempt.h
 generic-y += rwsem.h
 generic-y += vtime.h
-generic-y += msi.h

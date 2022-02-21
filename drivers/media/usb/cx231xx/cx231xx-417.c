@@ -18,6 +18,10 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "cx231xx.h"
@@ -29,7 +33,6 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
-#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
@@ -1491,7 +1494,7 @@ static void bb_buf_release(struct videobuf_queue *q,
 	free_buffer(q, buf);
 }
 
-static const struct videobuf_queue_ops cx231xx_qops = {
+static struct videobuf_queue_ops cx231xx_qops = {
 	.buf_setup    = bb_buf_setup,
 	.buf_prepare  = bb_buf_prepare,
 	.buf_queue    = bb_buf_queue,
@@ -1813,20 +1816,20 @@ static ssize_t mpeg_read(struct file *file, char __user *data,
 				    file->f_flags & O_NONBLOCK);
 }
 
-static __poll_t mpeg_poll(struct file *file,
+static unsigned int mpeg_poll(struct file *file,
 	struct poll_table_struct *wait)
 {
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned long req_events = poll_requested_events(wait);
 	struct cx231xx_fh *fh = file->private_data;
 	struct cx231xx *dev = fh->dev;
-	__poll_t res = 0;
+	unsigned int res = 0;
 
 	if (v4l2_event_pending(&fh->fh))
-		res |= EPOLLPRI;
+		res |= POLLPRI;
 	else
 		poll_wait(file, &fh->fh.wait, wait);
 
-	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
+	if (!(req_events & (POLLIN | POLLRDNORM)))
 		return res;
 
 	mutex_lock(&dev->lock);
@@ -1844,7 +1847,7 @@ static int mpeg_mmap(struct file *file, struct vm_area_struct *vma)
 	return videobuf_mmap_mapper(&fh->vidq, vma);
 }
 
-static const struct v4l2_file_operations mpeg_fops = {
+static struct v4l2_file_operations mpeg_fops = {
 	.owner	       = THIS_MODULE,
 	.open	       = mpeg_open,
 	.release       = mpeg_release,

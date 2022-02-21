@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/sleep.S
  *
- * Copyright (c) 2010-2011, NVIDIA Corporation.
+ * Copyright (c) 2010-2016, NVIDIA CORPORATION. All rights reserved.
  * Copyright (c) 2011, Google, Inc.
  *
  * Author: Colin Cross <ccross@android.com>
@@ -23,6 +23,8 @@
  */
 
 #include <linux/linkage.h>
+
+#include <soc/tegra/flowctrl.h>
 
 #include <asm/assembler.h>
 #include <asm/cache.h>

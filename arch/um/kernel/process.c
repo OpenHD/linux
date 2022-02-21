@@ -17,9 +17,6 @@
 #include <linux/random.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
 #include <linux/seq_file.h>
 #include <linux/tick.h>
 #include <linux/threads.h>
@@ -27,7 +24,7 @@
 #include <asm/current.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <as-layout.h>
 #include <kern_util.h>
 #include <os.h>
@@ -253,6 +250,11 @@ int copy_from_user_proc(void *to, void __user *from, int size)
 int clear_user_proc(void __user *buf, int size)
 {
 	return clear_user(buf, size);
+}
+
+int strlen_user_proc(char __user *str)
+{
+	return strlen_user(str);
 }
 
 int cpu(void)

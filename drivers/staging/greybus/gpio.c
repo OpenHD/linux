@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPIO Greybus driver.
  *
  * Copyright 2014 Google Inc.
  * Copyright 2014 Linaro Ltd.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/kernel.h>
@@ -409,21 +410,21 @@ static int gb_gpio_request_handler(struct gb_operation *op)
 	return 0;
 }
 
-static int gb_gpio_request(struct gpio_chip *chip, unsigned int offset)
+static int gb_gpio_request(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
 	return gb_gpio_activate_operation(ggc, (u8)offset);
 }
 
-static void gb_gpio_free(struct gpio_chip *chip, unsigned int offset)
+static void gb_gpio_free(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
 	gb_gpio_deactivate_operation(ggc, (u8)offset);
 }
 
-static int gb_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
+static int gb_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 	u8 which;
@@ -437,22 +438,22 @@ static int gb_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 	return ggc->lines[which].direction ? 1 : 0;
 }
 
-static int gb_gpio_direction_input(struct gpio_chip *chip, unsigned int offset)
+static int gb_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
 	return gb_gpio_direction_in_operation(ggc, (u8)offset);
 }
 
-static int gb_gpio_direction_output(struct gpio_chip *chip, unsigned int offset,
-				    int value)
+static int gb_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
+					int value)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
 	return gb_gpio_direction_out_operation(ggc, (u8)offset, !!value);
 }
 
-static int gb_gpio_get(struct gpio_chip *chip, unsigned int offset)
+static int gb_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 	u8 which;
@@ -466,27 +467,24 @@ static int gb_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return ggc->lines[which].value;
 }
 
-static void gb_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+static void gb_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
 	gb_gpio_set_value_operation(ggc, (u8)offset, !!value);
 }
 
-static int gb_gpio_set_config(struct gpio_chip *chip, unsigned int offset,
-			      unsigned long config)
+static int gb_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
+					unsigned debounce)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
-	u32 debounce;
+	u16 usec;
 
-	if (pinconf_to_config_param(config) != PIN_CONFIG_INPUT_DEBOUNCE)
-		return -ENOTSUPP;
-
-	debounce = pinconf_to_config_argument(config);
 	if (debounce > U16_MAX)
 		return -EINVAL;
+	usec = (u16)debounce;
 
-	return gb_gpio_set_debounce_operation(ggc, (u8)offset, (u16)debounce);
+	return gb_gpio_set_debounce_operation(ggc, (u8)offset, usec);
 }
 
 static int gb_gpio_controller_setup(struct gb_gpio_controller *ggc)
@@ -559,8 +557,7 @@ static void gb_gpio_irqchip_remove(struct gb_gpio_controller *ggc)
 	/* Remove all IRQ mappings and delete the domain */
 	if (ggc->irqdomain) {
 		for (offset = 0; offset < (ggc->line_max + 1); offset++)
-			irq_dispose_mapping(irq_find_mapping(ggc->irqdomain,
-							     offset));
+			irq_dispose_mapping(irq_find_mapping(ggc->irqdomain, offset));
 		irq_domain_remove(ggc->irqdomain);
 	}
 
@@ -596,7 +593,7 @@ static int gb_gpio_irqchip_add(struct gpio_chip *chip,
 {
 	struct gb_gpio_controller *ggc;
 	unsigned int offset;
-	unsigned int irq_base;
+	unsigned irq_base;
 
 	if (!chip || !irqchip)
 		return -EINVAL;
@@ -628,7 +625,7 @@ static int gb_gpio_irqchip_add(struct gpio_chip *chip,
 	return 0;
 }
 
-static int gb_gpio_to_irq(struct gpio_chip *chip, unsigned int offset)
+static int gb_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
 	struct gb_gpio_controller *ggc = gpio_chip_to_gb_gpio_controller(chip);
 
@@ -692,7 +689,7 @@ static int gb_gpio_probe(struct gbphy_device *gbphy_dev,
 	gpio->direction_output = gb_gpio_direction_output;
 	gpio->get = gb_gpio_get;
 	gpio->set = gb_gpio_set;
-	gpio->set_config = gb_gpio_set_config;
+	gpio->set_debounce = gb_gpio_set_debounce;
 	gpio->to_irq = gb_gpio_to_irq;
 	gpio->base = -1;		/* Allocate base dynamically */
 	gpio->ngpio = ggc->line_max + 1;

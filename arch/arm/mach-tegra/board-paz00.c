@@ -23,7 +23,7 @@
 
 #include "board.h"
 
-static struct property_entry wifi_rfkill_prop[] __initdata = {
+static struct property_entry __initdata wifi_rfkill_prop[] = {
 	PROPERTY_ENTRY_STRING("name", "wifi_rfkill"),
 	PROPERTY_ENTRY_STRING("type", "wlan"),
 	{ },

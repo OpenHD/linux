@@ -55,7 +55,6 @@
 		.type	symbol, @function;		\
 		.ent	symbol, 0;			\
 symbol:		.frame	sp, 0, ra;			\
-		.cfi_startproc;				\
 		.insn
 
 /*
@@ -67,14 +66,12 @@ symbol:		.frame	sp, 0, ra;			\
 		.type	symbol, @function;		\
 		.ent	symbol, 0;			\
 symbol:		.frame	sp, framesize, rpc;		\
-		.cfi_startproc;				\
 		.insn
 
 /*
  * END - mark end of function
  */
 #define END(function)					\
-		.cfi_endproc;				\
 		.end	function;			\
 		.size	function, .-function
 

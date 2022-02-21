@@ -73,17 +73,21 @@ bool ocrdma_alloc_stats_resources(struct ocrdma_dev *dev)
 	mem->size = max_t(u32, sizeof(struct ocrdma_rdma_stats_req),
 			sizeof(struct ocrdma_rdma_stats_resp));
 
-	mem->va = dma_zalloc_coherent(&dev->nic_info.pdev->dev, mem->size,
-				      &mem->pa, GFP_KERNEL);
+	mem->va   = dma_alloc_coherent(&dev->nic_info.pdev->dev, mem->size,
+					 &mem->pa, GFP_KERNEL);
 	if (!mem->va) {
 		pr_err("%s: stats mbox allocation failed\n", __func__);
 		return false;
 	}
 
+	memset(mem->va, 0, mem->size);
+
 	/* Alloc debugfs mem */
 	mem->debugfs_mem = kzalloc(OCRDMA_MAX_DBGFS_MEM, GFP_KERNEL);
-	if (!mem->debugfs_mem)
+	if (!mem->debugfs_mem) {
+		pr_err("%s: stats debugfs mem allocation failed\n", __func__);
 		return false;
+	}
 
 	return true;
 }
@@ -656,7 +660,7 @@ static ssize_t ocrdma_dbgfs_ops_write(struct file *filp,
 		if (reset) {
 			status = ocrdma_mbx_rdma_stats(dev, true);
 			if (status) {
-				pr_err("Failed to reset stats = %d\n", status);
+				pr_err("Failed to reset stats = %d", status);
 				goto err;
 			}
 		}

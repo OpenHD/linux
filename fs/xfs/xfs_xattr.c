@@ -1,7 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2008 Christoph Hellwig.
  * Portions Copyright (C) 2000-2008 Silicon Graphics, Inc.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include "xfs.h"
@@ -118,7 +130,7 @@ const struct xattr_handler *xfs_xattr_handlers[] = {
 	NULL
 };
 
-static void
+static int
 __xfs_xattr_put_listent(
 	struct xfs_attr_list_context *context,
 	char *prefix,
@@ -129,9 +141,6 @@ __xfs_xattr_put_listent(
 	char *offset;
 	int arraytop;
 
-	if (context->count < 0 || context->seen_enough)
-		return;
-
 	if (!context->alist)
 		goto compute_size;
 
@@ -139,7 +148,7 @@ __xfs_xattr_put_listent(
 	if (arraytop > context->firstu) {
 		context->count = -1;	/* insufficient space */
 		context->seen_enough = 1;
-		return;
+		return 0;
 	}
 	offset = (char *)context->alist + context->count;
 	strncpy(offset, prefix, prefix_len);
@@ -150,10 +159,10 @@ __xfs_xattr_put_listent(
 
 compute_size:
 	context->count += prefix_len + namelen + 1;
-	return;
+	return 0;
 }
 
-static void
+static int
 xfs_xattr_put_listent(
 	struct xfs_attr_list_context *context,
 	int		flags,
@@ -171,19 +180,23 @@ xfs_xattr_put_listent(
 		if (namelen == SGI_ACL_FILE_SIZE &&
 		    strncmp(name, SGI_ACL_FILE,
 			    SGI_ACL_FILE_SIZE) == 0) {
-			__xfs_xattr_put_listent(
+			int ret = __xfs_xattr_put_listent(
 					context, XATTR_SYSTEM_PREFIX,
 					XATTR_SYSTEM_PREFIX_LEN,
 					XATTR_POSIX_ACL_ACCESS,
 					strlen(XATTR_POSIX_ACL_ACCESS));
+			if (ret)
+				return ret;
 		} else if (namelen == SGI_ACL_DEFAULT_SIZE &&
 			 strncmp(name, SGI_ACL_DEFAULT,
 				 SGI_ACL_DEFAULT_SIZE) == 0) {
-			__xfs_xattr_put_listent(
+			int ret = __xfs_xattr_put_listent(
 					context, XATTR_SYSTEM_PREFIX,
 					XATTR_SYSTEM_PREFIX_LEN,
 					XATTR_POSIX_ACL_DEFAULT,
 					strlen(XATTR_POSIX_ACL_DEFAULT));
+			if (ret)
+				return ret;
 		}
 #endif
 
@@ -192,7 +205,7 @@ xfs_xattr_put_listent(
 		 * see them.
 		 */
 		if (!capable(CAP_SYS_ADMIN))
-			return;
+			return 0;
 
 		prefix = XATTR_TRUSTED_PREFIX;
 		prefix_len = XATTR_TRUSTED_PREFIX_LEN;
@@ -204,9 +217,8 @@ xfs_xattr_put_listent(
 		prefix_len = XATTR_USER_PREFIX_LEN;
 	}
 
-	__xfs_xattr_put_listent(context, prefix, prefix_len, name,
-				namelen);
-	return;
+	return __xfs_xattr_put_listent(context, prefix, prefix_len, name,
+				       namelen);
 }
 
 ssize_t

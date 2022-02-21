@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 
 ccflags-$(CONFIG_PM_DEBUG)	:= -DDEBUG
 
@@ -15,3 +14,5 @@ obj-$(CONFIG_PM_AUTOSLEEP)	+= autosleep.o
 obj-$(CONFIG_PM_WAKELOCKS)	+= wakelock.o
 
 obj-$(CONFIG_MAGIC_SYSRQ)	+= poweroff.o
+
+obj-$(CONFIG_SUSPEND)	+= wakeup_reason.o

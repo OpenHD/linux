@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/init.h>
 #include <linux/linkage.h>
 
@@ -127,8 +126,7 @@
          */
 	.macro	v7m_exception_slow_exit ret_r0
 	cpsid	i
-	ldr	lr, =exc_ret
-	ldr	lr, [lr]
+	ldr	lr, =EXC_RET_THREADMODE_PROCESSSTACK
 
 	@ read original r12, sp, lr, pc and xPSR
 	add	r12, sp, #S_IP

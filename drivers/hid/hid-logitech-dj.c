@@ -517,8 +517,13 @@ static void logi_dj_recv_queue_notification(struct dj_receiver_dev *djrcv_dev,
 					   struct dj_report *dj_report)
 {
 	/* We are called from atomic context (tasklet && djrcv->lock held) */
+	int err;
 
-	kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
+	err = kfifo_in(&djrcv_dev->notif_fifo, dj_report,
+					sizeof(struct dj_report));
+	if (!err)
+		dev_err(&djrcv_dev->hdev->dev,
+			"kfifo_in failed = %d\n", err);
 
 	if (schedule_work(&djrcv_dev->work) == 0) {
 		dbg_hid("%s: did not schedule the work item, was already "
@@ -692,12 +697,8 @@ static void logi_dj_ll_close(struct hid_device *hid)
 	dbg_hid("%s:%s\n", __func__, hid->phys);
 }
 
-/*
- * Register 0xB5 is "pairing information". It is solely intended for the
- * receiver, so do not overwrite the device index.
- */
-static u8 unifying_pairing_query[]  = {0x10, 0xff, 0x83, 0xb5};
-static u8 unifying_pairing_answer[] = {0x11, 0xff, 0x83, 0xb5};
+static u8 unifying_name_query[]  = {0x10, 0xff, 0x83, 0xb5, 0x40, 0x00, 0x00};
+static u8 unifying_name_answer[] = {0x11, 0xff, 0x83, 0xb5};
 
 static int logi_dj_ll_raw_request(struct hid_device *hid,
 				  unsigned char reportnum, __u8 *buf,
@@ -716,9 +717,9 @@ static int logi_dj_ll_raw_request(struct hid_device *hid,
 
 		/* special case where we should not overwrite
 		 * the device_index */
-		if (count == 7 && !memcmp(buf, unifying_pairing_query,
-					  sizeof(unifying_pairing_query)))
-			buf[4] = (buf[4] & 0xf0) | (djdev->device_index - 1);
+		if (count == 7 && !memcmp(buf, unifying_name_query,
+					  sizeof(unifying_name_query)))
+			buf[4] |= djdev->device_index - 1;
 		else
 			buf[1] = djdev->device_index;
 		return hid_hw_raw_request(djrcv_dev->hdev, reportnum, buf,
@@ -915,8 +916,9 @@ static int logi_dj_hidpp_event(struct hid_device *hdev,
 		/* special case were the device wants to know its unifying
 		 * name */
 		if (size == HIDPP_REPORT_LONG_LENGTH &&
-		    !memcmp(data, unifying_pairing_answer,
-			    sizeof(unifying_pairing_answer)))
+		    !memcmp(data, unifying_name_answer,
+			    sizeof(unifying_name_answer)) &&
+		    ((data[4] & 0xF0) == 0x40))
 			device_index = (data[4] & 0x0F) + 1;
 		else
 			return false;

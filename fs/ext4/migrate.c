@@ -1,7 +1,14 @@
-// SPDX-License-Identifier: LGPL-2.1
 /*
  * Copyright IBM Corporation, 2007
  * Author Aneesh Kumar K.V <aneesh.kumar@linux.vnet.ibm.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2.1 of the GNU Lesser General Public License
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it would be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *
  */
 
@@ -116,9 +123,9 @@ static int update_ind_extent_range(handle_t *handle, struct inode *inode,
 	int i, retval = 0;
 	unsigned long max_entries = inode->i_sb->s_blocksize >> 2;
 
-	bh = ext4_sb_bread(inode->i_sb, pblock, 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, pblock);
+	if (!bh)
+		return -EIO;
 
 	i_data = (__le32 *)bh->b_data;
 	for (i = 0; i < max_entries; i++) {
@@ -145,9 +152,9 @@ static int update_dind_extent_range(handle_t *handle, struct inode *inode,
 	int i, retval = 0;
 	unsigned long max_entries = inode->i_sb->s_blocksize >> 2;
 
-	bh = ext4_sb_bread(inode->i_sb, pblock, 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, pblock);
+	if (!bh)
+		return -EIO;
 
 	i_data = (__le32 *)bh->b_data;
 	for (i = 0; i < max_entries; i++) {
@@ -175,9 +182,9 @@ static int update_tind_extent_range(handle_t *handle, struct inode *inode,
 	int i, retval = 0;
 	unsigned long max_entries = inode->i_sb->s_blocksize >> 2;
 
-	bh = ext4_sb_bread(inode->i_sb, pblock, 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, pblock);
+	if (!bh)
+		return -EIO;
 
 	i_data = (__le32 *)bh->b_data;
 	for (i = 0; i < max_entries; i++) {
@@ -224,9 +231,9 @@ static int free_dind_blocks(handle_t *handle,
 	struct buffer_head *bh;
 	unsigned long max_entries = inode->i_sb->s_blocksize >> 2;
 
-	bh = ext4_sb_bread(inode->i_sb, le32_to_cpu(i_data), 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, le32_to_cpu(i_data));
+	if (!bh)
+		return -EIO;
 
 	tmp_idata = (__le32 *)bh->b_data;
 	for (i = 0; i < max_entries; i++) {
@@ -254,9 +261,9 @@ static int free_tind_blocks(handle_t *handle,
 	struct buffer_head *bh;
 	unsigned long max_entries = inode->i_sb->s_blocksize >> 2;
 
-	bh = ext4_sb_bread(inode->i_sb, le32_to_cpu(i_data), 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, le32_to_cpu(i_data));
+	if (!bh)
+		return -EIO;
 
 	tmp_idata = (__le32 *)bh->b_data;
 	for (i = 0; i < max_entries; i++) {
@@ -382,9 +389,9 @@ static int free_ext_idx(handle_t *handle, struct inode *inode,
 	struct ext4_extent_header *eh;
 
 	block = ext4_idx_pblock(ix);
-	bh = ext4_sb_bread(inode->i_sb, block, 0);
-	if (IS_ERR(bh))
-		return PTR_ERR(bh);
+	bh = sb_bread(inode->i_sb, block);
+	if (!bh)
+		return -EIO;
 
 	eh = (struct ext4_extent_header *)bh->b_data;
 	if (eh->eh_depth != 0) {
@@ -427,6 +434,7 @@ static int free_ext_block(handle_t *handle, struct inode *inode)
 
 int ext4_ext_migrate(struct inode *inode)
 {
+	struct ext4_sb_info *sbi = EXT4_SB(inode->i_sb);
 	handle_t *handle;
 	int retval = 0, i;
 	__le32 *i_data;
@@ -451,6 +459,8 @@ int ext4_ext_migrate(struct inode *inode)
 		 */
 		return retval;
 
+	percpu_down_write(&sbi->s_writepages_rwsem);
+
 	/*
 	 * Worst case we can touch the allocation bitmaps, a bgd
 	 * block, and a block to link in the orphan list.  We do need
@@ -461,18 +471,18 @@ int ext4_ext_migrate(struct inode *inode)
 
 	if (IS_ERR(handle)) {
 		retval = PTR_ERR(handle);
-		return retval;
+		goto out_unlock;
 	}
 	goal = (((inode->i_ino - 1) / EXT4_INODES_PER_GROUP(inode->i_sb)) *
 		EXT4_INODES_PER_GROUP(inode->i_sb)) + 1;
 	owner[0] = i_uid_read(inode);
 	owner[1] = i_gid_read(inode);
 	tmp_inode = ext4_new_inode(handle, d_inode(inode->i_sb->s_root),
-				   S_IFREG, NULL, goal, owner, 0);
+				   S_IFREG, NULL, goal, owner);
 	if (IS_ERR(tmp_inode)) {
 		retval = PTR_ERR(tmp_inode);
 		ext4_journal_stop(handle);
-		return retval;
+		goto out_unlock;
 	}
 	i_size_write(tmp_inode, i_size_read(inode));
 	/*
@@ -514,7 +524,7 @@ int ext4_ext_migrate(struct inode *inode)
 		 */
 		ext4_orphan_del(NULL, tmp_inode);
 		retval = PTR_ERR(handle);
-		goto out;
+		goto out_tmp_inode;
 	}
 
 	ei = EXT4_I(inode);
@@ -595,10 +605,11 @@ err_out:
 	/* Reset the extent details */
 	ext4_ext_tree_init(handle, tmp_inode);
 	ext4_journal_stop(handle);
-out:
+out_tmp_inode:
 	unlock_new_inode(tmp_inode);
 	iput(tmp_inode);
-
+out_unlock:
+	percpu_up_write(&sbi->s_writepages_rwsem);
 	return retval;
 }
 
@@ -608,7 +619,8 @@ out:
 int ext4_ind_migrate(struct inode *inode)
 {
 	struct ext4_extent_header	*eh;
-	struct ext4_super_block		*es = EXT4_SB(inode->i_sb)->s_es;
+	struct ext4_sb_info		*sbi = EXT4_SB(inode->i_sb);
+	struct ext4_super_block		*es = sbi->s_es;
 	struct ext4_inode_info		*ei = EXT4_I(inode);
 	struct ext4_extent		*ex;
 	unsigned int			i, len;
@@ -632,9 +644,13 @@ int ext4_ind_migrate(struct inode *inode)
 	if (test_opt(inode->i_sb, DELALLOC))
 		ext4_alloc_da_blocks(inode);
 
+	percpu_down_write(&sbi->s_writepages_rwsem);
+
 	handle = ext4_journal_start(inode, EXT4_HT_MIGRATE, 1);
-	if (IS_ERR(handle))
-		return PTR_ERR(handle);
+	if (IS_ERR(handle)) {
+		ret = PTR_ERR(handle);
+		goto out_unlock;
+	}
 
 	down_write(&EXT4_I(inode)->i_data_sem);
 	ret = ext4_ext_check_inode(inode);
@@ -669,5 +685,7 @@ int ext4_ind_migrate(struct inode *inode)
 errout:
 	ext4_journal_stop(handle);
 	up_write(&EXT4_I(inode)->i_data_sem);
+out_unlock:
+	percpu_up_write(&sbi->s_writepages_rwsem);
 	return ret;
 }

@@ -95,7 +95,7 @@ void __init arm_dt_init_cpu_maps(void)
 		if (of_node_cmp(cpu->type, "cpu"))
 			continue;
 
-		pr_debug(" * %pOF...\n", cpu);
+		pr_debug(" * %s...\n", cpu->full_name);
 		/*
 		 * A device tree containing CPU nodes with missing "reg"
 		 * properties is considered invalid to build the
@@ -103,7 +103,8 @@ void __init arm_dt_init_cpu_maps(void)
 		 */
 		cell = of_get_property(cpu, "reg", &prop_bytes);
 		if (!cell || prop_bytes < sizeof(*cell)) {
-			pr_debug(" * %pOF missing reg property\n", cpu);
+			pr_debug(" * %s missing reg property\n",
+				     cpu->full_name);
 			of_node_put(cpu);
 			return;
 		}

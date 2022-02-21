@@ -1,12 +1,27 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// S3C2442 Machine Support for Openmoko GTA02 / FreeRunner.
-//
-// Copyright (C) 2006-2009 by Openmoko, Inc.
-// Authors: Harald Welte <laforge@openmoko.org>
-//          Andy Green <andy@openmoko.org>
-//          Werner Almesberger <werner@openmoko.org>
-// All rights reserved.
+/*
+ * S3C2442 Machine Support for Openmoko GTA02 / FreeRunner.
+ *
+ * Copyright (C) 2006-2009 by Openmoko, Inc.
+ * Authors: Harald Welte <laforge@openmoko.org>
+ *          Andy Green <andy@openmoko.org>
+ *          Werner Almesberger <werner@openmoko.org>
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ * MA 02111-1307 USA
+ */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -35,7 +50,7 @@
 #include <linux/mfd/pcf50633/pmic.h>
 
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/rawnand.h>
+#include <linux/mtd/nand.h>
 #include <linux/mtd/nand_ecc.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
@@ -428,7 +443,6 @@ static struct s3c2410_platform_nand __initdata gta02_nand_info = {
 	.twrph1		= 15,
 	.nr_sets	= ARRAY_SIZE(gta02_nand_sets),
 	.sets		= gta02_nand_sets,
-	.ecc_mode       = NAND_ECC_SOFT,
 };
 
 

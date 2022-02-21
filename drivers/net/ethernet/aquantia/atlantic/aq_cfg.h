@@ -16,7 +16,7 @@
 #define AQ_CFG_TCS_DEF    1U
 
 #define AQ_CFG_TXDS_DEF    4096U
-#define AQ_CFG_RXDS_DEF    1024U
+#define AQ_CFG_RXDS_DEF    2048U
 
 #define AQ_CFG_IS_POLLING_DEF 0U
 
@@ -34,16 +34,18 @@
 #define AQ_CFG_TCS_MAX    8U
 
 #define AQ_CFG_TX_FRAME_MAX  (16U * 1024U)
-#define AQ_CFG_RX_FRAME_MAX  (4U * 1024U)
+#define AQ_CFG_RX_FRAME_MAX  (2U * 1024U)
 
 #define AQ_CFG_TX_CLEAN_BUDGET 256U
+
+#define AQ_CFG_RX_HDR_SIZE 256U
 
 /* LRO */
 #define AQ_CFG_IS_LRO_DEF           1U
 
 /* RSS */
-#define AQ_CFG_RSS_INDIRECTION_TABLE_MAX  64U
-#define AQ_CFG_RSS_HASHKEY_SIZE           40U
+#define AQ_CFG_RSS_INDIRECTION_TABLE_MAX  128U
+#define AQ_CFG_RSS_HASHKEY_SIZE           320U
 
 #define AQ_CFG_IS_RSS_DEF           1U
 #define AQ_CFG_NUM_RSS_QUEUES_DEF   AQ_CFG_VECS_DEF
@@ -73,10 +75,20 @@
 
 #define AQ_CFG_FC_MODE AQ_NIC_FC_FULL
 
+/* Default WOL mode used on initialization */
+#define AQ_CFG_WOL_MODE AQ_NIC_WOL_ENABLED
+
 #define AQ_CFG_SPEED_MSK  0xFFFFU	/* 0xFFFFU==auto_neg */
 
 #define AQ_CFG_IS_AUTONEG_DEF       1U
 #define AQ_CFG_MTU_DEF              1514U
+
+/* When defined, driver ensures fastest link up time
+ * on start and on ifup. Full hardware reset sequence
+ * is skipped in that case, we rely on existing FW state.
+ *
+ * #define AQ_CFG_FAST_START
+ */
 
 #define AQ_CFG_LOCK_TRYS   100U
 

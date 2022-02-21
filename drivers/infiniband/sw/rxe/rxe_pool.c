@@ -102,7 +102,7 @@ struct rxe_type_info rxe_type_info[RXE_NUM_TYPES] = {
 	},
 };
 
-static inline const char *pool_name(struct rxe_pool *pool)
+static inline char *pool_name(struct rxe_pool *pool)
 {
 	return rxe_type_info[pool->type].name;
 }
@@ -112,16 +112,11 @@ static inline struct kmem_cache *pool_cache(struct rxe_pool *pool)
 	return rxe_type_info[pool->type].cache;
 }
 
-static void rxe_cache_clean(size_t cnt)
+static inline enum rxe_elem_type rxe_type(void *arg)
 {
-	int i;
-	struct rxe_type_info *type;
+	struct rxe_pool_entry *elem = arg;
 
-	for (i = 0; i < cnt; i++) {
-		type = &rxe_type_info[i];
-		kmem_cache_destroy(type->cache);
-		type->cache = NULL;
-	}
+	return elem->pool->type;
 }
 
 int rxe_cache_init(void)
@@ -148,14 +143,24 @@ int rxe_cache_init(void)
 	return 0;
 
 err1:
-	rxe_cache_clean(i);
+	while (--i >= 0) {
+		kmem_cache_destroy(type->cache);
+		type->cache = NULL;
+	}
 
 	return err;
 }
 
 void rxe_cache_exit(void)
 {
-	rxe_cache_clean(RXE_NUM_TYPES);
+	int i;
+	struct rxe_type_info *type;
+
+	for (i = 0; i < RXE_NUM_TYPES; i++) {
+		type = &rxe_type_info[i];
+		kmem_cache_destroy(type->cache);
+		type->cache = NULL;
+	}
 }
 
 static int rxe_pool_init_index(struct rxe_pool *pool, u32 max, u32 min)
@@ -175,6 +180,7 @@ static int rxe_pool_init_index(struct rxe_pool *pool, u32 max, u32 min)
 	size = BITS_TO_LONGS(max - min + 1) * sizeof(long);
 	pool->table = kmalloc(size, GFP_KERNEL);
 	if (!pool->table) {
+		pr_warn("no memory for bit table\n");
 		err = -ENOMEM;
 		goto out;
 	}
@@ -190,7 +196,7 @@ int rxe_pool_init(
 	struct rxe_dev		*rxe,
 	struct rxe_pool		*pool,
 	enum rxe_elem_type	type,
-	unsigned int		max_elem)
+	unsigned		max_elem)
 {
 	int			err = 0;
 	size_t			size = rxe_type_info[type].size;
@@ -461,7 +467,7 @@ void *rxe_pool_get_index(struct rxe_pool *pool, u32 index)
 
 out:
 	spin_unlock_irqrestore(&pool->pool_lock, flags);
-	return node ? elem : NULL;
+	return node ? (void *)elem : NULL;
 }
 
 void *rxe_pool_get_key(struct rxe_pool *pool, void *key)
@@ -497,5 +503,5 @@ void *rxe_pool_get_key(struct rxe_pool *pool, void *key)
 
 out:
 	spin_unlock_irqrestore(&pool->pool_lock, flags);
-	return node ? elem : NULL;
+	return node ? ((void *)elem) : NULL;
 }

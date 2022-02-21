@@ -19,9 +19,6 @@
 #include <linux/mISDNif.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
-#include <linux/sched/cputime.h>
-#include <linux/signal.h>
-
 #include "core.h"
 
 static u_int	*debug;
@@ -206,7 +203,7 @@ mISDNStackd(void *data)
 {
 	struct mISDNstack *st = data;
 #ifdef MISDN_MSG_STATS
-	u64 utime, stime;
+	cputime_t utime, stime;
 #endif
 	int err = 0;
 
@@ -311,7 +308,7 @@ mISDNStackd(void *data)
 	       st->stopped_cnt);
 	task_cputime(st->thread, &utime, &stime);
 	printk(KERN_DEBUG
-	       "mISDNStackd daemon for %s utime(%llu) stime(%llu)\n",
+	       "mISDNStackd daemon for %s utime(%ld) stime(%ld)\n",
 	       dev_name(&st->dev->dev), utime, stime);
 	printk(KERN_DEBUG
 	       "mISDNStackd daemon for %s nvcsw(%ld) nivcsw(%ld)\n",
@@ -539,7 +536,6 @@ create_l2entity(struct mISDNdevice *dev, struct mISDNchannel *ch,
 		rq.protocol = ISDN_P_NT_S0;
 		if (dev->Dprotocols & (1 << ISDN_P_NT_E1))
 			rq.protocol = ISDN_P_NT_E1;
-		/* fall through */
 	case ISDN_P_LAPD_TE:
 		ch->recv = mISDN_queue_message;
 		ch->peer = &dev->D.st->own;

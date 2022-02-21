@@ -1,22 +1,20 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the kernel USB device drivers.
 #
 
 # Object files in subdirectories
 
+subdir-ccflags-y += -Werror
 obj-$(CONFIG_USB)		+= core/
 obj-$(CONFIG_USB_SUPPORT)	+= phy/
 
-obj-$(CONFIG_USB_DWCOTG)	+= host/
 obj-$(CONFIG_USB_DWC3)		+= dwc3/
 obj-$(CONFIG_USB_DWC2)		+= dwc2/
 obj-$(CONFIG_USB_ISP1760)	+= isp1760/
 
 obj-$(CONFIG_USB_MON)		+= mon/
-obj-$(CONFIG_USB_MTU3)		+= mtu3/
 
-obj-$(CONFIG_USB_PCI)		+= host/
+obj-$(CONFIG_PCI)		+= host/
 obj-$(CONFIG_USB_EHCI_HCD)	+= host/
 obj-$(CONFIG_USB_ISP116X_HCD)	+= host/
 obj-$(CONFIG_USB_OHCI_HCD)	+= host/
@@ -51,7 +49,7 @@ obj-$(CONFIG_USB_MICROTEK)	+= image/
 obj-$(CONFIG_USB_SERIAL)	+= serial/
 
 obj-$(CONFIG_USB)		+= misc/
-obj-$(CONFIG_EARLY_PRINTK_USB)	+= early/
+obj-$(CONFIG_EARLY_PRINTK_DBGP)	+= early/
 
 obj-$(CONFIG_USB_ATM)		+= atm/
 obj-$(CONFIG_USB_SPEEDTOUCH)	+= atm/
@@ -66,5 +64,3 @@ obj-$(CONFIG_USB_COMMON)	+= common/
 obj-$(CONFIG_USBIP_CORE)	+= usbip/
 
 obj-$(CONFIG_TYPEC)		+= typec/
-
-obj-$(CONFIG_USB_ROLE_SWITCH)	+= roles/

@@ -49,37 +49,37 @@
 const struct aq_hw_caps_s hw_atl_a0_caps_aqc100 = {
 	DEFAULT_A0_BOARD_BASIC_CAPABILITIES,
 	.media_type = AQ_HW_MEDIA_TYPE_FIBRE,
-	.link_speed_msk = HW_ATL_A0_RATE_5G  |
-			  HW_ATL_A0_RATE_2G5 |
-			  HW_ATL_A0_RATE_1G  |
-			  HW_ATL_A0_RATE_100M,
+	.link_speed_msk = AQ_NIC_RATE_5G|
+			  AQ_NIC_RATE_2GS|
+			  AQ_NIC_RATE_1G|
+			  AQ_NIC_RATE_100M,
 };
 
 const struct aq_hw_caps_s hw_atl_a0_caps_aqc107 = {
 	DEFAULT_A0_BOARD_BASIC_CAPABILITIES,
 	.media_type = AQ_HW_MEDIA_TYPE_TP,
-	.link_speed_msk = HW_ATL_A0_RATE_10G |
-			  HW_ATL_A0_RATE_5G  |
-			  HW_ATL_A0_RATE_2G5 |
-			  HW_ATL_A0_RATE_1G  |
-			  HW_ATL_A0_RATE_100M,
+	.link_speed_msk = AQ_NIC_RATE_10G|
+			  AQ_NIC_RATE_5G|
+			  AQ_NIC_RATE_2GS|
+			  AQ_NIC_RATE_1G|
+			  AQ_NIC_RATE_100M,
 };
 
 const struct aq_hw_caps_s hw_atl_a0_caps_aqc108 = {
 	DEFAULT_A0_BOARD_BASIC_CAPABILITIES,
 	.media_type = AQ_HW_MEDIA_TYPE_TP,
-	.link_speed_msk = HW_ATL_A0_RATE_5G  |
-			  HW_ATL_A0_RATE_2G5 |
-			  HW_ATL_A0_RATE_1G  |
-			  HW_ATL_A0_RATE_100M,
+	.link_speed_msk = AQ_NIC_RATE_5G|
+			  AQ_NIC_RATE_2GS|
+			  AQ_NIC_RATE_1G|
+			  AQ_NIC_RATE_100M,
 };
 
 const struct aq_hw_caps_s hw_atl_a0_caps_aqc109 = {
 	DEFAULT_A0_BOARD_BASIC_CAPABILITIES,
 	.media_type = AQ_HW_MEDIA_TYPE_TP,
-	.link_speed_msk = HW_ATL_A0_RATE_2G5 |
-			  HW_ATL_A0_RATE_1G  |
-			  HW_ATL_A0_RATE_100M,
+	.link_speed_msk = AQ_NIC_RATE_2GS|
+			  AQ_NIC_RATE_1G|
+			  AQ_NIC_RATE_100M,
 };
 
 static int hw_atl_a0_hw_reset(struct aq_hw_s *self)
@@ -207,8 +207,8 @@ static int hw_atl_a0_hw_rss_set(struct aq_hw_s *self,
 	u32 i = 0U;
 	u32 num_rss_queues = max(1U, self->aq_nic_cfg->num_rss_queues);
 	int err = 0;
-	u16 bitary[1 + (HW_ATL_A0_RSS_REDIRECTION_MAX *
-		   HW_ATL_A0_RSS_REDIRECTION_BITS / 16U)];
+	u16 bitary[(HW_ATL_A0_RSS_REDIRECTION_MAX *
+					HW_ATL_A0_RSS_REDIRECTION_BITS / 16U)];
 
 	memset(bitary, 0, sizeof(bitary));
 
@@ -284,7 +284,7 @@ static int hw_atl_a0_hw_init_rx_path(struct aq_hw_s *self)
 
 	/* RSS Ring selection */
 	hw_atl_reg_rx_flr_rss_control1set(self, cfg->is_rss ?
-					0xB3333333U : 0x00000000U);
+					  0xB3333333U : 0x00000000U);
 
 	/* Multicast filters */
 	for (i = HW_ATL_A0_MAC_MAX; i--;) {
@@ -325,7 +325,7 @@ static int hw_atl_a0_hw_mac_addr_set(struct aq_hw_s *self, u8 *mac_addr)
 	}
 	h = (mac_addr[0] << 8) | (mac_addr[1]);
 	l = (mac_addr[2] << 24) | (mac_addr[3] << 16) |
-		(mac_addr[4] << 8) | mac_addr[5];
+	    (mac_addr[4] << 8) | mac_addr[5];
 
 	hw_atl_rpfl2_uc_flr_en_set(self, 0U, HW_ATL_A0_MAC);
 	hw_atl_rpfl2unicast_dest_addresslsw_set(self, l, HW_ATL_A0_MAC);
@@ -451,22 +451,19 @@ static int hw_atl_a0_hw_ring_tx_xmit(struct aq_hw_s *self,
 				HW_ATL_A0_TXD_CTL_CMD_TCP |
 				HW_ATL_A0_TXD_CTL_DESC_TYPE_TXC;
 			txd->ctl2 |= (buff->mss << 16) |
-				(buff->len_l4 << 8) |
-				(buff->len_l3 >> 1);
+				     (buff->len_l4 << 8) |
+				     (buff->len_l3 >> 1);
 
 			pkt_len -= (buff->len_l4 +
 				    buff->len_l3 +
 				    buff->len_l2);
 			is_gso = true;
-
-			if (buff->is_ipv6)
-				txd->ctl |= HW_ATL_A0_TXD_CTL_CMD_IPV6;
 		} else {
 			buff_pa_len = buff->len;
 
 			txd->buf_addr = buff->pa;
 			txd->ctl |= (HW_ATL_A0_TXD_CTL_BLEN &
-						((u32)buff_pa_len << 4));
+				     ((u32)buff_pa_len << 4));
 			txd->ctl |= HW_ATL_A0_TXD_CTL_DESC_TYPE_TXD;
 			/* PAY_LEN */
 			txd->ctl2 |= HW_ATL_A0_TXD_CTL2_LEN & (pkt_len << 14);
@@ -486,7 +483,6 @@ static int hw_atl_a0_hw_ring_tx_xmit(struct aq_hw_s *self,
 			if (unlikely(buff->is_eop)) {
 				txd->ctl |= HW_ATL_A0_TXD_CTL_EOP;
 				txd->ctl |= HW_ATL_A0_TXD_CTL_CMD_WB;
-				is_gso = false;
 			}
 		}
 
@@ -610,8 +606,6 @@ err_exit:
 static int hw_atl_a0_hw_ring_rx_receive(struct aq_hw_s *self,
 					struct aq_ring_s *ring)
 {
-	struct device *ndev = aq_nic_get_dev(ring->aq_nic);
-
 	for (; ring->hw_head != ring->sw_tail;
 		ring->hw_head = aq_ring_next_dx(ring, ring->hw_head)) {
 		struct aq_ring_buff_s *buff = NULL;
@@ -678,8 +672,6 @@ static int hw_atl_a0_hw_ring_rx_receive(struct aq_hw_s *self,
 		is_err &= ~0x18U;
 		is_err &= ~0x04U;
 
-		dma_unmap_page(ndev, buff->pa, buff->len, DMA_FROM_DEVICE);
-
 		if (is_err || rxd_wb->type & 0x1000U) {
 			/* status error or DMA error */
 			buff->is_error = 1U;
@@ -697,9 +689,9 @@ static int hw_atl_a0_hw_ring_rx_receive(struct aq_hw_s *self,
 
 			if (HW_ATL_A0_RXD_WB_STAT2_EOP & rxd_wb->status) {
 				buff->len = rxd_wb->pkt_len %
-					AQ_CFG_RX_FRAME_MAX;
+					    AQ_CFG_RX_FRAME_MAX;
 				buff->len = buff->len ?
-					buff->len : AQ_CFG_RX_FRAME_MAX;
+					    buff->len : AQ_CFG_RX_FRAME_MAX;
 				buff->next = 0U;
 				buff->is_eop = 1U;
 			} else {
@@ -717,7 +709,7 @@ static int hw_atl_a0_hw_ring_rx_receive(struct aq_hw_s *self,
 static int hw_atl_a0_hw_irq_enable(struct aq_hw_s *self, u64 mask)
 {
 	hw_atl_itr_irq_msk_setlsw_set(self, LODWORD(mask) |
-			       (1U << HW_ATL_A0_ERR_INT));
+			              (1U << HW_ATL_A0_ERR_INT));
 	return aq_hw_err_from_flags(self);
 }
 
@@ -783,7 +775,7 @@ static int hw_atl_a0_hw_multicast_list_set(struct aq_hw_s *self,
 		u32 i = self->aq_nic_cfg->mc_list_count;
 		u32 h = (ar_mac[i][0] << 8) | (ar_mac[i][1]);
 		u32 l = (ar_mac[i][2] << 24) | (ar_mac[i][3] << 16) |
-					(ar_mac[i][4] << 8) | ar_mac[i][5];
+			(ar_mac[i][4] << 8) | ar_mac[i][5];
 
 		hw_atl_rpfl2_uc_flr_en_set(self, 0U, HW_ATL_A0_MAC_MIN + i);
 
@@ -877,7 +869,6 @@ static int hw_atl_a0_hw_ring_rx_stop(struct aq_hw_s *self,
 const struct aq_hw_ops hw_atl_ops_a0 = {
 	.hw_set_mac_address   = hw_atl_a0_hw_mac_addr_set,
 	.hw_init              = hw_atl_a0_hw_init,
-	.hw_set_power         = hw_atl_utils_hw_set_power,
 	.hw_reset             = hw_atl_a0_hw_reset,
 	.hw_start             = hw_atl_a0_hw_start,
 	.hw_ring_tx_start     = hw_atl_a0_hw_ring_tx_start,

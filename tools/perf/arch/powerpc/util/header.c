@@ -1,6 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <sys/types.h>
-#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,11 +30,11 @@ get_cpuid(char *buffer, size_t sz)
 		buffer[nb-1] = '\0';
 		return 0;
 	}
-	return ENOBUFS;
+	return -1;
 }
 
 char *
-get_cpuid_str(struct perf_pmu *pmu __maybe_unused)
+get_cpuid_str(void)
 {
 	char *bufp;
 

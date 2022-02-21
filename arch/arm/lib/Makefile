@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # linux/arch/arm/lib/Makefile
 #
@@ -7,8 +6,8 @@
 
 lib-y		:= backtrace.o changebit.o csumipv6.o csumpartial.o   \
 		   csumpartialcopy.o csumpartialcopyuser.o clearbit.o \
-		   delay.o delay-loop.o findbit.o memchr.o            \
-		   setbit.o                                           \
+		   delay.o delay-loop.o findbit.o memchr.o memcpy.o   \
+		   memmove.o memset.o memzero.o setbit.o              \
 		   strchr.o strrchr.o                                 \
 		   testchangebit.o testclearbit.o testsetbit.o        \
 		   ashldi3.o ashrdi3.o lshrdi3.o muldi3.o             \
@@ -18,16 +17,6 @@ lib-y		:= backtrace.o changebit.o csumipv6.o csumpartial.o   \
 
 mmu-y		:= clear_user.o copy_page.o getuser.o putuser.o       \
 		   copy_from_user.o copy_to_user.o
-
-# Choose optimised implementations for Raspberry Pi
-ifeq ($(CONFIG_BCM2835_FAST_MEMCPY),y)
-  CFLAGS_uaccess_with_memcpy.o += -DCOPY_FROM_USER_THRESHOLD=1600
-  CFLAGS_uaccess_with_memcpy.o += -DCOPY_TO_USER_THRESHOLD=672
-  obj-$(CONFIG_MODULES) += exports_rpi.o
-  lib-y        += memcpy_rpi.o memmove_rpi.o memset_rpi.o memcmp_rpi.o
-else
-  lib-y        += memcpy.o memmove.o memset.o
-endif
 
 # using lib_ here won't override already available weak symbols
 obj-$(CONFIG_UACCESS_WITH_MEMCPY) += uaccess_with_memcpy.o

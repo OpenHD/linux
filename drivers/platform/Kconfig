@@ -9,4 +9,6 @@ source "drivers/platform/goldfish/Kconfig"
 
 source "drivers/platform/chrome/Kconfig"
 
-source "drivers/platform/mellanox/Kconfig"
+if ARCH_TEGRA
+source "drivers/platform/tegra/Kconfig"
+endif

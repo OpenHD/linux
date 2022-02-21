@@ -1,5 +1,4 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
 #
 # Benchmark script:
 #  - developed for benchmarking egress qdisc path, derived (more
@@ -23,16 +22,16 @@ fi
 if [[ -n "$BURST" ]]; then
     err 1 "Bursting not supported for this mode"
 fi
-[ -z "$COUNT" ] && COUNT="10000000" # Zero means indefinitely
 
 # Base Config
 DELAY="0"        # Zero means max speed
+COUNT="10000000" # Zero means indefinitely
 
 # General cleanup everything since last run
 pg_ctrl "reset"
 
 # Threads are specified with parameter -t value in $THREADS
-for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
+for ((thread = 0; thread < $THREADS; thread++)); do
     # The device name is extended with @name, using thread number to
     # make then unique, but any name will do.
     dev=${DEV}@${thread}
@@ -62,7 +61,7 @@ pg_ctrl "start"
 echo "Done" >&2
 
 # Print results
-for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
+for ((thread = 0; thread < $THREADS; thread++)); do
     dev=${DEV}@${thread}
     echo "Device: $dev"
     cat /proc/net/pktgen/$dev | grep -A2 "Result:"

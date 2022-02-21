@@ -289,7 +289,7 @@ static int pcf2123_rtc_read_time(struct device *dev, struct rtc_time *tm)
 			tm->tm_sec, tm->tm_min, tm->tm_hour,
 			tm->tm_mday, tm->tm_mon, tm->tm_year, tm->tm_wday);
 
-	return 0;
+	return rtc_valid_tm(tm);
 }
 
 static int pcf2123_rtc_set_time(struct device *dev, struct rtc_time *tm)
@@ -472,4 +472,3 @@ module_spi_driver(pcf2123_driver);
 MODULE_AUTHOR("Chris Verges <chrisv@cyberswitching.com>");
 MODULE_DESCRIPTION("NXP PCF2123 RTC driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("spi:rtc-pcf2123");

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * (C) 2001 Clemson University and The University of Chicago
  *
@@ -36,19 +35,6 @@ static const match_table_t tokens = {
 
 uint64_t orangefs_features;
 
-static int orangefs_show_options(struct seq_file *m, struct dentry *root)
-{
-	struct orangefs_sb_info_s *orangefs_sb = ORANGEFS_SB(root->d_sb);
-
-	if (root->d_sb->s_flags & SB_POSIXACL)
-		seq_puts(m, ",acl");
-	if (orangefs_sb->flags & ORANGEFS_OPT_INTR)
-		seq_puts(m, ",intr");
-	if (orangefs_sb->flags & ORANGEFS_OPT_LOCAL_LOCK)
-		seq_puts(m, ",local_lock");
-	return 0;
-}
-
 static int parse_mount_options(struct super_block *sb, char *options,
 		int silent)
 {
@@ -60,7 +46,7 @@ static int parse_mount_options(struct super_block *sb, char *options,
 	 * Force any potential flags that might be set from the mount
 	 * to zero, ie, initialize to unset.
 	 */
-	sb->s_flags &= ~SB_POSIXACL;
+	sb->s_flags &= ~MS_POSIXACL;
 	orangefs_sb->flags &= ~ORANGEFS_OPT_INTR;
 	orangefs_sb->flags &= ~ORANGEFS_OPT_LOCAL_LOCK;
 
@@ -73,7 +59,7 @@ static int parse_mount_options(struct super_block *sb, char *options,
 		token = match_token(p, tokens, args);
 		switch (token) {
 		case Opt_acl:
-			sb->s_flags |= SB_POSIXACL;
+			sb->s_flags |= MS_POSIXACL;
 			break;
 		case Opt_intr:
 			orangefs_sb->flags |= ORANGEFS_OPT_INTR;
@@ -99,6 +85,8 @@ static void orangefs_inode_cache_ctor(void *req)
 
 	inode_init_once(&orangefs_inode->vfs_inode);
 	init_rwsem(&orangefs_inode->xattr_sem);
+
+	orangefs_inode->vfs_inode.i_version = 1;
 }
 
 static struct inode *orangefs_alloc_inode(struct super_block *sb)
@@ -106,8 +94,10 @@ static struct inode *orangefs_alloc_inode(struct super_block *sb)
 	struct orangefs_inode_s *orangefs_inode;
 
 	orangefs_inode = kmem_cache_alloc(orangefs_inode_cache, GFP_KERNEL);
-	if (!orangefs_inode)
+	if (orangefs_inode == NULL) {
+		gossip_err("Failed to allocate orangefs_inode\n");
 		return NULL;
+	}
 
 	/*
 	 * We want to clear everything except for rw_semaphore and the
@@ -117,6 +107,7 @@ static struct inode *orangefs_alloc_inode(struct super_block *sb)
 	orangefs_inode->refn.fs_id = ORANGEFS_FS_ID_NULL;
 	orangefs_inode->last_failed_block_index_read = 0;
 	memset(orangefs_inode->link_target, 0, sizeof(orangefs_inode->link_target));
+	orangefs_inode->pinode_flags = 0;
 
 	gossip_debug(GOSSIP_SUPER_DEBUG,
 		     "orangefs_alloc_inode: allocated %p\n",
@@ -156,10 +147,9 @@ static int orangefs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	sb = dentry->d_sb;
 
 	gossip_debug(GOSSIP_SUPER_DEBUG,
-			"%s: called on sb %p (fs_id is %d)\n",
-			__func__,
-			sb,
-			(int)(ORANGEFS_SB(sb)->fs_id));
+		     "orangefs_statfs: called on sb %p (fs_id is %d)\n",
+		     sb,
+		     (int)(ORANGEFS_SB(sb)->fs_id));
 
 	new_op = op_alloc(ORANGEFS_VFS_OP_STATFS);
 	if (!new_op)
@@ -199,7 +189,7 @@ static int orangefs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 out_op_release:
 	op_release(new_op);
-	gossip_debug(GOSSIP_SUPER_DEBUG, "%s: returning %d\n", __func__, ret);
+	gossip_debug(GOSSIP_SUPER_DEBUG, "orangefs_statfs: returning %d\n", ret);
 	return ret;
 }
 
@@ -297,13 +287,25 @@ void fsid_key_table_finalize(void)
 {
 }
 
+/* Called whenever the VFS dirties the inode in response to atime updates */
+static void orangefs_dirty_inode(struct inode *inode, int flags)
+{
+	struct orangefs_inode_s *orangefs_inode = ORANGEFS_I(inode);
+
+	gossip_debug(GOSSIP_SUPER_DEBUG,
+		     "orangefs_dirty_inode: %pU\n",
+		     get_khandle_from_ino(inode));
+	SetAtimeFlag(orangefs_inode);
+}
+
 static const struct super_operations orangefs_s_ops = {
 	.alloc_inode = orangefs_alloc_inode,
 	.destroy_inode = orangefs_destroy_inode,
+	.dirty_inode = orangefs_dirty_inode,
 	.drop_inode = generic_delete_inode,
 	.statfs = orangefs_statfs,
 	.remount_fs = orangefs_remount_fs,
-	.show_options = orangefs_show_options,
+	.show_options = generic_show_options,
 };
 
 static struct dentry *orangefs_fh_to_dentry(struct super_block *sb,
@@ -336,7 +338,7 @@ static int orangefs_encode_fh(struct inode *inode,
 	struct orangefs_object_kref refn;
 
 	if (*max_len < len) {
-		gossip_err("fh buffer is too small for encoding\n");
+		gossip_lerr("fh buffer is too small for encoding\n");
 		*max_len = len;
 		type = 255;
 		goto out;
@@ -374,25 +376,6 @@ static const struct export_operations orangefs_export_ops = {
 	.fh_to_dentry = orangefs_fh_to_dentry,
 };
 
-static int orangefs_unmount(int id, __s32 fs_id, const char *devname)
-{
-	struct orangefs_kernel_op_s *op;
-	int r;
-	op = op_alloc(ORANGEFS_VFS_OP_FS_UMOUNT);
-	if (!op)
-		return -ENOMEM;
-	op->upcall.req.fs_umount.id = id;
-	op->upcall.req.fs_umount.fs_id = fs_id;
-	strncpy(op->upcall.req.fs_umount.orangefs_config_server,
-	    devname, ORANGEFS_MAX_SERVER_ADDR_LEN - 1);
-	r = service_operation(op, "orangefs_fs_umount", 0);
-	/* Not much to do about an error here. */
-	if (r)
-		gossip_err("orangefs_unmount: service_operation %d\n", r);
-	op_release(op);
-	return r;
-}
-
 static int orangefs_fill_sb(struct super_block *sb,
 		struct orangefs_fs_mount_response *fs_mount,
 		void *data, int silent)
@@ -424,8 +407,8 @@ static int orangefs_fill_sb(struct super_block *sb,
 	sb->s_op = &orangefs_s_ops;
 	sb->s_d_op = &orangefs_dentry_operations;
 
-	sb->s_blocksize = PAGE_SIZE;
-	sb->s_blocksize_bits = PAGE_SHIFT;
+	sb->s_blocksize = orangefs_bufmap_size_query();
+	sb->s_blocksize_bits = orangefs_bufmap_shift_query();
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 
 	root_object.khandle = ORANGEFS_SB(sb)->root_khandle;
@@ -479,7 +462,7 @@ struct dentry *orangefs_mount(struct file_system_type *fst,
 
 	strncpy(new_op->upcall.req.fs_mount.orangefs_config_server,
 		devname,
-		ORANGEFS_MAX_SERVER_ADDR_LEN - 1);
+		ORANGEFS_MAX_SERVER_ADDR_LEN);
 
 	gossip_debug(GOSSIP_SUPER_DEBUG,
 		     "Attempting ORANGEFS Mount via host %s\n",
@@ -501,14 +484,12 @@ struct dentry *orangefs_mount(struct file_system_type *fst,
 
 	if (IS_ERR(sb)) {
 		d = ERR_CAST(sb);
-		orangefs_unmount(new_op->downcall.resp.fs_mount.id,
-		    new_op->downcall.resp.fs_mount.fs_id, devname);
 		goto free_op;
 	}
 
 	ret = orangefs_fill_sb(sb,
 	      &new_op->downcall.resp.fs_mount, data,
-	      flags & SB_SILENT ? 1 : 0);
+	      flags & MS_SILENT ? 1 : 0);
 
 	if (ret) {
 		d = ERR_PTR(ret);
@@ -521,7 +502,7 @@ struct dentry *orangefs_mount(struct file_system_type *fst,
 	 */
 	strncpy(ORANGEFS_SB(sb)->devname,
 		devname,
-		ORANGEFS_MAX_SERVER_ADDR_LEN - 1);
+		ORANGEFS_MAX_SERVER_ADDR_LEN);
 
 	/* mount_pending must be cleared */
 	ORANGEFS_SB(sb)->mount_pending = 0;
@@ -558,7 +539,6 @@ struct dentry *orangefs_mount(struct file_system_type *fst,
 free_sb_and_op:
 	/* Will call orangefs_kill_sb with sb not in list. */
 	ORANGEFS_SB(sb)->no_list = 1;
-	/* ORANGEFS_VFS_OP_FS_UMOUNT is done by orangefs_kill_sb. */
 	deactivate_locked_super(sb);
 free_op:
 	gossip_err("orangefs_mount: mount request failed with %d\n", ret);
@@ -574,7 +554,6 @@ free_op:
 
 void orangefs_kill_sb(struct super_block *sb)
 {
-	int r;
 	gossip_debug(GOSSIP_SUPER_DEBUG, "orangefs_kill_sb: called\n");
 
 	/* provided sb cleanup */
@@ -589,10 +568,7 @@ void orangefs_kill_sb(struct super_block *sb)
 	 * issue the unmount to userspace to tell it to remove the
 	 * dynamic mount info it has for this superblock
 	 */
-	r = orangefs_unmount(ORANGEFS_SB(sb)->id, ORANGEFS_SB(sb)->fs_id,
-	    ORANGEFS_SB(sb)->devname);
-	if (!r)
-		ORANGEFS_SB(sb)->mount_pending = 1;
+	 orangefs_unmount_sb(sb);
 
 	if (!ORANGEFS_SB(sb)->no_list) {
 		/* remove the sb from our list of orangefs specific sb's */
@@ -616,16 +592,11 @@ void orangefs_kill_sb(struct super_block *sb)
 
 int orangefs_inode_cache_initialize(void)
 {
-	orangefs_inode_cache = kmem_cache_create_usercopy(
-					"orangefs_inode_cache",
-					sizeof(struct orangefs_inode_s),
-					0,
-					ORANGEFS_CACHE_CREATE_FLAGS,
-					offsetof(struct orangefs_inode_s,
-						link_target),
-					sizeof_field(struct orangefs_inode_s,
-						link_target),
-					orangefs_inode_cache_ctor);
+	orangefs_inode_cache = kmem_cache_create("orangefs_inode_cache",
+					      sizeof(struct orangefs_inode_s),
+					      0,
+					      ORANGEFS_CACHE_CREATE_FLAGS,
+					      orangefs_inode_cache_ctor);
 
 	if (!orangefs_inode_cache) {
 		gossip_err("Cannot create orangefs_inode_cache\n");

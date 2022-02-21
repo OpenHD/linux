@@ -475,7 +475,7 @@ static int scarlett_ctl_meter_get(struct snd_kcontrol *kctl,
 	return 0;
 }
 
-static const struct snd_kcontrol_new usb_scarlett_ctl_switch = {
+static struct snd_kcontrol_new usb_scarlett_ctl_switch = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "",
 	.info = scarlett_ctl_switch_info,
@@ -485,7 +485,7 @@ static const struct snd_kcontrol_new usb_scarlett_ctl_switch = {
 
 static const DECLARE_TLV_DB_SCALE(db_scale_scarlett_gain, -12800, 100, 0);
 
-static const struct snd_kcontrol_new usb_scarlett_ctl = {
+static struct snd_kcontrol_new usb_scarlett_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
 		  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
@@ -497,7 +497,7 @@ static const struct snd_kcontrol_new usb_scarlett_ctl = {
 	.tlv = { .p = db_scale_scarlett_gain }
 };
 
-static const struct snd_kcontrol_new usb_scarlett_ctl_master = {
+static struct snd_kcontrol_new usb_scarlett_ctl_master = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
 		  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
@@ -509,7 +509,7 @@ static const struct snd_kcontrol_new usb_scarlett_ctl_master = {
 	.tlv = { .p = db_scale_scarlett_gain }
 };
 
-static const struct snd_kcontrol_new usb_scarlett_ctl_enum = {
+static struct snd_kcontrol_new usb_scarlett_ctl_enum = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "",
 	.info = scarlett_ctl_enum_info,
@@ -517,7 +517,7 @@ static const struct snd_kcontrol_new usb_scarlett_ctl_enum = {
 	.put =  scarlett_ctl_enum_put,
 };
 
-static const struct snd_kcontrol_new usb_scarlett_ctl_dynamic_enum = {
+static struct snd_kcontrol_new usb_scarlett_ctl_dynamic_enum = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "",
 	.info = scarlett_ctl_enum_dynamic_info,
@@ -525,7 +525,7 @@ static const struct snd_kcontrol_new usb_scarlett_ctl_dynamic_enum = {
 	.put =  scarlett_ctl_enum_put,
 };
 
-static const struct snd_kcontrol_new usb_scarlett_ctl_sync = {
+static struct snd_kcontrol_new usb_scarlett_ctl_sync = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.name = "",

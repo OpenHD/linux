@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_PARAVIRT_H
 #define _ASM_X86_PARAVIRT_H
 /* Various instructions on x86 need to be replaced for
@@ -17,9 +16,10 @@
 #include <linux/cpumask.h>
 #include <asm/frame.h>
 
-static inline void load_sp0(unsigned long sp0)
+static inline void load_sp0(struct tss_struct *tss,
+			     struct thread_struct *thread)
 {
-	PVOP_VCALL1(pv_cpu_ops.load_sp0, sp0);
+	PVOP_VCALL2(pv_cpu_ops.load_sp0, tss, thread);
 }
 
 /* The paravirtualized CPUID instruction. */
@@ -42,6 +42,11 @@ static inline void set_debugreg(unsigned long val, int reg)
 	PVOP_VCALL2(pv_cpu_ops.set_debugreg, reg, val);
 }
 
+static inline void clts(void)
+{
+	PVOP_VCALL0(pv_cpu_ops.clts);
+}
+
 static inline unsigned long read_cr0(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr0);
@@ -62,7 +67,7 @@ static inline void write_cr2(unsigned long x)
 	PVOP_VCALL1(pv_mmu_ops.write_cr2, x);
 }
 
-static inline unsigned long __read_cr3(void)
+static inline unsigned long read_cr3(void)
 {
 	return PVOP_CALL0(unsigned long, pv_mmu_ops.read_cr3);
 }
@@ -70,6 +75,11 @@ static inline unsigned long __read_cr3(void)
 static inline void write_cr3(unsigned long x)
 {
 	PVOP_VCALL1(pv_mmu_ops.write_cr3, x);
+}
+
+static inline unsigned long __read_cr4(void)
+{
+	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4);
 }
 
 static inline void __write_cr4(unsigned long x)
@@ -114,7 +124,7 @@ static inline u64 paravirt_read_msr(unsigned msr)
 static inline void paravirt_write_msr(unsigned msr,
 				      unsigned low, unsigned high)
 {
-	PVOP_VCALL3(pv_cpu_ops.write_msr, msr, low, high);
+	return PVOP_VCALL3(pv_cpu_ops.write_msr, msr, low, high);
 }
 
 static inline u64 paravirt_read_msr_safe(unsigned msr, int *err)
@@ -224,6 +234,10 @@ static inline void set_ldt(const void *addr, unsigned entries)
 {
 	PVOP_VCALL2(pv_cpu_ops.set_ldt, addr, entries);
 }
+static inline void store_idt(struct desc_ptr *dtr)
+{
+	PVOP_VCALL1(pv_cpu_ops.store_idt, dtr);
+}
 static inline unsigned long paravirt_store_tr(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.store_tr);
@@ -298,20 +312,17 @@ static inline void __flush_tlb_global(void)
 {
 	PVOP_VCALL0(pv_mmu_ops.flush_tlb_kernel);
 }
-static inline void __flush_tlb_one_user(unsigned long addr)
+static inline void __flush_tlb_single(unsigned long addr)
 {
-	PVOP_VCALL1(pv_mmu_ops.flush_tlb_one_user, addr);
+	PVOP_VCALL1(pv_mmu_ops.flush_tlb_single, addr);
 }
 
 static inline void flush_tlb_others(const struct cpumask *cpumask,
-				    const struct flush_tlb_info *info)
+				    struct mm_struct *mm,
+				    unsigned long start,
+				    unsigned long end)
 {
-	PVOP_VCALL2(pv_mmu_ops.flush_tlb_others, cpumask, info);
-}
-
-static inline void paravirt_tlb_remove_table(struct mmu_gather *tlb, void *table)
-{
-	PVOP_VCALL2(pv_mmu_ops.tlb_remove_table, tlb, table);
+	PVOP_VCALL4(pv_mmu_ops.flush_tlb_others, cpumask, mm, start, end);
 }
 
 static inline int paravirt_pgd_alloc(struct mm_struct *mm)
@@ -352,14 +363,10 @@ static inline void paravirt_release_pud(unsigned long pfn)
 	PVOP_VCALL1(pv_mmu_ops.release_pud, pfn);
 }
 
-static inline void paravirt_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
+static inline void pte_update(struct mm_struct *mm, unsigned long addr,
+			      pte_t *ptep)
 {
-	PVOP_VCALL2(pv_mmu_ops.alloc_p4d, mm, pfn);
-}
-
-static inline void paravirt_release_p4d(unsigned long pfn)
-{
-	PVOP_VCALL1(pv_mmu_ops.release_p4d, pfn);
+	PVOP_VCALL3(pv_mmu_ops.pte_update, mm, addr, ptep);
 }
 
 static inline pte_t __pte(pteval_t val)
@@ -463,6 +470,17 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 		PVOP_VCALL4(pv_mmu_ops.set_pte_at, mm, addr, ptep, pte.pte);
 }
 
+static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
+			      pmd_t *pmdp, pmd_t pmd)
+{
+	if (sizeof(pmdval_t) > sizeof(long))
+		/* 5 arg words */
+		pv_mmu_ops.set_pmd_at(mm, addr, pmdp, pmd);
+	else
+		PVOP_VCALL4(pv_mmu_ops.set_pmd_at, mm, addr, pmdp,
+			    native_pmd_val(pmd));
+}
+
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 	pmdval_t val = native_pmd_val(pmd);
@@ -513,7 +531,7 @@ static inline void set_pud(pud_t *pudp, pud_t pud)
 		PVOP_VCALL2(pv_mmu_ops.set_pud, pudp,
 			    val);
 }
-#if CONFIG_PGTABLE_LEVELS >= 4
+#if CONFIG_PGTABLE_LEVELS == 4
 static inline pud_t __pud(pudval_t val)
 {
 	pudval_t ret;
@@ -542,59 +560,26 @@ static inline pudval_t pud_val(pud_t pud)
 	return ret;
 }
 
-static inline void pud_clear(pud_t *pudp)
+static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
-	set_pud(pudp, __pud(0));
-}
+	pgdval_t val = native_pgd_val(pgd);
 
-static inline void set_p4d(p4d_t *p4dp, p4d_t p4d)
-{
-	p4dval_t val = native_p4d_val(p4d);
-
-	if (sizeof(p4dval_t) > sizeof(long))
-		PVOP_VCALL3(pv_mmu_ops.set_p4d, p4dp,
+	if (sizeof(pgdval_t) > sizeof(long))
+		PVOP_VCALL3(pv_mmu_ops.set_pgd, pgdp,
 			    val, (u64)val >> 32);
 	else
-		PVOP_VCALL2(pv_mmu_ops.set_p4d, p4dp,
+		PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp,
 			    val);
 }
 
-#if CONFIG_PGTABLE_LEVELS >= 5
-
-static inline p4d_t __p4d(p4dval_t val)
+static inline void pgd_clear(pgd_t *pgdp)
 {
-	p4dval_t ret = PVOP_CALLEE1(p4dval_t, pv_mmu_ops.make_p4d, val);
-
-	return (p4d_t) { ret };
+	set_pgd(pgdp, __pgd(0));
 }
 
-static inline p4dval_t p4d_val(p4d_t p4d)
+static inline void pud_clear(pud_t *pudp)
 {
-	return PVOP_CALLEE1(p4dval_t, pv_mmu_ops.p4d_val, p4d.p4d);
-}
-
-static inline void __set_pgd(pgd_t *pgdp, pgd_t pgd)
-{
-	PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp, native_pgd_val(pgd));
-}
-
-#define set_pgd(pgdp, pgdval) do {					\
-	if (pgtable_l5_enabled())						\
-		__set_pgd(pgdp, pgdval);				\
-	else								\
-		set_p4d((p4d_t *)(pgdp), (p4d_t) { (pgdval).pgd });	\
-} while (0)
-
-#define pgd_clear(pgdp) do {						\
-	if (pgtable_l5_enabled())						\
-		set_pgd(pgdp, __pgd(0));				\
-} while (0)
-
-#endif  /* CONFIG_PGTABLE_LEVELS == 5 */
-
-static inline void p4d_clear(p4d_t *p4dp)
-{
-	set_p4d(p4dp, __p4d(0));
+	set_pud(pudp, __pud(0));
 }
 
 #endif	/* CONFIG_PGTABLE_LEVELS == 4 */
@@ -694,11 +679,6 @@ static __always_inline void pv_kick(int cpu)
 	PVOP_VCALL1(pv_lock_ops.kick, cpu);
 }
 
-static __always_inline bool pv_vcpu_is_preempted(long cpu)
-{
-	return PVOP_CALLEE1(bool, pv_lock_ops.vcpu_is_preempted, cpu);
-}
-
 #endif /* SMP && PARAVIRT_SPINLOCKS */
 
 #ifdef CONFIG_X86_32
@@ -768,7 +748,6 @@ static __always_inline bool pv_vcpu_is_preempted(long cpu)
 	    PV_RESTORE_ALL_CALLER_REGS					\
 	    FRAME_END							\
 	    "ret;"							\
-	    ".size " PV_THUNK_NAME(func) ", .-" PV_THUNK_NAME(func) ";"	\
 	    ".popsection")
 
 /* Get a reference to a callee-save function */
@@ -941,21 +920,16 @@ extern void default_banner(void);
 	ANNOTATE_RETPOLINE_SAFE;				\
 	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_read_cr2);
 
+#define PARAVIRT_ADJUST_EXCEPTION_FRAME					\
+	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_adjust_exception_frame), \
+		  CLBR_NONE,						\
+		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_adjust_exception_frame))
+
 #define USERGS_SYSRET64							\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_usergs_sysret64),	\
 		  CLBR_NONE,						\
 		  ANNOTATE_RETPOLINE_SAFE;					\
 		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret64);)
-
-#ifdef CONFIG_DEBUG_ENTRY
-#define SAVE_FLAGS(clobbers)                                        \
-	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_save_fl), clobbers, \
-		  PV_SAVE_REGS(clobbers | CLBR_CALLEE_SAVE);        \
-		  ANNOTATE_RETPOLINE_SAFE;				    \
-		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_save_fl);    \
-		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
-#endif
-
 #endif	/* CONFIG_X86_32 */
 
 #endif /* __ASSEMBLY__ */

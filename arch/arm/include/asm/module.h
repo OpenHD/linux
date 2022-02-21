@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_ARM_MODULE_H
 #define _ASM_ARM_MODULE_H
 
@@ -34,7 +33,6 @@ struct mod_arch_specific {
 #endif
 };
 
-struct module;
 u32 get_module_plt(struct module *mod, unsigned long loc, Elf32_Addr val);
 
 /*

@@ -46,6 +46,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/sun4i-a10.h>
 
 / {
 	model = "ICnova-A20 SWAC";
@@ -104,10 +105,11 @@
 
 &mmc0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&mmc0_pins_a>;
+	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin_reference_design>;
 	vmmc-supply = <&reg_vcc3v3>;
 	bus-width = <4>;
-	cd-gpios = <&pio 8 5 GPIO_ACTIVE_LOW>; /* PI5 */
+	cd-gpios = <&pio 8 5 GPIO_ACTIVE_HIGH>; /* PI5 */
+	cd-inverted;
 	status = "okay";
 };
 

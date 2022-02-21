@@ -35,7 +35,7 @@ static ssize_t fuse_conn_abort_write(struct file *file, const char __user *buf,
 {
 	struct fuse_conn *fc = fuse_ctl_file_conn_get(file);
 	if (fc) {
-		fuse_abort_conn(fc, true);
+		fuse_abort_conn(fc);
 		fuse_conn_put(fc);
 	}
 	return count;
@@ -299,7 +299,7 @@ void fuse_ctl_remove_conn(struct fuse_conn *fc)
 
 static int fuse_ctl_fill_super(struct super_block *sb, void *data, int silent)
 {
-	static const struct tree_descr empty_descr = {""};
+	struct tree_descr empty_descr = {""};
 	struct fuse_conn *fc;
 	int err;
 

@@ -71,20 +71,13 @@ static int read_block(struct inode *inode, void *addr, unsigned int block,
 		return err;
 	}
 
-	ubifs_assert(c, le64_to_cpu(dn->ch.sqnum) >
+	ubifs_assert(le64_to_cpu(dn->ch.sqnum) >
 		     ubifs_inode(inode)->creat_sqnum);
 	len = le32_to_cpu(dn->size);
 	if (len <= 0 || len > UBIFS_BLOCK_SIZE)
 		goto dump;
 
 	dlen = le32_to_cpu(dn->ch.len) - UBIFS_DATA_NODE_SZ;
-
-	if (ubifs_crypt_is_encrypted(inode)) {
-		err = ubifs_decrypt(inode, dn, &dlen, block);
-		if (err)
-			goto dump;
-	}
-
 	out_len = UBIFS_BLOCK_SIZE;
 	err = ubifs_decompress(c, &dn->data, dlen, addr, &out_len,
 			       le16_to_cpu(dn->compr_type));
@@ -115,13 +108,12 @@ static int do_readpage(struct page *page)
 	unsigned int block, beyond;
 	struct ubifs_data_node *dn;
 	struct inode *inode = page->mapping->host;
-	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	loff_t i_size = i_size_read(inode);
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld, flags %#lx",
 		inode->i_ino, page->index, i_size, page->flags);
-	ubifs_assert(c, !PageChecked(page));
-	ubifs_assert(c, !PagePrivate(page));
+	ubifs_assert(!PageChecked(page));
+	ubifs_assert(!PagePrivate(page));
 
 	addr = kmap(page);
 
@@ -442,8 +434,8 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	int skipped_read = 0;
 	struct page *page;
 
-	ubifs_assert(c, ubifs_inode(inode)->ui_size == inode->i_size);
-	ubifs_assert(c, !c->ro_media && !c->ro_mount);
+	ubifs_assert(ubifs_inode(inode)->ui_size == inode->i_size);
+	ubifs_assert(!c->ro_media && !c->ro_mount);
 
 	if (unlikely(c->ro_error))
 		return -EROFS;
@@ -482,7 +474,7 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 
 	err = allocate_budget(c, page, ui, appending);
 	if (unlikely(err)) {
-		ubifs_assert(c, err == -ENOSPC);
+		ubifs_assert(err == -ENOSPC);
 		/*
 		 * If we skipped reading the page because we were going to
 		 * write all of it, then it is not up to date.
@@ -499,7 +491,7 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 		 * everything and fall-back to slow-path.
 		 */
 		if (appending) {
-			ubifs_assert(c, mutex_is_locked(&ui->ui_mutex));
+			ubifs_assert(mutex_is_locked(&ui->ui_mutex));
 			mutex_unlock(&ui->ui_mutex);
 		}
 		unlock_page(page);
@@ -596,7 +588,7 @@ static int ubifs_write_end(struct file *file, struct address_space *mapping,
 		 * '__set_page_dirty_nobuffers()'.
 		 */
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
-		ubifs_assert(c, mutex_is_locked(&ui->ui_mutex));
+		ubifs_assert(mutex_is_locked(&ui->ui_mutex));
 		mutex_unlock(&ui->ui_mutex);
 	}
 
@@ -649,7 +641,7 @@ static int populate_page(struct ubifs_info *c, struct page *page,
 
 			dn = bu->buf + (bu->zbranch[nn].offs - offs);
 
-			ubifs_assert(c, le64_to_cpu(dn->ch.sqnum) >
+			ubifs_assert(le64_to_cpu(dn->ch.sqnum) >
 				     ubifs_inode(inode)->creat_sqnum);
 
 			len = le32_to_cpu(dn->size);
@@ -658,13 +650,6 @@ static int populate_page(struct ubifs_info *c, struct page *page,
 
 			dlen = le32_to_cpu(dn->ch.len) - UBIFS_DATA_NODE_SZ;
 			out_len = UBIFS_BLOCK_SIZE;
-
-			if (ubifs_crypt_is_encrypted(inode)) {
-				err = ubifs_decrypt(inode, dn, &dlen, page_block);
-				if (err)
-					goto out_err;
-			}
-
 			err = ubifs_decompress(c, &dn->data, dlen, addr, &out_len,
 					       le16_to_cpu(dn->compr_type));
 			if (err || len != out_len)
@@ -768,8 +753,8 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 			bu->buf_len = bu->zbranch[bu->cnt - 1].offs +
 				      bu->zbranch[bu->cnt - 1].len -
 				      bu->zbranch[0].offs;
-			ubifs_assert(c, bu->buf_len > 0);
-			ubifs_assert(c, bu->buf_len <= c->leb_size);
+			ubifs_assert(bu->buf_len > 0);
+			ubifs_assert(bu->buf_len <= c->leb_size);
 			bu->buf = kmalloc(bu->buf_len, GFP_NOFS | __GFP_NOWARN);
 			if (!bu->buf)
 				goto out_bu_off;
@@ -798,7 +783,9 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 
 		if (page_offset > end_index)
 			break;
-		page = find_or_create_page(mapping, page_offset, ra_gfp_mask);
+		page = pagecache_get_page(mapping, page_offset,
+				 FGP_LOCK|FGP_ACCESSED|FGP_CREAT|FGP_NOWAIT,
+				 ra_gfp_mask);
 		if (!page)
 			break;
 		if (!PageUptodate(page))
@@ -921,7 +908,7 @@ static int do_writepage(struct page *page, int len)
 #ifdef UBIFS_DEBUG
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	spin_lock(&ui->ui_lock);
-	ubifs_assert(c, page->index <= ui->synced_i_size >> PAGE_SHIFT);
+	ubifs_assert(page->index <= ui->synced_i_size >> PAGE_SHIFT);
 	spin_unlock(&ui->ui_lock);
 #endif
 
@@ -950,7 +937,7 @@ static int do_writepage(struct page *page, int len)
 		ubifs_ro_mode(c, err);
 	}
 
-	ubifs_assert(c, PagePrivate(page));
+	ubifs_assert(PagePrivate(page));
 	if (PageChecked(page))
 		release_new_page_budget(c);
 	else
@@ -1015,7 +1002,6 @@ static int do_writepage(struct page *page, int len)
 static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct inode *inode = page->mapping->host;
-	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	loff_t i_size =  i_size_read(inode), synced_i_size;
 	pgoff_t end_index = i_size >> PAGE_SHIFT;
@@ -1024,7 +1010,7 @@ static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 
 	dbg_gen("ino %lu, pg %lu, pg flags %#lx",
 		inode->i_ino, page->index, page->flags);
-	ubifs_assert(c, PagePrivate(page));
+	ubifs_assert(PagePrivate(page));
 
 	/* Is the page fully outside @i_size? (truncate in progress) */
 	if (page->index > end_index || (page->index == end_index && !len)) {
@@ -1091,14 +1077,14 @@ static void do_attr_changes(struct inode *inode, const struct iattr *attr)
 	if (attr->ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
 	if (attr->ia_valid & ATTR_ATIME)
-		inode->i_atime = timespec64_trunc(attr->ia_atime,
-						  inode->i_sb->s_time_gran);
+		inode->i_atime = timespec_trunc(attr->ia_atime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_MTIME)
-		inode->i_mtime = timespec64_trunc(attr->ia_mtime,
-						  inode->i_sb->s_time_gran);
+		inode->i_mtime = timespec_trunc(attr->ia_mtime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_CTIME)
-		inode->i_ctime = timespec64_trunc(attr->ia_ctime,
-						  inode->i_sb->s_time_gran);
+		inode->i_ctime = timespec_trunc(attr->ia_ctime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_MODE) {
 		umode_t mode = attr->ia_mode;
 
@@ -1169,7 +1155,7 @@ static int do_truncation(struct ubifs_info *c, struct inode *inode,
 				 * 'ubifs_jnl_truncate()' will see an already
 				 * truncated (and up to date) data node.
 				 */
-				ubifs_assert(c, PagePrivate(page));
+				ubifs_assert(PagePrivate(page));
 
 				clear_page_dirty_for_io(page);
 				if (UBIFS_BLOCKS_PER_PAGE_SHIFT)
@@ -1198,7 +1184,7 @@ static int do_truncation(struct ubifs_info *c, struct inode *inode,
 	mutex_lock(&ui->ui_mutex);
 	ui->ui_size = inode->i_size;
 	/* Truncation changes inode [mc]time */
-	inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_ctime = ubifs_current_time(inode);
 	/* Other attributes may be changed at the same time as well */
 	do_attr_changes(inode, attr);
 	err = ubifs_jnl_truncate(c, inode, old_size, new_size);
@@ -1245,7 +1231,7 @@ static int do_setattr(struct ubifs_info *c, struct inode *inode,
 	mutex_lock(&ui->ui_mutex);
 	if (attr->ia_valid & ATTR_SIZE) {
 		/* Truncation changes inode [mc]time */
-		inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_mtime = inode->i_ctime = ubifs_current_time(inode);
 		/* 'truncate_setsize()' changed @i_size, update @ui_size */
 		ui->ui_size = inode->i_size;
 	}
@@ -1258,7 +1244,7 @@ static int do_setattr(struct ubifs_info *c, struct inode *inode,
 		 * Inode length changed, so we have to make sure
 		 * @I_DIRTY_DATASYNC is set.
 		 */
-		 __mark_inode_dirty(inode, I_DIRTY_DATASYNC);
+		 __mark_inode_dirty(inode, I_DIRTY_SYNC | I_DIRTY_DATASYNC);
 	else
 		mark_inode_dirty_sync(inode);
 	mutex_unlock(&ui->ui_mutex);
@@ -1286,10 +1272,6 @@ int ubifs_setattr(struct dentry *dentry, struct iattr *attr)
 	if (err)
 		return err;
 
-	err = fscrypt_prepare_setattr(dentry, attr);
-	if (err)
-		return err;
-
 	if ((attr->ia_valid & ATTR_SIZE) && attr->ia_size < inode->i_size)
 		/* Truncation to a smaller size */
 		err = do_truncation(c, inode, attr);
@@ -1305,7 +1287,7 @@ static void ubifs_invalidatepage(struct page *page, unsigned int offset,
 	struct inode *inode = page->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
-	ubifs_assert(c, PagePrivate(page));
+	ubifs_assert(PagePrivate(page));
 	if (offset || length < PAGE_SIZE)
 		/* Partial page remains dirty */
 		return;
@@ -1335,7 +1317,7 @@ int ubifs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		 */
 		return 0;
 
-	err = file_write_and_wait_range(file, start, end);
+	err = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (err)
 		return err;
 	inode_lock(inode);
@@ -1367,10 +1349,10 @@ out:
  * granularity, they are not updated. This is an optimization.
  */
 static inline int mctime_update_needed(const struct inode *inode,
-				       const struct timespec64 *now)
+				       const struct timespec *now)
 {
-	if (!timespec64_equal(&inode->i_mtime, now) ||
-	    !timespec64_equal(&inode->i_ctime, now))
+	if (!timespec_equal(&inode->i_mtime, now) ||
+	    !timespec_equal(&inode->i_ctime, now))
 		return 1;
 	return 0;
 }
@@ -1382,7 +1364,7 @@ static inline int mctime_update_needed(const struct inode *inode,
  *
  * This function updates time of the inode.
  */
-int ubifs_update_time(struct inode *inode, struct timespec64 *time,
+int ubifs_update_time(struct inode *inode, struct timespec *time,
 			     int flags)
 {
 	struct ubifs_inode *ui = ubifs_inode(inode);
@@ -1404,7 +1386,7 @@ int ubifs_update_time(struct inode *inode, struct timespec64 *time,
 	if (flags & S_MTIME)
 		inode->i_mtime = *time;
 
-	if (!(inode->i_sb->s_flags & SB_LAZYTIME))
+	if (!(inode->i_sb->s_flags & MS_LAZYTIME))
 		iflags |= I_DIRTY_SYNC;
 
 	release = ui->dirty;
@@ -1426,7 +1408,7 @@ int ubifs_update_time(struct inode *inode, struct timespec64 *time,
  */
 static int update_mctime(struct inode *inode)
 {
-	struct timespec64 now = current_time(inode);
+	struct timespec now = ubifs_current_time(inode);
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
@@ -1440,7 +1422,7 @@ static int update_mctime(struct inode *inode)
 			return err;
 
 		mutex_lock(&ui->ui_mutex);
-		inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_mtime = inode->i_ctime = ubifs_current_time(inode);
 		release = ui->dirty;
 		mark_inode_dirty_sync(inode);
 		mutex_unlock(&ui->ui_mutex);
@@ -1463,15 +1445,13 @@ static ssize_t ubifs_write_iter(struct kiocb *iocb, struct iov_iter *from)
 static int ubifs_set_page_dirty(struct page *page)
 {
 	int ret;
-	struct inode *inode = page->mapping->host;
-	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
 	ret = __set_page_dirty_nobuffers(page);
 	/*
 	 * An attempt to dirty a page without budgeting for it - should not
 	 * happen.
 	 */
-	ubifs_assert(c, ret == 0);
+	ubifs_assert(ret == 0);
 	return ret;
 }
 
@@ -1500,17 +1480,14 @@ static int ubifs_migrate_page(struct address_space *mapping,
 
 static int ubifs_releasepage(struct page *page, gfp_t unused_gfp_flags)
 {
-	struct inode *inode = page->mapping->host;
-	struct ubifs_info *c = inode->i_sb->s_fs_info;
-
 	/*
 	 * An attempt to release a dirty page without budgeting for it - should
 	 * not happen.
 	 */
 	if (PageWriteback(page))
 		return 0;
-	ubifs_assert(c, PagePrivate(page));
-	ubifs_assert(c, 0);
+	ubifs_assert(PagePrivate(page));
+	ubifs_assert(0);
 	ClearPagePrivate(page);
 	ClearPageChecked(page);
 	return 1;
@@ -1520,18 +1497,19 @@ static int ubifs_releasepage(struct page *page, gfp_t unused_gfp_flags)
  * mmap()d file has taken write protection fault and is being made writable.
  * UBIFS must ensure page is budgeted for.
  */
-static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
+static int ubifs_vm_page_mkwrite(struct vm_area_struct *vma,
+				 struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
-	struct inode *inode = file_inode(vmf->vma->vm_file);
+	struct inode *inode = file_inode(vma->vm_file);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
-	struct timespec64 now = current_time(inode);
+	struct timespec now = ubifs_current_time(inode);
 	struct ubifs_budget_req req = { .new_page = 1 };
 	int err, update_time;
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld",	inode->i_ino, page->index,
 		i_size_read(inode));
-	ubifs_assert(c, !c->ro_media && !c->ro_mount);
+	ubifs_assert(!c->ro_media && !c->ro_mount);
 
 	if (unlikely(c->ro_error))
 		return VM_FAULT_SIGBUS; /* -EROFS */
@@ -1574,7 +1552,8 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 	if (unlikely(page->mapping != inode->i_mapping ||
 		     page_offset(page) > i_size_read(inode))) {
 		/* Page got truncated out from underneath us */
-		goto sigbus;
+		err = -EINVAL;
+		goto out_unlock;
 	}
 
 	if (PagePrivate(page))
@@ -1592,7 +1571,7 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 		struct ubifs_inode *ui = ubifs_inode(inode);
 
 		mutex_lock(&ui->ui_mutex);
-		inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_mtime = inode->i_ctime = ubifs_current_time(inode);
 		release = ui->dirty;
 		mark_inode_dirty_sync(inode);
 		mutex_unlock(&ui->ui_mutex);
@@ -1603,10 +1582,12 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 	wait_for_stable_page(page);
 	return VM_FAULT_LOCKED;
 
-sigbus:
+out_unlock:
 	unlock_page(page);
 	ubifs_release_budget(c, &req);
-	return VM_FAULT_SIGBUS;
+	if (err)
+		err = VM_FAULT_SIGBUS;
+	return err;
 }
 
 static const struct vm_operations_struct ubifs_file_vm_ops = {
@@ -1629,21 +1610,6 @@ static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-static const char *ubifs_get_link(struct dentry *dentry,
-					    struct inode *inode,
-					    struct delayed_call *done)
-{
-	struct ubifs_inode *ui = ubifs_inode(inode);
-
-	if (!IS_ENCRYPTED(inode))
-		return ui->data;
-
-	if (!dentry)
-		return ERR_PTR(-ECHILD);
-
-	return fscrypt_get_symlink(inode, ui->data, ui->data_len, done);
-}
-
 const struct address_space_operations ubifs_file_address_operations = {
 	.readpage       = ubifs_readpage,
 	.writepage      = ubifs_writepage,
@@ -1660,21 +1626,18 @@ const struct address_space_operations ubifs_file_address_operations = {
 const struct inode_operations ubifs_file_inode_operations = {
 	.setattr     = ubifs_setattr,
 	.getattr     = ubifs_getattr,
-#ifdef CONFIG_UBIFS_FS_XATTR
 	.listxattr   = ubifs_listxattr,
-#endif
 #ifdef CONFIG_UBIFS_ATIME_SUPPORT
 	.update_time = ubifs_update_time,
 #endif
 };
 
 const struct inode_operations ubifs_symlink_inode_operations = {
-	.get_link    = ubifs_get_link,
+	.readlink    = generic_readlink,
+	.get_link    = simple_get_link,
 	.setattr     = ubifs_setattr,
 	.getattr     = ubifs_getattr,
-#ifdef CONFIG_UBIFS_FS_XATTR
 	.listxattr   = ubifs_listxattr,
-#endif
 #ifdef CONFIG_UBIFS_ATIME_SUPPORT
 	.update_time = ubifs_update_time,
 #endif
@@ -1689,7 +1652,6 @@ const struct file_operations ubifs_file_operations = {
 	.unlocked_ioctl = ubifs_ioctl,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
-	.open		= fscrypt_file_open,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = ubifs_compat_ioctl,
 #endif

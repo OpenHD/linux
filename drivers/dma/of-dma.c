@@ -38,8 +38,8 @@ static struct of_dma *of_dma_find_controller(struct of_phandle_args *dma_spec)
 		if (ofdma->of_node == dma_spec->np)
 			return ofdma;
 
-	pr_debug("%s: can't find DMA controller %pOF\n", __func__,
-		 dma_spec->np);
+	pr_debug("%s: can't find DMA controller %s\n", __func__,
+		 dma_spec->np->full_name);
 
 	return NULL;
 }
@@ -72,12 +72,12 @@ static struct dma_chan *of_dma_router_xlate(struct of_phandle_args *dma_spec,
 		return NULL;
 
 	chan = ofdma_target->of_dma_xlate(&dma_spec_target, ofdma_target);
-	if (chan) {
-		chan->router = ofdma->dma_router;
-		chan->route_data = route_data;
-	} else {
+	if (IS_ERR_OR_NULL(chan)) {
 		ofdma->dma_router->route_free(ofdma->dma_router->dev,
 					      route_data);
+	} else {
+		chan->router = ofdma->dma_router;
+		chan->route_data = route_data;
 	}
 
 	/*
@@ -255,8 +255,8 @@ struct dma_chan *of_dma_request_slave_channel(struct device_node *np,
 
 	count = of_property_count_strings(np, "dma-names");
 	if (count < 0) {
-		pr_err("%s: dma-names property of node '%pOF' missing or empty\n",
-			__func__, np);
+		pr_err("%s: dma-names property of node '%s' missing or empty\n",
+			__func__, np->full_name);
 		return ERR_PTR(-ENODEV);
 	}
 

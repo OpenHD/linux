@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * consolidates trace point definitions
  *
@@ -32,19 +31,12 @@
 #include <trace/events/napi.h>
 #include <trace/events/sock.h>
 #include <trace/events/udp.h>
-#include <trace/events/tcp.h>
 #include <trace/events/fib.h>
-#include <trace/events/qdisc.h>
-#if IS_ENABLED(CONFIG_BRIDGE)
-#include <trace/events/bridge.h>
-EXPORT_TRACEPOINT_SYMBOL_GPL(br_fdb_add);
-EXPORT_TRACEPOINT_SYMBOL_GPL(br_fdb_external_learn_add);
-EXPORT_TRACEPOINT_SYMBOL_GPL(fdb_delete);
-EXPORT_TRACEPOINT_SYMBOL_GPL(br_fdb_update);
+#if IS_ENABLED(CONFIG_IPV6)
+#include <trace/events/fib6.h>
+EXPORT_TRACEPOINT_SYMBOL_GPL(fib6_table_lookup);
 #endif
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(kfree_skb);
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(napi_poll);
-
-EXPORT_TRACEPOINT_SYMBOL_GPL(tcp_send_reset);

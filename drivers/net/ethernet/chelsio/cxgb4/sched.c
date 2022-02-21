@@ -177,7 +177,7 @@ static int t4_sched_queue_unbind(struct port_info *pi, struct ch_sched_queue *p)
 		}
 
 		list_del(&qe->list);
-		kvfree(qe);
+		t4_free_mem(qe);
 		if (atomic_dec_and_test(&e->refcnt)) {
 			e->state = SCHED_STATE_UNUSED;
 			memset(&e->info, 0, sizeof(e->info));
@@ -201,7 +201,7 @@ static int t4_sched_queue_bind(struct port_info *pi, struct ch_sched_queue *p)
 	if (p->queue < 0 || p->queue >= pi->nqsets)
 		return -ERANGE;
 
-	qe = kvzalloc(sizeof(struct sched_queue_entry), GFP_KERNEL);
+	qe = t4_alloc_mem(sizeof(struct sched_queue_entry));
 	if (!qe)
 		return -ENOMEM;
 
@@ -211,7 +211,7 @@ static int t4_sched_queue_bind(struct port_info *pi, struct ch_sched_queue *p)
 	/* Unbind queue from any existing class */
 	err = t4_sched_queue_unbind(pi, p);
 	if (err) {
-		kvfree(qe);
+		t4_free_mem(qe);
 		goto out;
 	}
 
@@ -224,7 +224,7 @@ static int t4_sched_queue_bind(struct port_info *pi, struct ch_sched_queue *p)
 	spin_lock(&e->lock);
 	err = t4_sched_bind_unbind_op(pi, (void *)qe, SCHED_QUEUE, true);
 	if (err) {
-		kvfree(qe);
+		t4_free_mem(qe);
 		spin_unlock(&e->lock);
 		goto out;
 	}
@@ -397,6 +397,9 @@ static struct sched_class *t4_sched_class_lookup(struct port_info *pi,
 		struct ch_sched_params info;
 		struct ch_sched_params tp;
 
+		memset(&info, 0, sizeof(info));
+		memset(&tp, 0, sizeof(tp));
+
 		memcpy(&tp, p, sizeof(tp));
 		/* Don't try to match class parameter */
 		tp.u.params.class = SCHED_CLS_NONE;
@@ -406,6 +409,7 @@ static struct sched_class *t4_sched_class_lookup(struct port_info *pi,
 			if (e->state == SCHED_STATE_UNUSED)
 				continue;
 
+			memset(&info, 0, sizeof(info));
 			memcpy(&info, &e->info, sizeof(info));
 			/* Don't try to match class parameter */
 			info.u.params.class = SCHED_CLS_NONE;
@@ -454,6 +458,7 @@ static struct sched_class *t4_sched_class_alloc(struct port_info *pi,
 		if (!e)
 			goto out;
 
+		memset(&np, 0, sizeof(np));
 		memcpy(&np, p, sizeof(np));
 		np.u.params.class = e->idx;
 
@@ -512,7 +517,7 @@ struct sched_table *t4_init_sched(unsigned int sched_size)
 	struct sched_table *s;
 	unsigned int i;
 
-	s = kvzalloc(sizeof(*s) + sched_size * sizeof(struct sched_class), GFP_KERNEL);
+	s = t4_alloc_mem(sizeof(*s) + sched_size * sizeof(struct sched_class));
 	if (!s)
 		return NULL;
 
@@ -533,15 +538,12 @@ struct sched_table *t4_init_sched(unsigned int sched_size)
 void t4_cleanup_sched(struct adapter *adap)
 {
 	struct sched_table *s;
-	unsigned int j, i;
+	unsigned int i;
 
-	for_each_port(adap, j) {
-		struct port_info *pi = netdev2pinfo(adap->port[j]);
+	for_each_port(adap, i) {
+		struct port_info *pi = netdev2pinfo(adap->port[i]);
 
 		s = pi->sched_tbl;
-		if (!s)
-			continue;
-
 		for (i = 0; i < s->sched_size; i++) {
 			struct sched_class *e;
 
@@ -551,6 +553,6 @@ void t4_cleanup_sched(struct adapter *adap)
 				t4_sched_class_free(pi, e);
 			write_unlock(&s->rw_lock);
 		}
-		kvfree(s);
+		t4_free_mem(s);
 	}
 }

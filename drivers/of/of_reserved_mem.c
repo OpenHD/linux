@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Device tree based initialization code for reserved memory.
  *
@@ -7,6 +6,11 @@
  *		http://www.samsung.com
  * Author: Marek Szyprowski <m.szyprowski@samsung.com>
  * Author: Josh Cartwright <joshc@codeaurora.org>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * License or (at your optional) any later version of the license.
  */
 
 #define pr_fmt(fmt)	"OF: reserved mem: " fmt
@@ -20,8 +24,9 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sort.h>
 #include <linux/slab.h>
+#include <linux/kmemleak.h>
 
-#define MAX_RESERVED_REGIONS	32
+#define MAX_RESERVED_REGIONS	16
 static struct reserved_mem reserved_mem[MAX_RESERVED_REGIONS];
 static int reserved_mem_count;
 
@@ -50,8 +55,10 @@ int __init __weak early_init_dt_alloc_reserved_memory_arch(phys_addr_t size,
 	}
 
 	*res_base = base;
-	if (nomap)
+	if (nomap) {
+		kmemleak_no_scan(__va(base));
 		return memblock_remove(base, size);
+	}
 	return 0;
 }
 #else
@@ -111,6 +118,8 @@ static int __init __reserved_mem_alloc_size(unsigned long node,
 		return -EINVAL;
 	}
 	size = dt_mem_next_cell(dt_root_size_cells, &prop);
+	if (!size)
+		return -EINVAL;
 
 	nomap = of_get_flat_dt_prop(node, "no-map", NULL) != NULL;
 
@@ -133,6 +142,11 @@ static int __init __reserved_mem_alloc_size(unsigned long node,
 			max_t(unsigned long, MAX_ORDER - 1, pageblock_order);
 
 		align = max(align, (phys_addr_t)PAGE_SIZE << order);
+	}
+
+	if (IS_ENABLED(CONFIG_CMA) && of_flat_dt_is_compatible(node, "nvidia,vpr-carveout")) {
+		align = max(align, (phys_addr_t)PAGE_SIZE << max(MAX_ORDER - 1, pageblock_order));
+		size = roundup(size, align);
 	}
 
 	prop = of_get_flat_dt_prop(node, "alloc-ranges", &len);
@@ -218,6 +232,16 @@ static int __init __rmem_cmp(const void *a, const void *b)
 	if (ra->base > rb->base)
 		return 1;
 
+	/*
+	 * Put the dynamic allocations (address == 0, size == 0) before static
+	 * allocations at address 0x0 so that overlap detection works
+	 * correctly.
+	 */
+	if (ra->size < rb->size)
+		return -1;
+	if (ra->size > rb->size)
+		return 1;
+
 	return 0;
 }
 
@@ -235,8 +259,7 @@ static void __init __rmem_check_for_overlap(void)
 
 		this = &reserved_mem[i];
 		next = &reserved_mem[i + 1];
-		if (!(this->base && next->base))
-			continue;
+
 		if (this->base + this->size > next->base) {
 			phys_addr_t this_end, next_end;
 
@@ -350,10 +373,6 @@ int of_reserved_mem_device_init_by_idx(struct device *dev,
 		mutex_lock(&of_rmem_assigned_device_mutex);
 		list_add(&rd->list, &of_rmem_assigned_device_list);
 		mutex_unlock(&of_rmem_assigned_device_mutex);
-		/* ensure that dma_ops is set for virtual devices
-		 * using reserved memory
-		 */
-		of_dma_configure(dev, np, true);
 
 		dev_info(dev, "assigned reserved memory node %s\n", rmem->name);
 	} else {
@@ -393,29 +412,3 @@ void of_reserved_mem_device_release(struct device *dev)
 	rmem->ops->device_release(rmem, dev);
 }
 EXPORT_SYMBOL_GPL(of_reserved_mem_device_release);
-
-/**
- * of_reserved_mem_lookup() - acquire reserved_mem from a device node
- * @np:		node pointer of the desired reserved-memory region
- *
- * This function allows drivers to acquire a reference to the reserved_mem
- * struct based on a device node handle.
- *
- * Returns a reserved_mem reference, or NULL on error.
- */
-struct reserved_mem *of_reserved_mem_lookup(struct device_node *np)
-{
-	const char *name;
-	int i;
-
-	if (!np->full_name)
-		return NULL;
-
-	name = kbasename(np->full_name);
-	for (i = 0; i < reserved_mem_count; i++)
-		if (!strcmp(reserved_mem[i].name, name))
-			return &reserved_mem[i];
-
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(of_reserved_mem_lookup);

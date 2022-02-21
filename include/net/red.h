@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_SCHED_RED_H
 #define __NET_SCHED_RED_H
 
@@ -168,11 +167,13 @@ static inline void red_set_vars(struct red_vars *v)
 	v->qcount	= -1;
 }
 
-static inline bool red_check_params(u32 qth_min, u32 qth_max, u8 Wlog)
+static inline bool red_check_params(u32 qth_min, u32 qth_max, u8 Wlog, u8 Scell_log)
 {
 	if (fls(qth_min) + Wlog > 32)
 		return false;
 	if (fls(qth_max) + Wlog > 32)
+		return false;
+	if (Scell_log >= 32)
 		return false;
 	if (qth_max < qth_min)
 		return false;
@@ -219,7 +220,7 @@ static inline void red_set_parms(struct red_parms *p,
 
 static inline int red_is_idling(const struct red_vars *v)
 {
-	return v->qidlestart != 0;
+	return v->qidlestart.tv64 != 0;
 }
 
 static inline void red_start_of_idle_period(struct red_vars *v)
@@ -229,7 +230,7 @@ static inline void red_start_of_idle_period(struct red_vars *v)
 
 static inline void red_end_of_idle_period(struct red_vars *v)
 {
-	v->qidlestart = 0;
+	v->qidlestart.tv64 = 0;
 }
 
 static inline void red_restart(struct red_vars *v)

@@ -1,11 +1,45 @@
-// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /******************************************************************************
  *
  * Module Name: tbxfload - Table load/unload external interfaces
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
- *
  *****************************************************************************/
+
+/*
+ * Copyright (C) 2000 - 2016, Intel Corp.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions, and the following disclaimer,
+ *    without modification.
+ * 2. Redistributions in binary form must reproduce at minimum a disclaimer
+ *    substantially similar to the "NO WARRANTY" disclaimer below
+ *    ("Disclaimer") and any redistribution must be conditioned upon
+ *    including a substantially similar Disclaimer requirement for further
+ *    binary redistribution.
+ * 3. Neither the names of the above-listed copyright holders nor the names
+ *    of any contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * Alternatively, this software may be distributed under the terms of the
+ * GNU General Public License ("GPL") version 2 as published by the Free
+ * Software Foundation.
+ *
+ * NO WARRANTY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGES.
+ */
 
 #define EXPORT_ACPI_INTERFACES
 
@@ -69,16 +103,13 @@ acpi_status ACPI_INIT_FUNCTION acpi_load_tables(void)
 				"While loading namespace from ACPI tables"));
 	}
 
-	if (acpi_gbl_execute_tables_as_methods
+	if (acpi_gbl_parse_table_as_term_list
 	    || !acpi_gbl_group_module_level_code) {
 		/*
-		 * If the module-level code support is enabled, initialize the objects
-		 * in the namespace that remain uninitialized. This runs the executable
-		 * AML that may be part of the declaration of these name objects:
-		 *     operation_regions, buffer_fields, Buffers, and Packages.
-		 *
-		 * Note: The module-level code is optional at this time, but will
-		 * become the default in the future.
+		 * Initialize the objects that remain uninitialized. This
+		 * runs the executable AML that may be part of the
+		 * declaration of these objects:
+		 * operation_regions, buffer_fields, Buffers, and Packages.
 		 */
 		status = acpi_ns_initialize_objects();
 		if (ACPI_FAILURE(status)) {
@@ -175,7 +206,7 @@ acpi_status acpi_tb_load_namespace(void)
 	for (i = 0; i < acpi_gbl_root_table_list.current_table_count; ++i) {
 		table = &acpi_gbl_root_table_list.tables[i];
 
-		if (!table->address ||
+		if (!acpi_gbl_root_table_list.tables[i].address ||
 		    (!ACPI_COMPARE_NAME(table->signature.ascii, ACPI_SIG_SSDT)
 		     && !ACPI_COMPARE_NAME(table->signature.ascii,
 					   ACPI_SIG_PSDT)
@@ -208,7 +239,7 @@ acpi_status acpi_tb_load_namespace(void)
 	}
 
 	if (!tables_failed) {
-		ACPI_INFO(("%u ACPI AML tables successfully acquired and loaded", tables_loaded));
+		ACPI_INFO(("%u ACPI AML tables successfully acquired and loaded\n", tables_loaded));
 	} else {
 		ACPI_ERROR((AE_INFO,
 			    "%u table load failures, %u successful",
@@ -218,10 +249,6 @@ acpi_status acpi_tb_load_namespace(void)
 
 		status = AE_CTRL_TERMINATE;
 	}
-
-#ifdef ACPI_APPLICATION
-	ACPI_DEBUG_PRINT_RAW((ACPI_DB_INIT, "\n"));
-#endif
 
 unlock_and_exit:
 	(void)acpi_ut_release_mutex(ACPI_MTX_TABLES);
@@ -299,9 +326,10 @@ acpi_status acpi_load_table(struct acpi_table_header *table)
 	/* Install the table and load it into the namespace */
 
 	ACPI_INFO(("Host-directed Dynamic ACPI Table Load:"));
-	status = acpi_tb_install_and_load_table(ACPI_PTR_TO_PHYSADDR(table),
-						ACPI_TABLE_ORIGIN_EXTERNAL_VIRTUAL,
-						FALSE, &table_index);
+	status =
+	    acpi_tb_install_and_load_table(table, ACPI_PTR_TO_PHYSADDR(table),
+					   ACPI_TABLE_ORIGIN_EXTERNAL_VIRTUAL,
+					   FALSE, &table_index);
 	return_ACPI_STATUS(status);
 }
 
@@ -377,8 +405,37 @@ acpi_status acpi_unload_parent_table(acpi_handle object)
 			break;
 		}
 
+		/* Ensure the table is actually loaded */
+
 		(void)acpi_ut_release_mutex(ACPI_MTX_TABLES);
-		status = acpi_tb_unload_table(i);
+		if (!acpi_tb_is_table_loaded(i)) {
+			status = AE_NOT_EXIST;
+			(void)acpi_ut_acquire_mutex(ACPI_MTX_TABLES);
+			break;
+		}
+
+		/* Invoke table handler if present */
+
+		if (acpi_gbl_table_handler) {
+			(void)acpi_gbl_table_handler(ACPI_TABLE_EVENT_UNLOAD,
+						     acpi_gbl_root_table_list.
+						     tables[i].pointer,
+						     acpi_gbl_table_handler_context);
+		}
+
+		/*
+		 * Delete all namespace objects owned by this table. Note that
+		 * these objects can appear anywhere in the namespace by virtue
+		 * of the AML "Scope" operator. Thus, we need to track ownership
+		 * by an ID, not simply a position within the hierarchy.
+		 */
+		status = acpi_tb_delete_namespace_by_owner(i);
+		if (ACPI_FAILURE(status)) {
+			break;
+		}
+
+		status = acpi_tb_release_owner_id(i);
+		acpi_tb_set_table_loaded_flag(i, FALSE);
 		(void)acpi_ut_acquire_mutex(ACPI_MTX_TABLES);
 		break;
 	}

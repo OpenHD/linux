@@ -11,7 +11,6 @@
 
 #define pr_fmt(fmt) "kasan test: %s " fmt, __func__
 
-#include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
@@ -94,37 +93,6 @@ static noinline void __init kmalloc_pagealloc_oob_right(void)
 	ptr[size] = 0;
 	kfree(ptr);
 }
-
-static noinline void __init kmalloc_pagealloc_uaf(void)
-{
-	char *ptr;
-	size_t size = KMALLOC_MAX_CACHE_SIZE + 10;
-
-	pr_info("kmalloc pagealloc allocation: use-after-free\n");
-	ptr = kmalloc(size, GFP_KERNEL);
-	if (!ptr) {
-		pr_err("Allocation failed\n");
-		return;
-	}
-
-	kfree(ptr);
-	ptr[0] = 0;
-}
-
-static noinline void __init kmalloc_pagealloc_invalid_free(void)
-{
-	char *ptr;
-	size_t size = KMALLOC_MAX_CACHE_SIZE + 10;
-
-	pr_info("kmalloc pagealloc allocation: invalid-free\n");
-	ptr = kmalloc(size, GFP_KERNEL);
-	if (!ptr) {
-		pr_err("Allocation failed\n");
-		return;
-	}
-
-	kfree(ptr + 1);
-}
 #endif
 
 static noinline void __init kmalloc_large_oob_right(void)
@@ -157,6 +125,7 @@ static noinline void __init kmalloc_oob_krealloc_more(void)
 	if (!ptr1 || !ptr2) {
 		pr_err("Allocation failed\n");
 		kfree(ptr1);
+		kfree(ptr2);
 		return;
 	}
 
@@ -364,37 +333,6 @@ static noinline void __init kmem_cache_oob(void)
 	kmem_cache_destroy(cache);
 }
 
-static noinline void __init memcg_accounted_kmem_cache(void)
-{
-	int i;
-	char *p;
-	size_t size = 200;
-	struct kmem_cache *cache;
-
-	cache = kmem_cache_create("test_cache", size, 0, SLAB_ACCOUNT, NULL);
-	if (!cache) {
-		pr_err("Cache allocation failed\n");
-		return;
-	}
-
-	pr_info("allocate memcg accounted object\n");
-	/*
-	 * Several allocations with a delay to allow for lazy per memcg kmem
-	 * cache creation.
-	 */
-	for (i = 0; i < 5; i++) {
-		p = kmem_cache_alloc(cache, GFP_KERNEL);
-		if (!p)
-			goto free_cache;
-
-		kmem_cache_free(cache, p);
-		msleep(100);
-	}
-
-free_cache:
-	kmem_cache_destroy(cache);
-}
-
 static char global_array[10];
 
 static noinline void __init kasan_global_oob(void)
@@ -523,62 +461,6 @@ static noinline void __init kasan_alloca_oob_right(void)
 	*(volatile char *)p;
 }
 
-static noinline void __init kmem_cache_double_free(void)
-{
-	char *p;
-	size_t size = 200;
-	struct kmem_cache *cache;
-
-	cache = kmem_cache_create("test_cache", size, 0, 0, NULL);
-	if (!cache) {
-		pr_err("Cache allocation failed\n");
-		return;
-	}
-	pr_info("double-free on heap object\n");
-	p = kmem_cache_alloc(cache, GFP_KERNEL);
-	if (!p) {
-		pr_err("Allocation failed\n");
-		kmem_cache_destroy(cache);
-		return;
-	}
-
-	kmem_cache_free(cache, p);
-	kmem_cache_free(cache, p);
-	kmem_cache_destroy(cache);
-}
-
-static noinline void __init kmem_cache_invalid_free(void)
-{
-	char *p;
-	size_t size = 200;
-	struct kmem_cache *cache;
-
-	cache = kmem_cache_create("test_cache", size, 0, SLAB_TYPESAFE_BY_RCU,
-				  NULL);
-	if (!cache) {
-		pr_err("Cache allocation failed\n");
-		return;
-	}
-	pr_info("invalid-free of heap object\n");
-	p = kmem_cache_alloc(cache, GFP_KERNEL);
-	if (!p) {
-		pr_err("Allocation failed\n");
-		kmem_cache_destroy(cache);
-		return;
-	}
-
-	/* Trigger invalid free, the object doesn't get freed */
-	kmem_cache_free(cache, p + 1);
-
-	/*
-	 * Properly free the object to prevent the "Objects remaining in
-	 * test_cache on __kmem_cache_shutdown" BUG failure.
-	 */
-	kmem_cache_free(cache, p);
-
-	kmem_cache_destroy(cache);
-}
-
 static int __init kmalloc_tests_init(void)
 {
 	/*
@@ -592,8 +474,6 @@ static int __init kmalloc_tests_init(void)
 	kmalloc_node_oob_right();
 #ifdef CONFIG_SLUB
 	kmalloc_pagealloc_oob_right();
-	kmalloc_pagealloc_uaf();
-	kmalloc_pagealloc_invalid_free();
 #endif
 	kmalloc_large_oob_right();
 	kmalloc_oob_krealloc_more();
@@ -608,7 +488,6 @@ static int __init kmalloc_tests_init(void)
 	kmalloc_uaf_memset();
 	kmalloc_uaf2();
 	kmem_cache_oob();
-	memcg_accounted_kmem_cache();
 	kasan_stack_oob();
 	kasan_global_oob();
 	kasan_alloca_oob_left();
@@ -616,8 +495,6 @@ static int __init kmalloc_tests_init(void)
 	ksize_unpoisons_memory();
 	copy_user_test();
 	use_after_scope_test();
-	kmem_cache_double_free();
-	kmem_cache_invalid_free();
 
 	kasan_restore_multi_shot(multishot);
 

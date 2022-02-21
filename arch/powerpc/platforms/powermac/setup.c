@@ -152,7 +152,7 @@ static void pmac_show_cpuinfo(struct seq_file *m)
 			of_get_property(np, "d-cache-size", NULL);
 		seq_printf(m, "L2 cache\t:");
 		has_l2cache = 1;
-		if (of_get_property(np, "cache-unified", NULL) && dc) {
+		if (of_get_property(np, "cache-unified", NULL) != 0 && dc) {
 			seq_printf(m, " %dK unified", *dc / 1024);
 		} else {
 			if (ic)
@@ -244,12 +244,12 @@ static void __init l2cr_init(void)
 	/* Checks "l2cr-value" property in the registry */
 	if (cpu_has_feature(CPU_FTR_L2CR)) {
 		struct device_node *np = of_find_node_by_name(NULL, "cpus");
-		if (!np)
+		if (np == 0)
 			np = of_find_node_by_type(NULL, "cpu");
-		if (np) {
+		if (np != 0) {
 			const unsigned int *l2cr =
 				of_get_property(np, "l2cr-value", NULL);
-			if (l2cr) {
+			if (l2cr != 0) {
 				ppc_override_l2cr = 1;
 				ppc_override_l2cr_value = *l2cr;
 				_set_L2CR(0);
@@ -557,7 +557,7 @@ static int __init check_pmac_serial_console(void)
 		pr_debug(" can't find stdout package %s !\n", name);
 		return -ENODEV;
 	}
-	pr_debug("stdout is %pOF\n", prom_stdout);
+	pr_debug("stdout is %s\n", prom_stdout->full_name);
 
 	name = of_get_property(prom_stdout, "name", NULL);
 	if (!name) {

@@ -24,7 +24,6 @@
 #include <linux/nospec.h>
 #include <sound/opl3.h>
 #include <sound/asound_fm.h>
-#include "opl3_voice.h"
 
 #if IS_ENABLED(CONFIG_SND_SEQUENCER)
 #define OPL3_SUPPORT_SYNTH
@@ -104,6 +103,8 @@ int snd_opl3_ioctl(struct snd_hwdep * hw, struct file *file,
 	case SNDRV_DM_FM_IOCTL_INFO:
 		{
 			struct snd_dm_fm_info info;
+
+			memset(&info, 0, sizeof(info));
 
 			info.fm_mode = opl3->fm_mode;
 			info.rhythm = opl3->rhythm;

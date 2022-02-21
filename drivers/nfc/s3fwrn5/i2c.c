@@ -37,8 +37,8 @@ struct s3fwrn5_i2c_phy {
 	struct i2c_client *i2c_dev;
 	struct nci_dev *ndev;
 
-	unsigned int gpio_en;
-	unsigned int gpio_fw_wake;
+	int gpio_en;
+	int gpio_fw_wake;
 
 	struct mutex mutex;
 
@@ -157,7 +157,7 @@ static int s3fwrn5_i2c_read(struct s3fwrn5_i2c_phy *phy)
 	if (!skb)
 		return -ENOMEM;
 
-	skb_put_data(skb, hdr, hdr_size);
+	memcpy(skb_put(skb, hdr_size), hdr, hdr_size);
 
 	if (data_len == 0)
 		goto out;
@@ -276,7 +276,7 @@ static int s3fwrn5_i2c_remove(struct i2c_client *client)
 	return 0;
 }
 
-static const struct i2c_device_id s3fwrn5_i2c_id_table[] = {
+static struct i2c_device_id s3fwrn5_i2c_id_table[] = {
 	{S3FWRN5_I2C_DRIVER_NAME, 0},
 	{}
 };

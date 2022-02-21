@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ACPI_IO_H_
 #define _ACPI_IO_H_
 
@@ -13,8 +12,6 @@ static inline void __iomem *acpi_os_ioremap(acpi_physical_address phys,
        return ioremap_cache(phys, size);
 }
 #endif
-
-extern bool acpi_permanent_mmap;
 
 void __iomem *__ref
 acpi_os_map_iomem(acpi_physical_address phys, acpi_size size);

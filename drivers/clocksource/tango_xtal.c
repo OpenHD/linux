@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/clocksource.h>
 #include <linux/sched_clock.h>
 #include <linux/of_address.h>
@@ -27,13 +26,13 @@ static int __init tango_clocksource_init(struct device_node *np)
 
 	xtal_in_cnt = of_iomap(np, 0);
 	if (xtal_in_cnt == NULL) {
-		pr_err("%pOF: invalid address\n", np);
+		pr_err("%s: invalid address\n", np->full_name);
 		return -ENXIO;
 	}
 
 	clk = of_clk_get(np, 0);
 	if (IS_ERR(clk)) {
-		pr_err("%pOF: invalid clock\n", np);
+		pr_err("%s: invalid clock\n", np->full_name);
 		return PTR_ERR(clk);
 	}
 
@@ -44,7 +43,7 @@ static int __init tango_clocksource_init(struct device_node *np)
 	ret = clocksource_mmio_init(xtal_in_cnt, "tango-xtal", xtal_freq, 350,
 				    32, clocksource_mmio_readl_up);
 	if (ret) {
-		pr_err("%pOF: registration failed\n", np);
+		pr_err("%s: registration failed\n", np->full_name);
 		return ret;
 	}
 
@@ -54,4 +53,4 @@ static int __init tango_clocksource_init(struct device_node *np)
 	return 0;
 }
 
-TIMER_OF_DECLARE(tango, "sigma,tick-counter", tango_clocksource_init);
+CLOCKSOURCE_OF_DECLARE(tango, "sigma,tick-counter", tango_clocksource_init);

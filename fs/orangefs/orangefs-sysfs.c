@@ -1,6 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * Documentation/ABI/stable/sysfs-fs-orangefs:
+ * Documentation/ABI/stable/orangefs-sysfs:
  *
  * What:		/sys/fs/orangefs/perf_counter_reset
  * Date:		June 2015
@@ -91,13 +90,6 @@
  * Contact:		Martin Brandenburg <martin@omnibond.com>
  * Description:
  *			Readahead cache buffer count and size.
- *
- * What:		/sys/fs/orangefs/readahead_readcnt
- * Date:		Jan 2017
- * Contact:		Martin Brandenburg <martin@omnibond.com>
- * Description:
- *			Number of buffers (in multiples of readahead_size)
- *			which can be read ahead for a single file at once.
  *
  * What:		/sys/fs/orangefs/acache/...
  * Date:		Jun 2015
@@ -337,8 +329,7 @@ static ssize_t sysfs_service_op_show(struct kobject *kobj,
 		if (!(orangefs_features & ORANGEFS_FEATURE_READAHEAD) &&
 		    (!strcmp(attr->attr.name, "readahead_count") ||
 		    !strcmp(attr->attr.name, "readahead_size") ||
-		    !strcmp(attr->attr.name, "readahead_count_size") ||
-		    !strcmp(attr->attr.name, "readahead_readcnt"))) {
+		    !strcmp(attr->attr.name, "readahead_count_size"))) {
 			rc = -EINVAL;
 			goto out;
 		}
@@ -369,11 +360,6 @@ static ssize_t sysfs_service_op_show(struct kobject *kobj,
 				 "readahead_count_size"))
 			new_op->upcall.req.param.op =
 				ORANGEFS_PARAM_REQUEST_OP_READAHEAD_COUNT_SIZE;
-
-		else if (!strcmp(attr->attr.name,
-				 "readahead_readcnt"))
-			new_op->upcall.req.param.op =
-				ORANGEFS_PARAM_REQUEST_OP_READAHEAD_READCNT;
 	} else if (!strcmp(kobj->name, ACACHE_KOBJ_ID)) {
 		if (!strcmp(attr->attr.name, "timeout_msecs"))
 			new_op->upcall.req.param.op =
@@ -556,8 +542,7 @@ static ssize_t sysfs_service_op_store(struct kobject *kobj,
 		if (!(orangefs_features & ORANGEFS_FEATURE_READAHEAD) &&
 		    (!strcmp(attr->attr.name, "readahead_count") ||
 		    !strcmp(attr->attr.name, "readahead_size") ||
-		    !strcmp(attr->attr.name, "readahead_count_size") ||
-		    !strcmp(attr->attr.name, "readahead_readcnt"))) {
+		    !strcmp(attr->attr.name, "readahead_count_size"))) {
 			rc = -EINVAL;
 			goto out;
 		}
@@ -625,10 +610,10 @@ static ssize_t sysfs_service_op_store(struct kobject *kobj,
 			new_op->upcall.req.param.u.value32[1] = val2;
 			goto value_set;
 		} else if (!strcmp(attr->attr.name,
-				   "readahead_readcnt")) {
-			if ((val >= 0)) {
+				   "perf_counter_reset")) {
+			if ((val > 0)) {
 				new_op->upcall.req.param.op =
-				ORANGEFS_PARAM_REQUEST_OP_READAHEAD_READCNT;
+				ORANGEFS_PARAM_REQUEST_OP_READAHEAD_COUNT_SIZE;
 			} else {
 				rc = 0;
 				goto out;
@@ -836,10 +821,6 @@ static struct orangefs_attribute readahead_count_size_attribute =
 	__ATTR(readahead_count_size, 0664, sysfs_service_op_show,
 	       sysfs_service_op_store);
 
-static struct orangefs_attribute readahead_readcnt_attribute =
-	__ATTR(readahead_readcnt, 0664, sysfs_service_op_show,
-	       sysfs_service_op_store);
-
 static struct orangefs_attribute perf_counter_reset_attribute =
 	__ATTR(perf_counter_reset,
 	       0664,
@@ -866,7 +847,6 @@ static struct attribute *orangefs_default_attrs[] = {
 	&readahead_count_attribute.attr,
 	&readahead_size_attribute.attr,
 	&readahead_count_size_attribute.attr,
-	&readahead_readcnt_attribute.attr,
 	&perf_counter_reset_attribute.attr,
 	&perf_history_size_attribute.attr,
 	&perf_time_interval_secs_attribute.attr,

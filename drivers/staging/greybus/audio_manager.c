@@ -1,15 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Greybus operations
  *
  * Copyright 2015-2016 Google Inc.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/string.h>
 #include <linux/sysfs.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/spinlock.h>
+#include <linux/rwlock.h>
 #include <linux/idr.h>
 
 #include "audio_manager.h"
@@ -89,8 +90,8 @@ void gb_audio_manager_remove_all(void)
 
 	list_for_each_entry_safe(module, next, &modules_list, list) {
 		list_del(&module->list);
-		kobject_put(&module->kobj);
 		ida_simple_remove(&module_id, module->id);
+		kobject_put(&module->kobj);
 	}
 
 	is_empty = list_empty(&modules_list);

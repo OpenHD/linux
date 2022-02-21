@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * super.c
  *
@@ -116,7 +115,7 @@ static void destroy_inodecache(void)
 static int efs_remount(struct super_block *sb, int *flags, char *data)
 {
 	sync_filesystem(sb);
-	*flags |= SB_RDONLY;
+	*flags |= MS_RDONLY;
 	return 0;
 }
 
@@ -307,11 +306,11 @@ static int efs_fill_super(struct super_block *s, void *d, int silent)
 	}
 	brelse(bh);
 
-	if (!sb_rdonly(s)) {
+	if (!(s->s_flags & MS_RDONLY)) {
 #ifdef DEBUG
 		pr_info("forcing read-only mode\n");
 #endif
-		s->s_flags |= SB_RDONLY;
+		s->s_flags |= MS_RDONLY;
 	}
 	s->s_op   = &efs_superblock_operations;
 	s->s_export_op = &efs_export_ops;

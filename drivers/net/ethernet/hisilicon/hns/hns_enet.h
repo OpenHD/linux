@@ -37,11 +37,10 @@ enum hns_nic_state {
 struct hns_nic_ring_data {
 	struct hnae_ring *ring;
 	struct napi_struct napi;
-	cpumask_t mask; /* affinity mask */
-	u32 queue_index;
+	int queue_index;
 	int (*poll_one)(struct hns_nic_ring_data *, int, void *);
 	void (*ex_process)(struct hns_nic_ring_data *, struct sk_buff *);
-	bool (*fini_process)(struct hns_nic_ring_data *);
+	void (*fini_process)(struct hns_nic_ring_data *);
 };
 
 /* compatible the difference between two versions */

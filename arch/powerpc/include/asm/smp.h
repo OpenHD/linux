@@ -31,7 +31,6 @@
 
 extern int boot_cpuid;
 extern int spinning_secondaries;
-extern u32 *cpu_to_phys_id;
 
 extern void cpu_die(void);
 extern int cpu_to_chip_id(int cpu);
@@ -41,12 +40,10 @@ extern int cpu_to_chip_id(int cpu);
 struct smp_ops_t {
 	void  (*message_pass)(int cpu, int msg);
 #ifdef CONFIG_PPC_SMP_MUXED_IPI
-	void  (*cause_ipi)(int cpu);
+	void  (*cause_ipi)(int cpu, unsigned long data);
 #endif
-	int   (*cause_nmi_ipi)(int cpu);
 	void  (*probe)(void);
 	int   (*kick_cpu)(int nr);
-	int   (*prepare_cpu)(int nr);
 	void  (*setup_cpu)(int nr);
 	void  (*bringup_done)(void);
 	void  (*take_timebase)(void);
@@ -56,8 +53,6 @@ struct smp_ops_t {
 	int   (*cpu_bootable)(unsigned int nr);
 };
 
-extern int smp_send_nmi_ipi(int cpu, void (*fn)(struct pt_regs *), u64 delay_us);
-extern int smp_send_safe_nmi_ipi(int cpu, void (*fn)(struct pt_regs *), u64 delay_us);
 extern void smp_send_debugger_break(void);
 extern void start_secondary_resume(void);
 extern void smp_generic_give_timebase(void);
@@ -66,6 +61,7 @@ extern void smp_generic_take_timebase(void);
 DECLARE_PER_CPU(unsigned int, cpu_pvr);
 
 #ifdef CONFIG_HOTPLUG_CPU
+extern void migrate_irqs(void);
 int generic_cpu_disable(void);
 void generic_cpu_die(unsigned int cpu);
 void generic_set_cpu_dead(unsigned int cpu);
@@ -98,7 +94,6 @@ static inline void set_hard_smp_processor_id(int cpu, int phys)
 #endif
 
 DECLARE_PER_CPU(cpumask_var_t, cpu_sibling_map);
-DECLARE_PER_CPU(cpumask_var_t, cpu_l2_cache_map);
 DECLARE_PER_CPU(cpumask_var_t, cpu_core_map);
 
 static inline struct cpumask *cpu_sibling_mask(int cpu)
@@ -111,42 +106,29 @@ static inline struct cpumask *cpu_core_mask(int cpu)
 	return per_cpu(cpu_core_map, cpu);
 }
 
-static inline struct cpumask *cpu_l2_cache_mask(int cpu)
-{
-	return per_cpu(cpu_l2_cache_map, cpu);
-}
-
 extern int cpu_to_core_id(int cpu);
 
 /* Since OpenPIC has only 4 IPIs, we use slightly different message numbers.
  *
  * Make sure this matches openpic_request_IPIs in open_pic.c, or what shows up
  * in /proc/interrupts will be wrong!!! --Troy */
-#define PPC_MSG_CALL_FUNCTION	0
-#define PPC_MSG_RESCHEDULE	1
+#define PPC_MSG_CALL_FUNCTION   0
+#define PPC_MSG_RESCHEDULE      1
 #define PPC_MSG_TICK_BROADCAST	2
-#define PPC_MSG_NMI_IPI		3
+#define PPC_MSG_DEBUGGER_BREAK  3
 
 /* This is only used by the powernv kernel */
 #define PPC_MSG_RM_HOST_ACTION	4
-
-#define NMI_IPI_ALL_OTHERS		-2
-
-#ifdef CONFIG_NMI_IPI
-extern int smp_handle_nmi_ipi(struct pt_regs *regs);
-#else
-static inline int smp_handle_nmi_ipi(struct pt_regs *regs) { return 0; }
-#endif
 
 /* for irq controllers that have dedicated ipis per message (4) */
 extern int smp_request_message_ipi(int virq, int message);
 extern const char *smp_ipi_name[];
 
 /* for irq controllers with only a single ipi */
+extern void smp_muxed_ipi_set_data(int cpu, unsigned long data);
 extern void smp_muxed_ipi_message_pass(int cpu, int msg);
 extern void smp_muxed_ipi_set_message(int cpu, int msg);
 extern irqreturn_t smp_ipi_demux(void);
-extern irqreturn_t smp_ipi_demux_relaxed(void);
 
 void smp_init_pSeries(void);
 void smp_init_cell(void);
@@ -171,12 +153,12 @@ static inline const struct cpumask *cpu_sibling_mask(int cpu)
 #ifdef CONFIG_PPC64
 static inline int get_hard_smp_processor_id(int cpu)
 {
-	return paca_ptrs[cpu]->hw_cpu_id;
+	return paca[cpu].hw_cpu_id;
 }
 
 static inline void set_hard_smp_processor_id(int cpu, int phys)
 {
-	paca_ptrs[cpu]->hw_cpu_id = phys;
+	paca[cpu].hw_cpu_id = phys;
 }
 #else
 /* 32-bit */
@@ -194,7 +176,7 @@ static inline void set_hard_smp_processor_id(int cpu, int phys)
 #endif /* !CONFIG_SMP */
 #endif /* !CONFIG_PPC64 */
 
-#if defined(CONFIG_PPC64) && (defined(CONFIG_SMP) || defined(CONFIG_KEXEC_CORE))
+#if defined(CONFIG_PPC64) && (defined(CONFIG_SMP) || defined(CONFIG_KEXEC))
 extern void smp_release_cpus(void);
 #else
 static inline void smp_release_cpus(void) { };

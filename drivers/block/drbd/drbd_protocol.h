@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __DRBD_PROTOCOL_H
 #define __DRBD_PROTOCOL_H
 

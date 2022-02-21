@@ -21,9 +21,6 @@
 #include <linux/irq.h>
 #include <linux/kdebug.h>
 #include <linux/module.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/hotplug.h>
-#include <linux/sched/task_stack.h>
 #include <linux/reboot.h>
 #include <linux/seq_file.h>
 #include <linux/smp.h>
@@ -143,8 +140,8 @@ void secondary_start_kernel(void)
 
 	/* All kernel threads share the same mm context. */
 
-	mmget(mm);
-	mmgrab(mm);
+	atomic_inc(&mm->mm_users);
+	atomic_inc(&mm->mm_count);
 	current->active_mm = mm;
 	cpumask_set_cpu(cpu, mm_cpumask(mm));
 	enter_lazy_tlb(mm, current);

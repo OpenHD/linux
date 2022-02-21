@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2015, Intel Corporation
  * Authors: Tadeusz Struk <tadeusz.struk@intel.com>
+ * Copyright (c) 2017, NVIDIA Corporation. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -27,6 +28,7 @@
  *		result.
  *		In case of error where the dst sgl size was insufficient,
  *		it will be updated to the size required for the operation.
+ * @info:	Any request specific data needed to process the request.
  * @__ctx:	Start of private context data
  */
 struct akcipher_request {
@@ -35,6 +37,7 @@ struct akcipher_request {
 	struct scatterlist *dst;
 	unsigned int src_len;
 	unsigned int dst_len;
+	void *info;
 	void *__ctx[] CRYPTO_MINALIGN_ATTR;
 };
 
@@ -98,7 +101,7 @@ struct akcipher_alg {
 			   unsigned int keylen);
 	int (*set_priv_key)(struct crypto_akcipher *tfm, const void *key,
 			    unsigned int keylen);
-	unsigned int (*max_size)(struct crypto_akcipher *tfm);
+	int (*max_size)(struct crypto_akcipher *tfm);
 	int (*init)(struct crypto_akcipher *tfm);
 	void (*exit)(struct crypto_akcipher *tfm);
 
@@ -193,7 +196,7 @@ static inline struct akcipher_request *akcipher_request_alloc(
 {
 	struct akcipher_request *req;
 
-	req = kmalloc(sizeof(*req) + crypto_akcipher_reqsize(tfm), gfp);
+	req = kzalloc(sizeof(*req) + crypto_akcipher_reqsize(tfm), gfp);
 	if (likely(req))
 		akcipher_request_set_tfm(req, tfm);
 
@@ -257,14 +260,13 @@ static inline void akcipher_request_set_crypt(struct akcipher_request *req,
 /**
  * crypto_akcipher_maxsize() - Get len for output buffer
  *
- * Function returns the dest buffer size required for a given key.
- * Function assumes that the key is already set in the transformation. If this
- * function is called without a setkey or with a failed setkey, you will end up
- * in a NULL dereference.
+ * Function returns the dest buffer size required for a given key
  *
  * @tfm:	AKCIPHER tfm handle allocated with crypto_alloc_akcipher()
+ *
+ * Return: minimum len for output buffer or error code in key hasn't been set
  */
-static inline unsigned int crypto_akcipher_maxsize(struct crypto_akcipher *tfm)
+static inline int crypto_akcipher_maxsize(struct crypto_akcipher *tfm)
 {
 	struct akcipher_alg *alg = crypto_akcipher_alg(tfm);
 

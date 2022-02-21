@@ -12,12 +12,9 @@ RGB Formats
 
     pixfmt-packed-rgb
     pixfmt-srggb8
+    pixfmt-sbggr16
     pixfmt-srggb10
     pixfmt-srggb10p
     pixfmt-srggb10alaw8
     pixfmt-srggb10dpcm8
-    pixfmt-srggb10-ipu3
     pixfmt-srggb12
-    pixfmt-srggb12p
-    pixfmt-srggb14p
-    pixfmt-srggb16

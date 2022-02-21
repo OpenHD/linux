@@ -29,7 +29,6 @@
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/cpu.h>
-#include <linux/hashtable.h>
 #include <trace/events/power.h>
 
 #include <asm/cputhreads.h>
@@ -39,13 +38,10 @@
 #include <asm/opal.h>
 #include <linux/timer.h>
 
-#define POWERNV_MAX_PSTATES_ORDER  8
-#define POWERNV_MAX_PSTATES	(1UL << (POWERNV_MAX_PSTATES_ORDER))
+#define POWERNV_MAX_PSTATES	256
 #define PMSR_PSAFE_ENABLE	(1UL << 30)
 #define PMSR_SPR_EM_DISABLE	(1UL << 31)
-#define MAX_PSTATE_SHIFT	32
-#define LPSTATE_SHIFT		48
-#define GPSTATE_SHIFT		56
+#define PMSR_MAX(x)		((x >> 32) & 0xFF)
 
 #define MAX_RAMP_DOWN_TIME				5120
 /*
@@ -90,31 +86,9 @@ struct global_pstate_info {
 	int last_gpstate_idx;
 	spinlock_t gpstate_lock;
 	struct timer_list timer;
-	struct cpufreq_policy *policy;
 };
 
 static struct cpufreq_frequency_table powernv_freqs[POWERNV_MAX_PSTATES+1];
-
-DEFINE_HASHTABLE(pstate_revmap, POWERNV_MAX_PSTATES_ORDER);
-/**
- * struct pstate_idx_revmap_data: Entry in the hashmap pstate_revmap
- *				  indexed by a function of pstate id.
- *
- * @pstate_id: pstate id for this entry.
- *
- * @cpufreq_table_idx: Index into the powernv_freqs
- *		       cpufreq_frequency_table for frequency
- *		       corresponding to pstate_id.
- *
- * @hentry: hlist_node that hooks this entry into the pstate_revmap
- *	    hashtable
- */
-struct pstate_idx_revmap_data {
-	u8 pstate_id;
-	unsigned int cpufreq_table_idx;
-	struct hlist_node hentry;
-};
-
 static bool rebooting, throttled, occ_reset;
 
 static const char * const throttle_reason[] = {
@@ -166,59 +140,41 @@ static struct powernv_pstate_info {
 	unsigned int max;
 	unsigned int nominal;
 	unsigned int nr_pstates;
-	bool wof_enabled;
 } powernv_pstate_info;
 
-static inline u8 extract_pstate(u64 pmsr_val, unsigned int shift)
-{
-	return ((pmsr_val >> shift) & 0xFF);
-}
-
-#define extract_local_pstate(x) extract_pstate(x, LPSTATE_SHIFT)
-#define extract_global_pstate(x) extract_pstate(x, GPSTATE_SHIFT)
-#define extract_max_pstate(x)  extract_pstate(x, MAX_PSTATE_SHIFT)
-
-/* Use following functions for conversions between pstate_id and index */
-
-/**
- * idx_to_pstate : Returns the pstate id corresponding to the
- *		   frequency in the cpufreq frequency table
- *		   powernv_freqs indexed by @i.
- *
- *		   If @i is out of bound, this will return the pstate
- *		   corresponding to the nominal frequency.
- */
-static inline u8 idx_to_pstate(unsigned int i)
+/* Use following macros for conversions between pstate_id and index */
+static inline int idx_to_pstate(unsigned int i)
 {
 	if (unlikely(i >= powernv_pstate_info.nr_pstates)) {
-		pr_warn_once("idx_to_pstate: index %u is out of bound\n", i);
+		pr_warn_once("index %u is out of bound\n", i);
 		return powernv_freqs[powernv_pstate_info.nominal].driver_data;
 	}
 
 	return powernv_freqs[i].driver_data;
 }
 
-/**
- * pstate_to_idx : Returns the index in the cpufreq frequencytable
- *		   powernv_freqs for the frequency whose corresponding
- *		   pstate id is @pstate.
- *
- *		   If no frequency corresponding to @pstate is found,
- *		   this will return the index of the nominal
- *		   frequency.
- */
-static unsigned int pstate_to_idx(u8 pstate)
+static inline unsigned int pstate_to_idx(int pstate)
 {
-	unsigned int key = pstate % POWERNV_MAX_PSTATES;
-	struct pstate_idx_revmap_data *revmap_data;
+	int min = powernv_freqs[powernv_pstate_info.min].driver_data;
+	int max = powernv_freqs[powernv_pstate_info.max].driver_data;
 
-	hash_for_each_possible(pstate_revmap, revmap_data, hentry, key) {
-		if (revmap_data->pstate_id == pstate)
-			return revmap_data->cpufreq_table_idx;
+	if (min > 0) {
+		if (unlikely((pstate < max) || (pstate > min))) {
+			pr_warn_once("pstate %d is out of bound\n", pstate);
+			return powernv_pstate_info.nominal;
+		}
+	} else {
+		if (unlikely((pstate > max) || (pstate < min))) {
+			pr_warn_once("pstate %d is out of bound\n", pstate);
+			return powernv_pstate_info.nominal;
+		}
 	}
-
-	pr_warn_once("pstate_to_idx: pstate 0x%x not found\n", pstate);
-	return powernv_pstate_info.nominal;
+	/*
+	 * abs() is deliberately used so that is works with
+	 * both monotonically increasing and decreasing
+	 * pstate values
+	 */
+	return abs(pstate - idx_to_pstate(powernv_pstate_info.max));
 }
 
 static inline void reset_gpstates(struct cpufreq_policy *policy)
@@ -243,7 +199,6 @@ static int init_powernv_pstates(void)
 	const __be32 *pstate_ids, *pstate_freqs;
 	u32 len_ids, len_freqs;
 	u32 pstate_min, pstate_max, pstate_nominal;
-	u32 pstate_turbo, pstate_ultra_turbo;
 
 	power_mgt = of_find_node_by_path("/ibm,opal/power-mgt");
 	if (!power_mgt) {
@@ -266,29 +221,8 @@ static int init_powernv_pstates(void)
 		pr_warn("ibm,pstate-nominal not found\n");
 		return -ENODEV;
 	}
-
-	if (of_property_read_u32(power_mgt, "ibm,pstate-ultra-turbo",
-				 &pstate_ultra_turbo)) {
-		powernv_pstate_info.wof_enabled = false;
-		goto next;
-	}
-
-	if (of_property_read_u32(power_mgt, "ibm,pstate-turbo",
-				 &pstate_turbo)) {
-		powernv_pstate_info.wof_enabled = false;
-		goto next;
-	}
-
-	if (pstate_turbo == pstate_ultra_turbo)
-		powernv_pstate_info.wof_enabled = false;
-	else
-		powernv_pstate_info.wof_enabled = true;
-
-next:
-	pr_info("cpufreq pstate min 0x%x nominal 0x%x max 0x%x\n", pstate_min,
+	pr_info("cpufreq pstate min %d nominal %d max %d\n", pstate_min,
 		pstate_nominal, pstate_max);
-	pr_info("Workload Optimized Frequency is %s in the platform\n",
-		(powernv_pstate_info.wof_enabled) ? "enabled" : "disabled");
 
 	pstate_ids = of_get_property(power_mgt, "ibm,pstate-ids", &len_ids);
 	if (!pstate_ids) {
@@ -316,24 +250,13 @@ next:
 
 	powernv_pstate_info.nr_pstates = nr_pstates;
 	pr_debug("NR PStates %d\n", nr_pstates);
-
 	for (i = 0; i < nr_pstates; i++) {
 		u32 id = be32_to_cpu(pstate_ids[i]);
 		u32 freq = be32_to_cpu(pstate_freqs[i]);
-		struct pstate_idx_revmap_data *revmap_data;
-		unsigned int key;
 
 		pr_debug("PState id %d freq %d MHz\n", id, freq);
 		powernv_freqs[i].frequency = freq * 1000; /* kHz */
-		powernv_freqs[i].driver_data = id & 0xFF;
-
-		revmap_data = (struct pstate_idx_revmap_data *)
-			      kmalloc(sizeof(*revmap_data), GFP_KERNEL);
-
-		revmap_data->pstate_id = id & 0xFF;
-		revmap_data->cpufreq_table_idx = i;
-		key = (revmap_data->pstate_id) % POWERNV_MAX_PSTATES;
-		hash_add(pstate_revmap, &revmap_data->hentry, key);
+		powernv_freqs[i].driver_data = id;
 
 		if (id == pstate_max)
 			powernv_pstate_info.max = i;
@@ -341,13 +264,6 @@ next:
 			powernv_pstate_info.nominal = i;
 		if (id == pstate_min)
 			powernv_pstate_info.min = i;
-
-		if (powernv_pstate_info.wof_enabled && id == pstate_turbo) {
-			int j;
-
-			for (j = i - 1; j >= (int)powernv_pstate_info.max; j--)
-				powernv_freqs[j].flags = CPUFREQ_BOOST_FREQ;
-		}
 	}
 
 	/* End of list marker entry */
@@ -356,13 +272,14 @@ next:
 }
 
 /* Returns the CPU frequency corresponding to the pstate_id. */
-static unsigned int pstate_id_to_freq(u8 pstate_id)
+static unsigned int pstate_id_to_freq(int pstate_id)
 {
 	int i;
 
 	i = pstate_to_idx(pstate_id);
 	if (i >= powernv_pstate_info.nr_pstates || i < 0) {
-		pr_warn("PState id 0x%x outside of PState table, reporting nominal id 0x%x instead\n",
+		pr_warn("PState id %d outside of PState table, "
+			"reporting nominal id %d instead\n",
 			pstate_id, idx_to_pstate(powernv_pstate_info.nominal));
 		i = powernv_pstate_info.nominal;
 	}
@@ -384,12 +301,9 @@ static ssize_t cpuinfo_nominal_freq_show(struct cpufreq_policy *policy,
 struct freq_attr cpufreq_freq_attr_cpuinfo_nominal_freq =
 	__ATTR_RO(cpuinfo_nominal_freq);
 
-#define SCALING_BOOST_FREQS_ATTR_INDEX		2
-
 static struct freq_attr *powernv_cpu_freq_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
 	&cpufreq_freq_attr_cpuinfo_nominal_freq,
-	&cpufreq_freq_attr_scaling_boost_freqs,
 	NULL,
 };
 
@@ -468,8 +382,8 @@ static inline void set_pmspr(unsigned long sprn, unsigned long val)
  */
 struct powernv_smp_call_data {
 	unsigned int freq;
-	u8 pstate_id;
-	u8 gpstate_id;
+	int pstate_id;
+	int gpstate_id;
 };
 
 /*
@@ -486,15 +400,22 @@ struct powernv_smp_call_data {
 static void powernv_read_cpu_freq(void *arg)
 {
 	unsigned long pmspr_val;
+	s8 local_pstate_id;
 	struct powernv_smp_call_data *freq_data = arg;
 
 	pmspr_val = get_pmspr(SPRN_PMSR);
-	freq_data->pstate_id = extract_local_pstate(pmspr_val);
+
+	/*
+	 * The local pstate id corresponds bits 48..55 in the PMSR.
+	 * Note: Watch out for the sign!
+	 */
+	local_pstate_id = (pmspr_val >> 48) & 0xFF;
+	freq_data->pstate_id = local_pstate_id;
 	freq_data->freq = pstate_id_to_freq(freq_data->pstate_id);
 
-	pr_debug("cpu %d pmsr %016lX pstate_id 0x%x frequency %d kHz\n",
-		 raw_smp_processor_id(), pmspr_val, freq_data->pstate_id,
-		 freq_data->freq);
+	pr_debug("cpu %d pmsr %016lX pstate_id %d frequency %d kHz\n",
+		raw_smp_processor_id(), pmspr_val, freq_data->pstate_id,
+		freq_data->freq);
 }
 
 /*
@@ -556,21 +477,21 @@ static void powernv_cpufreq_throttle_check(void *data)
 	struct chip *chip;
 	unsigned int cpu = smp_processor_id();
 	unsigned long pmsr;
-	u8 pmsr_pmax;
+	int pmsr_pmax;
 	unsigned int pmsr_pmax_idx;
 
 	pmsr = get_pmspr(SPRN_PMSR);
 	chip = this_cpu_read(chip_info);
 
 	/* Check for Pmax Capping */
-	pmsr_pmax = extract_max_pstate(pmsr);
+	pmsr_pmax = (s8)PMSR_MAX(pmsr);
 	pmsr_pmax_idx = pstate_to_idx(pmsr_pmax);
 	if (pmsr_pmax_idx != powernv_pstate_info.max) {
 		if (chip->throttled)
 			goto next;
 		chip->throttled = true;
 		if (pmsr_pmax_idx > powernv_pstate_info.nominal) {
-			pr_warn_once("CPU %d on Chip %u has Pmax(0x%x) reduced below that of nominal frequency(0x%x)\n",
+			pr_warn_once("CPU %d on Chip %u has Pmax(%d) reduced below nominal frequency(%d)\n",
 				     cpu, chip->id, pmsr_pmax,
 				     idx_to_pstate(powernv_pstate_info.nominal));
 			chip->throttle_sub_turbo++;
@@ -667,12 +588,11 @@ static inline void  queue_gpstate_timer(struct global_pstate_info *gpstates)
  * according quadratic equation. Queues a new timer if it is still not equal
  * to local pstate
  */
-void gpstate_timer_handler(struct timer_list *t)
+void gpstate_timer_handler(unsigned long data)
 {
-	struct global_pstate_info *gpstates = from_timer(gpstates, t, timer);
-	struct cpufreq_policy *policy = gpstates->policy;
-	int gpstate_idx, lpstate_idx;
-	unsigned long val;
+	struct cpufreq_policy *policy = (struct cpufreq_policy *)data;
+	struct global_pstate_info *gpstates = policy->driver_data;
+	int gpstate_idx;
 	unsigned int time_diff = jiffies_to_msecs(jiffies)
 					- gpstates->last_sampled_time;
 	struct powernv_smp_call_data freq_data;
@@ -690,43 +610,31 @@ void gpstate_timer_handler(struct timer_list *t)
 		return;
 	}
 
-	/*
-	 * If PMCR was last updated was using fast_swtich then
-	 * We may have wrong in gpstate->last_lpstate_idx
-	 * value. Hence, read from PMCR to get correct data.
-	 */
-	val = get_pmspr(SPRN_PMCR);
-	freq_data.gpstate_id = extract_global_pstate(val);
-	freq_data.pstate_id = extract_local_pstate(val);
-	if (freq_data.gpstate_id  == freq_data.pstate_id) {
-		reset_gpstates(policy);
-		spin_unlock(&gpstates->gpstate_lock);
-		return;
-	}
-
 	gpstates->last_sampled_time += time_diff;
 	gpstates->elapsed_time += time_diff;
+	freq_data.pstate_id = idx_to_pstate(gpstates->last_lpstate_idx);
 
-	if (gpstates->elapsed_time > MAX_RAMP_DOWN_TIME) {
+	if ((gpstates->last_gpstate_idx == gpstates->last_lpstate_idx) ||
+	    (gpstates->elapsed_time > MAX_RAMP_DOWN_TIME)) {
 		gpstate_idx = pstate_to_idx(freq_data.pstate_id);
-		lpstate_idx = gpstate_idx;
 		reset_gpstates(policy);
 		gpstates->highest_lpstate_idx = gpstate_idx;
 	} else {
-		lpstate_idx = pstate_to_idx(freq_data.pstate_id);
 		gpstate_idx = calc_global_pstate(gpstates->elapsed_time,
 						 gpstates->highest_lpstate_idx,
-						 lpstate_idx);
+						 gpstates->last_lpstate_idx);
 	}
-	freq_data.gpstate_id = idx_to_pstate(gpstate_idx);
-	gpstates->last_gpstate_idx = gpstate_idx;
-	gpstates->last_lpstate_idx = lpstate_idx;
+
 	/*
 	 * If local pstate is equal to global pstate, rampdown is over
 	 * So timer is not required to be queued.
 	 */
 	if (gpstate_idx != gpstates->last_lpstate_idx)
 		queue_gpstate_timer(gpstates);
+
+	freq_data.gpstate_id = idx_to_pstate(gpstate_idx);
+	gpstates->last_gpstate_idx = pstate_to_idx(freq_data.gpstate_id);
+	gpstates->last_lpstate_idx = pstate_to_idx(freq_data.pstate_id);
 
 	set_pstate(&freq_data);
 	spin_unlock(&gpstates->gpstate_lock);
@@ -758,13 +666,8 @@ static int powernv_cpufreq_target_index(struct cpufreq_policy *policy,
 
 	cur_msec = jiffies_to_msecs(get_jiffies_64());
 
-	freq_data.pstate_id = idx_to_pstate(new_index);
-	if (!gpstates) {
-		freq_data.gpstate_id = freq_data.pstate_id;
-		goto no_gpstate;
-	}
-
 	spin_lock(&gpstates->gpstate_lock);
+	freq_data.pstate_id = idx_to_pstate(new_index);
 
 	if (!gpstates->last_sampled_time) {
 		gpstate_idx = new_index;
@@ -814,7 +717,6 @@ gpstates_done:
 
 	spin_unlock(&gpstates->gpstate_lock);
 
-no_gpstate:
 	/*
 	 * Use smp_call_function to send IPI and execute the
 	 * mtspr on target CPU.  We could do that without IPI
@@ -826,7 +728,7 @@ no_gpstate:
 
 static int powernv_cpufreq_cpu_init(struct cpufreq_policy *policy)
 {
-	int base, i;
+	int base, i, ret;
 	struct kernfs_node *kn;
 	struct global_pstate_info *gpstates;
 
@@ -849,13 +751,6 @@ static int powernv_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		kernfs_put(kn);
 	}
 
-	policy->freq_table = powernv_freqs;
-	policy->fast_switch_possible = true;
-
-	if (pvr_version_is(PVR_POWER9))
-		return 0;
-
-	/* Initialise Gpstate ramp-down timer only on POWER8 */
 	gpstates =  kzalloc(sizeof(*gpstates), GFP_KERNEL);
 	if (!gpstates)
 		return -ENOMEM;
@@ -863,14 +758,18 @@ static int powernv_cpufreq_cpu_init(struct cpufreq_policy *policy)
 	policy->driver_data = gpstates;
 
 	/* initialize timer */
-	gpstates->policy = policy;
-	timer_setup(&gpstates->timer, gpstate_timer_handler,
-		    TIMER_PINNED | TIMER_DEFERRABLE);
+	init_timer_pinned_deferrable(&gpstates->timer);
+	gpstates->timer.data = (unsigned long)policy;
+	gpstates->timer.function = gpstate_timer_handler;
 	gpstates->timer.expires = jiffies +
 				msecs_to_jiffies(GPSTATE_TIMER_INTERVAL);
 	spin_lock_init(&gpstates->gpstate_lock);
+	ret = cpufreq_table_validate_and_show(policy, powernv_freqs);
 
-	return 0;
+	if (ret < 0)
+		kfree(policy->driver_data);
+
+	return ret;
 }
 
 static int powernv_cpufreq_cpu_exit(struct cpufreq_policy *policy)
@@ -885,12 +784,15 @@ static int powernv_cpufreq_reboot_notifier(struct notifier_block *nb,
 				unsigned long action, void *unused)
 {
 	int cpu;
-	struct cpufreq_policy cpu_policy;
+	struct cpufreq_policy *cpu_policy;
 
 	rebooting = true;
 	for_each_online_cpu(cpu) {
-		cpufreq_get_policy(&cpu_policy, cpu);
-		powernv_cpufreq_target_index(&cpu_policy, get_nominal_index());
+		cpu_policy = cpufreq_cpu_get(cpu);
+		if (!cpu_policy)
+			continue;
+		powernv_cpufreq_target_index(cpu_policy, get_nominal_index());
+		cpufreq_cpu_put(cpu_policy);
 	}
 
 	return NOTIFY_DONE;
@@ -903,6 +805,7 @@ static struct notifier_block powernv_cpufreq_reboot_nb = {
 void powernv_cpufreq_work_fn(struct work_struct *work)
 {
 	struct chip *chip = container_of(work, struct chip, throttle);
+	struct cpufreq_policy *policy;
 	unsigned int cpu;
 	cpumask_t mask;
 
@@ -917,12 +820,14 @@ void powernv_cpufreq_work_fn(struct work_struct *work)
 	chip->restore = false;
 	for_each_cpu(cpu, &mask) {
 		int index;
-		struct cpufreq_policy policy;
 
-		cpufreq_get_policy(&policy, cpu);
-		index = cpufreq_table_find_index_c(&policy, policy.cur);
-		powernv_cpufreq_target_index(&policy, index);
-		cpumask_andnot(&mask, &mask, policy.cpus);
+		policy = cpufreq_cpu_get(cpu);
+		if (!policy)
+			continue;
+		index = cpufreq_table_find_index_c(policy, policy->cur);
+		powernv_cpufreq_target_index(policy, index);
+		cpumask_andnot(&mask, &mask, policy->cpus);
+		cpufreq_cpu_put(policy);
 	}
 out:
 	put_online_cpus();
@@ -1009,22 +914,7 @@ static void powernv_cpufreq_stop_cpu(struct cpufreq_policy *policy)
 	freq_data.pstate_id = idx_to_pstate(powernv_pstate_info.min);
 	freq_data.gpstate_id = idx_to_pstate(powernv_pstate_info.min);
 	smp_call_function_single(policy->cpu, set_pstate, &freq_data, 1);
-	if (gpstates)
-		del_timer_sync(&gpstates->timer);
-}
-
-static unsigned int powernv_fast_switch(struct cpufreq_policy *policy,
-					unsigned int target_freq)
-{
-	int index;
-	struct powernv_smp_call_data freq_data;
-
-	index = cpufreq_table_find_index_dl(policy, target_freq);
-	freq_data.pstate_id = powernv_freqs[index].driver_data;
-	freq_data.gpstate_id = powernv_freqs[index].driver_data;
-	set_pstate(&freq_data);
-
-	return powernv_freqs[index].frequency;
+	del_timer_sync(&gpstates->timer);
 }
 
 static struct cpufreq_driver powernv_cpufreq_driver = {
@@ -1034,7 +924,6 @@ static struct cpufreq_driver powernv_cpufreq_driver = {
 	.exit		= powernv_cpufreq_cpu_exit,
 	.verify		= cpufreq_generic_frequency_table_verify,
 	.target_index	= powernv_cpufreq_target_index,
-	.fast_switch	= powernv_fast_switch,
 	.get		= powernv_cpufreq_get,
 	.stop_cpu	= powernv_cpufreq_stop_cpu,
 	.attr		= powernv_cpu_freq_attr,
@@ -1042,14 +931,9 @@ static struct cpufreq_driver powernv_cpufreq_driver = {
 
 static int init_chip_info(void)
 {
-	unsigned int *chip;
+	unsigned int chip[256];
 	unsigned int cpu, i;
 	unsigned int prev_chip_id = UINT_MAX;
-	int ret = 0;
-
-	chip = kcalloc(num_possible_cpus(), sizeof(*chip), GFP_KERNEL);
-	if (!chip)
-		return -ENOMEM;
 
 	for_each_possible_cpu(cpu) {
 		unsigned int id = cpu_to_chip_id(cpu);
@@ -1061,10 +945,8 @@ static int init_chip_info(void)
 	}
 
 	chips = kcalloc(nr_chips, sizeof(struct chip), GFP_KERNEL);
-	if (!chips) {
-		ret = -ENOMEM;
-		goto free_and_return;
-	}
+	if (!chips)
+		return -ENOMEM;
 
 	for (i = 0; i < nr_chips; i++) {
 		chips[i].id = chip[i];
@@ -1074,13 +956,17 @@ static int init_chip_info(void)
 			per_cpu(chip_info, cpu) =  &chips[i];
 	}
 
-free_and_return:
-	kfree(chip);
-	return ret;
+	return 0;
 }
 
 static inline void clean_chip_info(void)
 {
+	int i;
+
+	/* flush any pending work items */
+	if (chips)
+		for (i = 0; i < nr_chips; i++)
+			cancel_work_sync(&chips[i].throttle);
 	kfree(chips);
 }
 
@@ -1112,22 +998,11 @@ static int __init powernv_cpufreq_init(void)
 	register_reboot_notifier(&powernv_cpufreq_reboot_nb);
 	opal_message_notifier_register(OPAL_MSG_OCC, &powernv_cpufreq_opal_nb);
 
-	if (powernv_pstate_info.wof_enabled)
-		powernv_cpufreq_driver.boost_enabled = true;
-	else
-		powernv_cpu_freq_attr[SCALING_BOOST_FREQS_ATTR_INDEX] = NULL;
-
 	rc = cpufreq_register_driver(&powernv_cpufreq_driver);
-	if (rc) {
-		pr_info("Failed to register the cpufreq driver (%d)\n", rc);
-		goto cleanup_notifiers;
-	}
+	if (!rc)
+		return 0;
 
-	if (powernv_pstate_info.wof_enabled)
-		cpufreq_enable_boost_support();
-
-	return 0;
-cleanup_notifiers:
+	pr_info("Failed to register the cpufreq driver (%d)\n", rc);
 	unregister_all_notifiers();
 	clean_chip_info();
 out:

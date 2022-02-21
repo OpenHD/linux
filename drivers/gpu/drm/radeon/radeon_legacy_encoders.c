@@ -27,7 +27,6 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/radeon_drm.h>
 #include "radeon.h"
-#include "radeon_asic.h"
 #include "atom.h"
 #include <linux/backlight.h>
 #ifdef CONFIG_PMAC_BACKLIGHT

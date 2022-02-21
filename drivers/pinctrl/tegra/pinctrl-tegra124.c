@@ -1,8 +1,6 @@
 /*
  * Pinctrl data for the NVIDIA Tegra124 pinmux
  *
- * Author: Ashwini Ghuge <aghuge@nvidia.com>
- *
  * Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -15,7 +13,7 @@
  * more details.
  */
 
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
@@ -1750,6 +1748,7 @@ static struct tegra_function tegra124_functions[] = {
 		.ioreset_bit = PINGROUP_BIT_##ior(8),			\
 		.rcv_sel_bit = PINGROUP_BIT_##rcv_sel(9),		\
 		.parked_bit = -1,					\
+		.pad_bit = -1,						\
 		.drv_reg = -1,						\
 	}
 
@@ -1771,6 +1770,7 @@ static struct tegra_function tegra124_functions[] = {
 		.drv_reg = DRV_PINGROUP_REG(r),				\
 		.drv_bank = 0,						\
 		.parked_bit = -1,					\
+		.pad_bit = -1,						\
 		.hsm_bit = hsm_b,					\
 		.schmitt_bit = schmitt_b,				\
 		.lpmd_bit = lpmd_b,					\
@@ -2051,7 +2051,6 @@ static const struct tegra_pingroup tegra124_groups[] = {
 
 static const struct tegra_pinctrl_soc_data tegra124_pinctrl = {
 	.ngpios = NUM_GPIOS,
-	.gpio_compatible = "nvidia,tegra30-gpio",
 	.pins = tegra124_pins,
 	.npins = ARRAY_SIZE(tegra124_pins),
 	.functions = tegra124_functions,
@@ -2072,6 +2071,7 @@ static const struct of_device_id tegra124_pinctrl_of_match[] = {
 	{ .compatible = "nvidia,tegra124-pinmux", },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, tegra124_pinctrl_of_match);
 
 static struct platform_driver tegra124_pinctrl_driver = {
 	.driver = {
@@ -2080,9 +2080,8 @@ static struct platform_driver tegra124_pinctrl_driver = {
 	},
 	.probe = tegra124_pinctrl_probe,
 };
+module_platform_driver(tegra124_pinctrl_driver);
 
-static int __init tegra124_pinctrl_init(void)
-{
-	return platform_driver_register(&tegra124_pinctrl_driver);
-}
-arch_initcall(tegra124_pinctrl_init);
+MODULE_AUTHOR("Ashwini Ghuge <aghuge@nvidia.com>");
+MODULE_DESCRIPTION("NVIDIA Tegra124 pinctrl driver");
+MODULE_LICENSE("GPL v2");

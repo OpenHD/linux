@@ -462,6 +462,7 @@ static int gs_remove(struct spi_device *spi)
 static struct spi_driver gs_driver = {
 	.driver = {
 		.name		= "gs1662",
+		.owner		= THIS_MODULE,
 	},
 
 	.probe		= gs_probe,

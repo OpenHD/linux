@@ -32,7 +32,6 @@ pgd_t *resume_pg_dir;
  */
 static pmd_t *resume_one_md_table_init(pgd_t *pgd)
 {
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd_table;
 
@@ -42,13 +41,11 @@ static pmd_t *resume_one_md_table_init(pgd_t *pgd)
 		return NULL;
 
 	set_pgd(pgd, __pgd(__pa(pmd_table) | _PAGE_PRESENT));
-	p4d = p4d_offset(pgd, 0);
-	pud = pud_offset(p4d, 0);
+	pud = pud_offset(pgd, 0);
 
 	BUG_ON(pmd_table != pmd_offset(pud, 0));
 #else
-	p4d = p4d_offset(pgd, 0);
-	pud = pud_offset(p4d, 0);
+	pud = pud_offset(pgd, 0);
 	pmd_table = pmd_offset(pud, 0);
 #endif
 

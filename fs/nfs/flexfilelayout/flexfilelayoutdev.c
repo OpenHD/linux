@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Device operations for the pnfs nfs4 file layout driver.
  *
@@ -21,11 +20,9 @@
 static unsigned int dataserver_timeo = NFS_DEF_TCP_TIMEO;
 static unsigned int dataserver_retrans;
 
-static bool ff_layout_has_available_ds(struct pnfs_layout_segment *lseg);
-
 void nfs4_ff_layout_put_deviceid(struct nfs4_ff_layout_ds *mirror_ds)
 {
-	if (!IS_ERR_OR_NULL(mirror_ds))
+	if (mirror_ds)
 		nfs4_put_deviceid_node(&mirror_ds->id_node);
 }
 
@@ -99,8 +96,7 @@ nfs4_ff_alloc_deviceid_node(struct nfs_server *server, struct pnfs_device *pdev,
 	version_count = be32_to_cpup(p);
 	dprintk("%s: version count %d\n", __func__, version_count);
 
-	ds_versions = kcalloc(version_count,
-			      sizeof(struct nfs4_ff_ds_version),
+	ds_versions = kzalloc(version_count * sizeof(struct nfs4_ff_ds_version),
 			      gfp_flags);
 	if (!ds_versions)
 		goto out_scratch;
@@ -122,13 +118,7 @@ nfs4_ff_alloc_deviceid_node(struct nfs_server *server, struct pnfs_device *pdev,
 		if (ds_versions[i].wsize > NFS_MAX_FILE_IO_SIZE)
 			ds_versions[i].wsize = NFS_MAX_FILE_IO_SIZE;
 
-		/*
-		 * check for valid major/minor combination.
-		 * currently we support dataserver which talk:
-		 *   v3, v4.0, v4.1, v4.2
-		 */
-		if (!((ds_versions[i].version == 3 && ds_versions[i].minor_version == 0) ||
-			(ds_versions[i].version == 4 && ds_versions[i].minor_version < 3))) {
+		if (ds_versions[i].version != 3 || ds_versions[i].minor_version != 0) {
 			dprintk("%s: [%d] unsupported ds version %d-%d\n", __func__,
 				i, ds_versions[i].version,
 				ds_versions[i].minor_version);
@@ -186,41 +176,20 @@ out_err:
 static void ff_layout_mark_devid_invalid(struct pnfs_layout_segment *lseg,
 		struct nfs4_deviceid_node *devid)
 {
-	nfs4_delete_deviceid(devid->ld, devid->nfs_client, &devid->deviceid);
+	nfs4_mark_deviceid_unavailable(devid);
 	if (!ff_layout_has_available_ds(lseg))
 		pnfs_error_mark_layout_for_return(lseg->pls_layout->plh_inode,
 				lseg);
 }
 
 static bool ff_layout_mirror_valid(struct pnfs_layout_segment *lseg,
-				   struct nfs4_ff_layout_mirror *mirror,
-				   bool create)
+		struct nfs4_ff_layout_mirror *mirror)
 {
-	if (mirror == NULL || IS_ERR(mirror->mirror_ds))
-		goto outerr;
-	if (mirror->mirror_ds == NULL) {
-		if (create) {
-			struct nfs4_deviceid_node *node;
-			struct pnfs_layout_hdr *lh = lseg->pls_layout;
-			struct nfs4_ff_layout_ds *mirror_ds = ERR_PTR(-ENODEV);
-
-			node = nfs4_find_get_deviceid(NFS_SERVER(lh->plh_inode),
-					&mirror->devid, lh->plh_lc_cred,
-					GFP_KERNEL);
-			if (node)
-				mirror_ds = FF_LAYOUT_MIRROR_DS(node);
-
-			/* check for race with another call to this function */
-			if (cmpxchg(&mirror->mirror_ds, NULL, mirror_ds) &&
-			    mirror_ds != ERR_PTR(-ENODEV))
-				nfs4_put_deviceid_node(node);
-		} else
-			goto outerr;
+	if (mirror == NULL || mirror->mirror_ds == NULL) {
+		pnfs_error_mark_layout_for_return(lseg->pls_layout->plh_inode,
+					lseg);
+		return false;
 	}
-
-	if (IS_ERR(mirror->mirror_ds))
-		goto outerr;
-
 	if (mirror->mirror_ds->ds == NULL) {
 		struct nfs4_deviceid_node *devid;
 		devid = &mirror->mirror_ds->id_node;
@@ -228,9 +197,15 @@ static bool ff_layout_mirror_valid(struct pnfs_layout_segment *lseg,
 		return false;
 	}
 	return true;
-outerr:
-	pnfs_error_mark_layout_for_return(lseg->pls_layout->plh_inode, lseg);
-	return false;
+}
+
+static u64
+end_offset(u64 start, u64 len)
+{
+	u64 end;
+
+	end = start + len;
+	return end >= start ? end : NFS4_MAX_UINT64;
 }
 
 static void extend_ds_error(struct nfs4_ff_layout_ds_err *err,
@@ -238,8 +213,8 @@ static void extend_ds_error(struct nfs4_ff_layout_ds_err *err,
 {
 	u64 end;
 
-	end = max_t(u64, pnfs_end_offset(err->offset, err->length),
-		    pnfs_end_offset(offset, length));
+	end = max_t(u64, end_offset(err->offset, err->length),
+		    end_offset(offset, length));
 	err->offset = min_t(u64, err->offset, offset);
 	err->length = end - err->offset;
 }
@@ -261,9 +236,9 @@ ff_ds_error_match(const struct nfs4_ff_layout_ds_err *e1,
 	ret = memcmp(&e1->deviceid, &e2->deviceid, sizeof(e1->deviceid));
 	if (ret != 0)
 		return ret;
-	if (pnfs_end_offset(e1->offset, e1->length) < e2->offset)
+	if (end_offset(e1->offset, e1->length) < e2->offset)
 		return -1;
-	if (e1->offset > pnfs_end_offset(e2->offset, e2->length))
+	if (e1->offset > end_offset(e2->offset, e2->length))
 		return 1;
 	/* If ranges overlap or are contiguous, they are the same */
 	return 0;
@@ -289,9 +264,8 @@ ff_layout_add_ds_error_locked(struct nfs4_flexfile_layout *flo,
 		}
 		/* Entries match, so merge "err" into "dserr" */
 		extend_ds_error(dserr, err->offset, err->length);
-		list_replace(&err->list, &dserr->list);
+		list_del(&err->list);
 		kfree(err);
-		return;
 	}
 
 	list_add_tail(&dserr->list, head);
@@ -307,7 +281,7 @@ int ff_layout_track_ds_error(struct nfs4_flexfile_layout *flo,
 	if (status == 0)
 		return 0;
 
-	if (IS_ERR_OR_NULL(mirror->mirror_ds))
+	if (mirror->mirror_ds == NULL)
 		return -EINVAL;
 
 	dserr = kmalloc(sizeof(*dserr), gfp_flags);
@@ -358,7 +332,7 @@ nfs4_ff_layout_select_ds_fh(struct pnfs_layout_segment *lseg, u32 mirror_idx)
 	struct nfs4_ff_layout_mirror *mirror = FF_LAYOUT_COMP(lseg, mirror_idx);
 	struct nfs_fh *fh = NULL;
 
-	if (!ff_layout_mirror_valid(lseg, mirror, false)) {
+	if (!ff_layout_mirror_valid(lseg, mirror)) {
 		pr_err_ratelimited("NFS: %s: No data server for mirror offset index %d\n",
 			__func__, mirror_idx);
 		goto out;
@@ -368,25 +342,6 @@ nfs4_ff_layout_select_ds_fh(struct pnfs_layout_segment *lseg, u32 mirror_idx)
 	fh = &mirror->fh_versions[0];
 out:
 	return fh;
-}
-
-int
-nfs4_ff_layout_select_ds_stateid(struct pnfs_layout_segment *lseg,
-				u32 mirror_idx,
-				nfs4_stateid *stateid)
-{
-	struct nfs4_ff_layout_mirror *mirror = FF_LAYOUT_COMP(lseg, mirror_idx);
-
-	if (!ff_layout_mirror_valid(lseg, mirror, false)) {
-		pr_err_ratelimited("NFS: %s: No data server for mirror offset index %d\n",
-			__func__, mirror_idx);
-		goto out;
-	}
-
-	nfs4_stateid_copy(stateid, &mirror->stateid);
-	return 1;
-out:
-	return 0;
 }
 
 /**
@@ -416,9 +371,8 @@ nfs4_ff_layout_prepare_ds(struct pnfs_layout_segment *lseg, u32 ds_idx,
 	struct inode *ino = lseg->pls_layout->plh_inode;
 	struct nfs_server *s = NFS_SERVER(ino);
 	unsigned int max_payload;
-	int status;
 
-	if (!ff_layout_mirror_valid(lseg, mirror, true)) {
+	if (!ff_layout_mirror_valid(lseg, mirror)) {
 		pr_err_ratelimited("NFS: %s: No data server for offset index %d\n",
 			__func__, ds_idx);
 		goto out;
@@ -437,13 +391,14 @@ nfs4_ff_layout_prepare_ds(struct pnfs_layout_segment *lseg, u32 ds_idx,
 	/* FIXME: For now we assume the server sent only one version of NFS
 	 * to use for the DS.
 	 */
-	status = nfs4_pnfs_ds_connect(s, ds, devid, dataserver_timeo,
+	nfs4_pnfs_ds_connect(s, ds, devid, dataserver_timeo,
 			     dataserver_retrans,
 			     mirror->mirror_ds->ds_versions[0].version,
-			     mirror->mirror_ds->ds_versions[0].minor_version);
+			     mirror->mirror_ds->ds_versions[0].minor_version,
+			     RPC_AUTH_UNIX);
 
 	/* connect success, check rsize/wsize limit */
-	if (!status) {
+	if (ds->ds_clp) {
 		max_payload =
 			nfs_block_size(rpc_max_payload(ds->ds_clp->cl_rpcclient),
 				       NULL);
@@ -453,11 +408,11 @@ nfs4_ff_layout_prepare_ds(struct pnfs_layout_segment *lseg, u32 ds_idx,
 			mirror->mirror_ds->ds_versions[0].wsize = max_payload;
 		goto out;
 	}
-out_fail:
 	ff_layout_track_ds_error(FF_LAYOUT_FROM_HDR(lseg->pls_layout),
 				 mirror, lseg->pls_range.offset,
 				 lseg->pls_range.length, NFS4ERR_NXIO,
 				 OP_ILLEGAL, GFP_NOIO);
+out_fail:
 	if (fail_return || !ff_layout_has_available_ds(lseg))
 		pnfs_error_mark_layout_for_return(ino, lseg);
 	ds = NULL;
@@ -503,26 +458,28 @@ nfs4_ff_find_or_create_ds_client(struct pnfs_layout_segment *lseg, u32 ds_idx,
 	}
 }
 
-void ff_layout_free_ds_ioerr(struct list_head *head)
+static bool is_range_intersecting(u64 offset1, u64 length1,
+				  u64 offset2, u64 length2)
 {
-	struct nfs4_ff_layout_ds_err *err;
+	u64 end1 = end_offset(offset1, length1);
+	u64 end2 = end_offset(offset2, length2);
 
-	while (!list_empty(head)) {
-		err = list_first_entry(head,
-				struct nfs4_ff_layout_ds_err,
-				list);
-		list_del(&err->list);
-		kfree(err);
-	}
+	return (end1 == NFS4_MAX_UINT64 || end1 > offset2) &&
+	       (end2 == NFS4_MAX_UINT64 || end2 > offset1);
 }
 
 /* called with inode i_lock held */
-int ff_layout_encode_ds_ioerr(struct xdr_stream *xdr, const struct list_head *head)
+int ff_layout_encode_ds_ioerr(struct nfs4_flexfile_layout *flo,
+			      struct xdr_stream *xdr, int *count,
+			      const struct pnfs_layout_range *range)
 {
-	struct nfs4_ff_layout_ds_err *err;
+	struct nfs4_ff_layout_ds_err *err, *n;
 	__be32 *p;
 
-	list_for_each_entry(err, head, list) {
+	list_for_each_entry_safe(err, n, &flo->error_list, list) {
+		if (!is_range_intersecting(err->offset, err->length,
+					   range->offset, range->length))
+			continue;
 		/* offset(8) + length(8) + stateid(NFS4_STATEID_SIZE)
 		 * + array length + deviceid(NFS4_DEVICEID4_SIZE)
 		 * + status(4) + opnum(4)
@@ -541,57 +498,15 @@ int ff_layout_encode_ds_ioerr(struct xdr_stream *xdr, const struct list_head *he
 					    NFS4_DEVICEID4_SIZE);
 		*p++ = cpu_to_be32(err->status);
 		*p++ = cpu_to_be32(err->opnum);
-		dprintk("%s: offset %llu length %llu status %d op %d\n",
+		*count += 1;
+		list_del(&err->list);
+		dprintk("%s: offset %llu length %llu status %d op %d count %d\n",
 			__func__, err->offset, err->length, err->status,
-			err->opnum);
+			err->opnum, *count);
+		kfree(err);
 	}
 
 	return 0;
-}
-
-static
-unsigned int do_layout_fetch_ds_ioerr(struct pnfs_layout_hdr *lo,
-				      const struct pnfs_layout_range *range,
-				      struct list_head *head,
-				      unsigned int maxnum)
-{
-	struct nfs4_flexfile_layout *flo = FF_LAYOUT_FROM_HDR(lo);
-	struct inode *inode = lo->plh_inode;
-	struct nfs4_ff_layout_ds_err *err, *n;
-	unsigned int ret = 0;
-
-	spin_lock(&inode->i_lock);
-	list_for_each_entry_safe(err, n, &flo->error_list, list) {
-		if (!pnfs_is_range_intersecting(err->offset,
-				pnfs_end_offset(err->offset, err->length),
-				range->offset,
-				pnfs_end_offset(range->offset, range->length)))
-			continue;
-		if (!maxnum)
-			break;
-		list_move(&err->list, head);
-		maxnum--;
-		ret++;
-	}
-	spin_unlock(&inode->i_lock);
-	return ret;
-}
-
-unsigned int ff_layout_fetch_ds_ioerr(struct pnfs_layout_hdr *lo,
-				      const struct pnfs_layout_range *range,
-				      struct list_head *head,
-				      unsigned int maxnum)
-{
-	unsigned int ret;
-
-	ret = do_layout_fetch_ds_ioerr(lo, range, head, maxnum);
-	/* If we're over the max, discard all remaining entries */
-	if (ret == maxnum) {
-		LIST_HEAD(discard);
-		do_layout_fetch_ds_ioerr(lo, range, &discard, -1);
-		ff_layout_free_ds_ioerr(&discard);
-	}
-	return ret;
 }
 
 static bool ff_read_layout_has_available_ds(struct pnfs_layout_segment *lseg)
@@ -602,11 +517,7 @@ static bool ff_read_layout_has_available_ds(struct pnfs_layout_segment *lseg)
 
 	for (idx = 0; idx < FF_LAYOUT_MIRROR_COUNT(lseg); idx++) {
 		mirror = FF_LAYOUT_COMP(lseg, idx);
-		if (mirror) {
-			if (!mirror->mirror_ds)
-				return true;
-			if (IS_ERR(mirror->mirror_ds))
-				continue;
+		if (mirror && mirror->mirror_ds) {
 			devid = &mirror->mirror_ds->id_node;
 			if (!ff_layout_test_devid_unavailable(devid))
 				return true;
@@ -624,10 +535,8 @@ static bool ff_rw_layout_has_available_ds(struct pnfs_layout_segment *lseg)
 
 	for (idx = 0; idx < FF_LAYOUT_MIRROR_COUNT(lseg); idx++) {
 		mirror = FF_LAYOUT_COMP(lseg, idx);
-		if (!mirror || IS_ERR(mirror->mirror_ds))
+		if (!mirror || !mirror->mirror_ds)
 			return false;
-		if (!mirror->mirror_ds)
-			continue;
 		devid = &mirror->mirror_ds->id_node;
 		if (ff_layout_test_devid_unavailable(devid))
 			return false;
@@ -636,7 +545,7 @@ static bool ff_rw_layout_has_available_ds(struct pnfs_layout_segment *lseg)
 	return FF_LAYOUT_MIRROR_COUNT(lseg) != 0;
 }
 
-static bool ff_layout_has_available_ds(struct pnfs_layout_segment *lseg)
+bool ff_layout_has_available_ds(struct pnfs_layout_segment *lseg)
 {
 	if (lseg->pls_range.iomode == IOMODE_READ)
 		return  ff_read_layout_has_available_ds(lseg);

@@ -240,13 +240,13 @@ static const struct i2c_algorithm algo = {
 	.functionality = functionality,
 };
 
-static const struct i2c_adapter adap_template = {
+static struct i2c_adapter adap_template = {
 	.owner = THIS_MODULE,
 	.name = "stk1160",
 	.algo = &algo,
 };
 
-static const struct i2c_client client_template = {
+static struct i2c_client client_template = {
 	.name = "stk1160 internal",
 };
 

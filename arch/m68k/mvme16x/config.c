@@ -46,6 +46,7 @@ static void mvme16x_get_model(char *model);
 extern void mvme16x_sched_init(irq_handler_t handler);
 extern u32 mvme16x_gettimeoffset(void);
 extern int mvme16x_hwclk (int, struct rtc_time *);
+extern int mvme16x_set_clock_mmss (unsigned long);
 extern void mvme16x_reset (void);
 
 int bcd2int (unsigned char b);
@@ -66,8 +67,8 @@ int __init mvme16x_parse_bootinfo(const struct bi_record *bi)
 
 void mvme16x_reset(void)
 {
-	pr_info("\r\n\nCalled mvme16x_reset\r\n"
-		"\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r");
+	printk ("\r\n\nCalled mvme16x_reset\r\n"
+			"\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r");
 	/* The string of returns is to delay the reset until the whole
 	 * message is output.  Assert reset bit in GCSR */
 	*(volatile char *)0xfff40107 = 0x80;
@@ -274,6 +275,7 @@ void __init config_mvme16x(void)
     mach_init_IRQ        = mvme16x_init_IRQ;
     arch_gettimeoffset   = mvme16x_gettimeoffset;
     mach_hwclk           = mvme16x_hwclk;
+    mach_set_clock_mmss	 = mvme16x_set_clock_mmss;
     mach_reset		 = mvme16x_reset;
     mach_get_model       = mvme16x_get_model;
     mach_get_hardware_list = mvme16x_get_hardware_list;
@@ -282,7 +284,7 @@ void __init config_mvme16x(void)
 
     if (strncmp("BDID", p->bdid, 4))
     {
-	pr_crit("Bug call .BRD_ID returned garbage - giving up\n");
+	printk ("\n\nBug call .BRD_ID returned garbage - giving up\n\n");
 	while (1)
 		;
     }
@@ -291,25 +293,25 @@ void __init config_mvme16x(void)
 	vme_brdtype = brdno;
 
     mvme16x_get_model(id);
-    pr_info("BRD_ID: %s   BUG %x.%x %02x/%02x/%02x\n", id, p->rev >> 4,
-	    p->rev & 0xf, p->yr, p->mth, p->day);
+    printk ("\nBRD_ID: %s   BUG %x.%x %02x/%02x/%02x\n", id, p->rev>>4,
+					p->rev&0xf, p->yr, p->mth, p->day);
     if (brdno == 0x0162 || brdno == 0x172)
     {
 	unsigned char rev = *(unsigned char *)MVME162_VERSION_REG;
 
 	mvme16x_config = rev | MVME16x_CONFIG_GOT_SCCA;
 
-	pr_info("MVME%x Hardware status:\n", brdno);
-	pr_info("    CPU Type           68%s040\n",
-		rev & MVME16x_CONFIG_GOT_FPU ? "" : "LC");
-	pr_info("    CPU clock          %dMHz\n",
-		rev & MVME16x_CONFIG_SPEED_32 ? 32 : 25);
-	pr_info("    VMEchip2           %spresent\n",
-		rev & MVME16x_CONFIG_NO_VMECHIP2 ? "NOT " : "");
-	pr_info("    SCSI interface     %spresent\n",
-		rev & MVME16x_CONFIG_NO_SCSICHIP ? "NOT " : "");
-	pr_info("    Ethernet interface %spresent\n",
-		rev & MVME16x_CONFIG_NO_ETHERNET ? "NOT " : "");
+	printk ("MVME%x Hardware status:\n", brdno);
+	printk ("    CPU Type           68%s040\n",
+			rev & MVME16x_CONFIG_GOT_FPU ? "" : "LC");
+	printk ("    CPU clock          %dMHz\n",
+			rev & MVME16x_CONFIG_SPEED_32 ? 32 : 25);
+	printk ("    VMEchip2           %spresent\n",
+			rev & MVME16x_CONFIG_NO_VMECHIP2 ? "NOT " : "");
+	printk ("    SCSI interface     %spresent\n",
+			rev & MVME16x_CONFIG_NO_SCSICHIP ? "NOT " : "");
+	printk ("    Ethernet interface %spresent\n",
+			rev & MVME16x_CONFIG_NO_ETHERNET ? "NOT " : "");
     }
     else
     {
@@ -399,14 +401,18 @@ int mvme16x_hwclk(int op, struct rtc_time *t)
 	if (!op) {
 		rtc->ctrl = RTC_READ;
 		t->tm_year = bcd2int (rtc->bcd_year);
-		t->tm_mon  = bcd2int(rtc->bcd_mth) - 1;
+		t->tm_mon  = bcd2int (rtc->bcd_mth);
 		t->tm_mday = bcd2int (rtc->bcd_dom);
 		t->tm_hour = bcd2int (rtc->bcd_hr);
 		t->tm_min  = bcd2int (rtc->bcd_min);
 		t->tm_sec  = bcd2int (rtc->bcd_sec);
 		rtc->ctrl = 0;
-		if (t->tm_year < 70)
-			t->tm_year += 100;
 	}
 	return 0;
 }
+
+int mvme16x_set_clock_mmss (unsigned long nowtime)
+{
+	return 0;
+}
+

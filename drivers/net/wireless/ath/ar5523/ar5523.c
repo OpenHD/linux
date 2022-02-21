@@ -830,8 +830,8 @@ static void ar5523_tx_work_locked(struct ar5523 *ar)
 		data->ar = ar;
 		data->urb = urb;
 
-		desc = skb_push(skb, sizeof(*desc));
-		chunk = skb_push(skb, sizeof(*chunk));
+		desc = (struct ar5523_tx_desc *)skb_push(skb, sizeof(*desc));
+		chunk = (struct ar5523_chunk *)skb_push(skb, sizeof(*chunk));
 
 		chunk->seqnum = 0;
 		chunk->flags = UATH_CFLAGS_FINAL;
@@ -890,9 +890,9 @@ static void ar5523_tx_work(struct work_struct *work)
 	mutex_unlock(&ar->mutex);
 }
 
-static void ar5523_tx_wd_timer(struct timer_list *t)
+static void ar5523_tx_wd_timer(unsigned long arg)
 {
-	struct ar5523 *ar = from_timer(ar, t, tx_wd_timer);
+	struct ar5523 *ar = (struct ar5523 *) arg;
 
 	ar5523_dbg(ar, "TX watchdog timer triggered\n");
 	ieee80211_queue_work(ar->hw, &ar->tx_wd_work);
@@ -1600,7 +1600,8 @@ static int ar5523_probe(struct usb_interface *intf,
 	mutex_init(&ar->mutex);
 
 	INIT_DELAYED_WORK(&ar->stat_work, ar5523_stat_work);
-	timer_setup(&ar->tx_wd_timer, ar5523_tx_wd_timer, 0);
+	init_timer(&ar->tx_wd_timer);
+	setup_timer(&ar->tx_wd_timer, ar5523_tx_wd_timer, (unsigned long) ar);
 	INIT_WORK(&ar->tx_wd_work, ar5523_tx_wd_work);
 	INIT_WORK(&ar->tx_work, ar5523_tx_work);
 	INIT_LIST_HEAD(&ar->tx_queue_pending);
@@ -1689,8 +1690,6 @@ static int ar5523_probe(struct usb_interface *intf,
 	if (error)
 		goto out_cancel_rx_cmd;
 
-	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
-
 	usb_set_intfdata(intf, hw);
 
 	error = ieee80211_register_hw(hw);
@@ -1749,7 +1748,7 @@ static void ar5523_disconnect(struct usb_interface *intf)
 	{ USB_DEVICE((vendor), (device) + 1), \
 		.driver_info = AR5523_FLAG_ABG|AR5523_FLAG_PRE_FIRMWARE }
 
-static const struct usb_device_id ar5523_id_table[] = {
+static struct usb_device_id ar5523_id_table[] = {
 	AR5523_DEVICE_UG(0x168c, 0x0001),	/* Atheros / AR5523 */
 	AR5523_DEVICE_UG(0x0cf3, 0x0001),	/* Atheros2 / AR5523_1 */
 	AR5523_DEVICE_UG(0x0cf3, 0x0003),	/* Atheros2 / AR5523_2 */
@@ -1770,6 +1769,8 @@ static const struct usb_device_id ar5523_id_table[] = {
 	AR5523_DEVICE_UX(0x0846, 0x4300),	/* Netgear / WG111U */
 	AR5523_DEVICE_UG(0x0846, 0x4250),	/* Netgear / WG111T */
 	AR5523_DEVICE_UG(0x0846, 0x5f00),	/* Netgear / WPN111 */
+	AR5523_DEVICE_UG(0x083a, 0x4506),	/* SMC / EZ Connect
+						   SMCWUSBT-G2 */
 	AR5523_DEVICE_UG(0x157e, 0x3006),	/* Umedia / AR5523_1 */
 	AR5523_DEVICE_UX(0x157e, 0x3205),	/* Umedia / AR5523_2 */
 	AR5523_DEVICE_UG(0x157e, 0x3006),	/* Umedia / TEW444UBEU */

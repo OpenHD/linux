@@ -86,14 +86,23 @@
 };
 
 &mmc1_pins_a {
-	bias-pull-up;
+	allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 };
 
 &r_pio {
 	wifi_pwrseq_pin_mid2407: wifi_pwrseq_pin@0 {
-		pins = "PL6";
-		function = "gpio_out";
+		allwinner,pins = "PL6";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
+};
+
+&reg_ldo_io1 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-touchscreen";
+	status = "okay";
 };
 
 &touchscreen {

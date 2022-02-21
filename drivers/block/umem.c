@@ -54,7 +54,7 @@
 
 #include "umem.h"
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 
 #define MM_MAXCARDS 4
@@ -454,7 +454,7 @@ static void process_page(unsigned long data)
 				PCI_DMA_TODEVICE : PCI_DMA_FROMDEVICE);
 		if (control & DMASCR_HARD_ERROR) {
 			/* error */
-			bio->bi_status = BLK_STS_IOERR;
+			bio->bi_error = -EIO;
 			dev_printk(KERN_WARNING, &card->dev->dev,
 				"I/O error on sector %d/%d\n",
 				le32_to_cpu(desc->local_addr)>>9,
@@ -529,13 +529,13 @@ static blk_qc_t mm_make_request(struct request_queue *q, struct bio *bio)
 		 (unsigned long long)bio->bi_iter.bi_sector,
 		 bio->bi_iter.bi_size);
 
-	blk_queue_split(q, &bio);
+	blk_queue_split(q, &bio, q->bio_split);
 
 	spin_lock_irq(&card->lock);
 	*card->biotail = bio;
 	bio->bi_next = NULL;
 	card->biotail = &bio->bi_next;
-	if (op_is_sync(bio->bi_opf) || !mm_check_plugged(card))
+	if (bio->bi_opf & REQ_SYNC || !mm_check_plugged(card))
 		activate(card);
 	spin_unlock_irq(&card->lock);
 
@@ -718,7 +718,7 @@ static void check_batteries(struct cardinfo *card)
 		set_fault_to_battery_status(card);
 }
 
-static void check_all_batteries(struct timer_list *unused)
+static void check_all_batteries(unsigned long ptr)
 {
 	int i;
 
@@ -738,7 +738,8 @@ static void check_all_batteries(struct timer_list *unused)
 
 static void init_battery_timer(void)
 {
-	timer_setup(&battery_timer, check_all_batteries, 0);
+	init_timer(&battery_timer);
+	battery_timer.function = check_all_batteries;
 	battery_timer.expires = jiffies + (HZ * 60);
 	add_timer(&battery_timer);
 }
@@ -888,14 +889,13 @@ static int mm_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	card->Active = -1;	/* no page is active */
 	card->bio = NULL;
 	card->biotail = &card->bio;
-	spin_lock_init(&card->lock);
 
-	card->queue = blk_alloc_queue_node(GFP_KERNEL, NUMA_NO_NODE,
-					   &card->lock);
+	card->queue = blk_alloc_queue(GFP_KERNEL);
 	if (!card->queue)
 		goto failed_alloc;
 
 	blk_queue_make_request(card->queue, mm_make_request);
+	card->queue->queue_lock = &card->lock;
 	card->queue->queuedata = card;
 
 	tasklet_init(&card->tasklet, process_page, (unsigned long)card);
@@ -968,6 +968,8 @@ static int mm_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	dev_printk(KERN_INFO, &card->dev->dev,
 		"Window size %d bytes, IRQ %d\n", data, dev->irq);
+
+	spin_lock_init(&card->lock);
 
 	pci_set_drvdata(dev, card);
 

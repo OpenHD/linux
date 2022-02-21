@@ -35,11 +35,10 @@
 #ifndef _ASM_ARC_PGTABLE_H
 #define _ASM_ARC_PGTABLE_H
 
-#include <linux/const.h>
-#define __ARCH_USE_5LEVEL_HACK
-#include <asm-generic/pgtable-nopmd.h>
 #include <asm/page.h>
-#include <asm/mmu.h>	/* to propagate CONFIG_ARC_MMU_VER <n> */
+#include <asm/mmu.h>
+#include <asm-generic/pgtable-nopmd.h>
+#include <linux/const.h>
 
 /**************************************************************************
  * Page Table Flags
@@ -319,6 +318,8 @@ PTE_BIT_FUNC(exprotect,	&= ~(_PAGE_EXECUTE));
 PTE_BIT_FUNC(mkexec,	|= (_PAGE_EXECUTE));
 PTE_BIT_FUNC(mkspecial,	|= (_PAGE_SPECIAL));
 PTE_BIT_FUNC(mkhuge,	|= (_PAGE_HW_SZ));
+
+#define __HAVE_ARCH_PTE_SPECIAL
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {

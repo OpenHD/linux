@@ -12,5 +12,4 @@ Depth data provides distance to points, mapped onto the image plane
 .. toctree::
     :maxdepth: 1
 
-    pixfmt-inzi
     pixfmt-z16

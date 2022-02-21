@@ -21,7 +21,6 @@
 			device_type = "cpu";
 			compatible = "snps,archs38";
 			reg = <0>;
-			clocks = <&core_clk>;
 		};
 	};
 

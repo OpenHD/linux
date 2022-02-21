@@ -167,7 +167,7 @@ void hash_preload(struct mm_struct *mm, unsigned long ea,
 {
 	pmd_t *pmd;
 
-	if (!Hash)
+	if (Hash == 0)
 		return;
 	pmd = pmd_offset(pud_offset(pgd_offset(mm, ea), ea), ea);
 	if (!pmd_none(*pmd))

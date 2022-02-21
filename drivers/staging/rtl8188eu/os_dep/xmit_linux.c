@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 #define _XMIT_OSDEP_C_
@@ -14,12 +22,54 @@
 #include <xmit_osdep.h>
 #include <osdep_intf.h>
 
+uint rtw_remainder_len(struct pkt_file *pfile)
+{
+	return pfile->buf_len - ((size_t)(pfile->cur_addr) -
+	       (size_t)(pfile->buf_start));
+}
+
+void _rtw_open_pktfile(struct sk_buff *pktptr, struct pkt_file *pfile)
+{
+
+	pfile->pkt = pktptr;
+	pfile->cur_addr = pktptr->data;
+	pfile->buf_start = pktptr->data;
+	pfile->pkt_len = pktptr->len;
+	pfile->buf_len = pktptr->len;
+
+	pfile->cur_buffer = pfile->buf_start;
+
+}
+
+uint _rtw_pktfile_read(struct pkt_file *pfile, u8 *rmem, uint rlen)
+{
+	uint	len = 0;
+
+
+	len =  rtw_remainder_len(pfile);
+	len = min(rlen, len);
+
+	if (rmem)
+		skb_copy_bits(pfile->pkt, pfile->buf_len-pfile->pkt_len, rmem, len);
+
+	pfile->cur_addr += len;
+	pfile->pkt_len -= len;
+
+
+	return len;
+}
+
+int rtw_endofpktfile(struct pkt_file *pfile)
+{
+	return pfile->pkt_len == 0;
+}
+
 int rtw_os_xmit_resource_alloc(struct adapter *padapter, struct xmit_buf *pxmitbuf, u32 alloc_sz)
 {
 	int i;
 
 	pxmitbuf->pallocated_buf = kzalloc(alloc_sz, GFP_KERNEL);
-	if (!pxmitbuf->pallocated_buf)
+	if (pxmitbuf->pallocated_buf == NULL)
 		return _FAIL;
 
 	pxmitbuf->pbuf = PTR_ALIGN(pxmitbuf->pallocated_buf, XMITBUF_ALIGN_SZ);
@@ -27,7 +77,7 @@ int rtw_os_xmit_resource_alloc(struct adapter *padapter, struct xmit_buf *pxmitb
 
 	for (i = 0; i < 8; i++) {
 		pxmitbuf->pxmit_urb[i] = usb_alloc_urb(0, GFP_KERNEL);
-		if (!pxmitbuf->pxmit_urb[i]) {
+		if (pxmitbuf->pxmit_urb[i] == NULL) {
 			DBG_88E("pxmitbuf->pxmit_urb[i]==NULL");
 			return _FAIL;
 		}
@@ -35,7 +85,8 @@ int rtw_os_xmit_resource_alloc(struct adapter *padapter, struct xmit_buf *pxmitb
 	return _SUCCESS;
 }
 
-void rtw_os_xmit_resource_free(struct xmit_buf *pxmitbuf)
+void rtw_os_xmit_resource_free(struct adapter *padapter,
+			       struct xmit_buf *pxmitbuf, u32 free_sz)
 {
 	int i;
 
@@ -156,12 +207,14 @@ static int rtw_mlcst2unicst(struct adapter *padapter, struct sk_buff *skb)
 	return true;
 }
 
+
 int rtw_xmit_entry(struct sk_buff *pkt, struct  net_device *pnetdev)
 {
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(pnetdev);
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct mlme_priv	*pmlmepriv = &padapter->mlmepriv;
 	s32 res = 0;
+
 
 	RT_TRACE(_module_rtl871x_mlme_c_, _drv_info_, ("+xmit_enry\n"));
 
@@ -196,5 +249,7 @@ drop_packet:
 	RT_TRACE(_module_xmit_osdep_c_, _drv_notice_, ("rtw_xmit_entry: drop, tx_drop=%d\n", (u32)pxmitpriv->tx_drop));
 
 exit:
+
+
 	return 0;
 }

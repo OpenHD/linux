@@ -52,7 +52,7 @@ struct go7007_snd {
 	int capturing;
 };
 
-static const struct snd_pcm_hardware go7007_snd_capture_hw = {
+static struct snd_pcm_hardware go7007_snd_capture_hw = {
 	.info			= (SNDRV_PCM_INFO_MMAP |
 					SNDRV_PCM_INFO_INTERLEAVED |
 					SNDRV_PCM_INFO_BLOCK_TRANSFER |
@@ -75,14 +75,13 @@ static void parse_audio_stream_data(struct go7007 *go, u8 *buf, int length)
 	struct go7007_snd *gosnd = go->snd_context;
 	struct snd_pcm_runtime *runtime = gosnd->substream->runtime;
 	int frames = bytes_to_frames(runtime, length);
-	unsigned long flags;
 
-	spin_lock_irqsave(&gosnd->lock, flags);
+	spin_lock(&gosnd->lock);
 	gosnd->hw_ptr += frames;
 	if (gosnd->hw_ptr >= runtime->buffer_size)
 		gosnd->hw_ptr -= runtime->buffer_size;
 	gosnd->avail += frames;
-	spin_unlock_irqrestore(&gosnd->lock, flags);
+	spin_unlock(&gosnd->lock);
 	if (gosnd->w_idx + length > runtime->dma_bytes) {
 		int cpy = runtime->dma_bytes - gosnd->w_idx;
 
@@ -93,13 +92,13 @@ static void parse_audio_stream_data(struct go7007 *go, u8 *buf, int length)
 	}
 	memcpy(runtime->dma_area + gosnd->w_idx, buf, length);
 	gosnd->w_idx += length;
-	spin_lock_irqsave(&gosnd->lock, flags);
+	spin_lock(&gosnd->lock);
 	if (gosnd->avail < runtime->period_size) {
-		spin_unlock_irqrestore(&gosnd->lock, flags);
+		spin_unlock(&gosnd->lock);
 		return;
 	}
 	gosnd->avail -= runtime->period_size;
-	spin_unlock_irqrestore(&gosnd->lock, flags);
+	spin_unlock(&gosnd->lock);
 	if (gosnd->capturing)
 		snd_pcm_period_elapsed(gosnd->substream);
 }
@@ -228,7 +227,7 @@ int go7007_snd_init(struct go7007 *go)
 {
 	static int dev;
 	struct go7007_snd *gosnd;
-	int ret;
+	int ret = 0;
 
 	if (dev >= SNDRV_CARDS)
 		return -ENODEV;
@@ -244,22 +243,18 @@ int go7007_snd_init(struct go7007 *go)
 	gosnd->capturing = 0;
 	ret = snd_card_new(go->dev, index[dev], id[dev], THIS_MODULE, 0,
 			   &gosnd->card);
-	if (ret < 0) {
-		kfree(gosnd);
-		return ret;
-	}
+	if (ret < 0)
+		goto free_snd;
+
 	ret = snd_device_new(gosnd->card, SNDRV_DEV_LOWLEVEL, go,
 			&go7007_snd_device_ops);
-	if (ret < 0) {
-		kfree(gosnd);
-		return ret;
-	}
+	if (ret < 0)
+		goto free_card;
+
 	ret = snd_pcm_new(gosnd->card, "go7007", 0, 0, 1, &gosnd->pcm);
-	if (ret < 0) {
-		snd_card_free(gosnd->card);
-		kfree(gosnd);
-		return ret;
-	}
+	if (ret < 0)
+		goto free_card;
+
 	strlcpy(gosnd->card->driver, "go7007", sizeof(gosnd->card->driver));
 	strlcpy(gosnd->card->shortname, go->name, sizeof(gosnd->card->driver));
 	strlcpy(gosnd->card->longname, gosnd->card->shortname,
@@ -270,11 +265,8 @@ int go7007_snd_init(struct go7007 *go)
 			&go7007_snd_capture_ops);
 
 	ret = snd_card_register(gosnd->card);
-	if (ret < 0) {
-		snd_card_free(gosnd->card);
-		kfree(gosnd);
-		return ret;
-	}
+	if (ret < 0)
+		goto free_card;
 
 	gosnd->substream = NULL;
 	go->snd_context = gosnd;
@@ -282,6 +274,12 @@ int go7007_snd_init(struct go7007 *go)
 	++dev;
 
 	return 0;
+
+free_card:
+	snd_card_free(gosnd->card);
+free_snd:
+	kfree(gosnd);
+	return ret;
 }
 EXPORT_SYMBOL(go7007_snd_init);
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifdef CONFIG_PPC64
 #define PROVIDE32(x)	PROVIDE(__unused__##x)
 #else
@@ -8,12 +7,6 @@
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/cache.h>
 #include <asm/thread_info.h>
-
-#if defined(CONFIG_STRICT_KERNEL_RWX) && !defined(CONFIG_PPC32)
-#define STRICT_ALIGN_SIZE	(1 << 24)
-#else
-#define STRICT_ALIGN_SIZE	PAGE_SIZE
-#endif
 
 ENTRY(_stext)
 
@@ -65,6 +58,7 @@ SECTIONS
 #ifdef CONFIG_PPC64
 		KEEP(*(.head.text.first_256B));
 #ifdef CONFIG_PPC_BOOK3E
+# define END_FIXED	0x100
 #else
 		KEEP(*(.head.text.real_vectors));
 		*(.head.text.real_trampolines);
@@ -72,15 +66,34 @@ SECTIONS
 		*(.head.text.virt_trampolines);
 # if defined(CONFIG_PPC_PSERIES) || defined(CONFIG_PPC_POWERNV)
 		KEEP(*(.head.data.fwnmi_page));
+#  define END_FIXED	0x8000
+# else
+#  define END_FIXED	0x7000
 # endif
 #endif
+		ASSERT((. == END_FIXED), "vmlinux.lds.S: fixed section overflow error");
 #else /* !CONFIG_PPC64 */
 		HEAD_TEXT
 #endif
 	} :kernel
 
-	__head_end = .;
-
+	/*
+	 * If the build dies here, it's likely code in head_64.S is referencing
+	 * labels it can't reach, and the linker inserting stubs without the
+	 * assembler's knowledge. To debug, remove the above assert and
+	 * rebuild. Look for branch stubs in the fixed section region.
+	 *
+	 * Linker stub generation could be allowed in "trampoline"
+	 * sections if absolutely necessary, but this would require
+	 * some rework of the fixed sections. Before resorting to this,
+	 * consider references that have sufficient addressing range,
+	 * (e.g., hand coded trampolines) so the linker does not have
+	 * to add stubs.
+	 *
+	 * Linker stubs at the top of the main text section are currently not
+	 * detected, and will result in a crash at boot due to offsets being
+	 * wrong.
+	 */
 #ifdef CONFIG_PPC64
 	/*
 	 * BLOCK(0) overrides the default output section alignment because
@@ -88,31 +101,18 @@ SECTIONS
 	 * section placement to work.
 	 */
 	.text BLOCK(0) : AT(ADDR(.text) - LOAD_OFFSET) {
-#ifdef CONFIG_LD_HEAD_STUB_CATCH
-		KEEP(*(.linker_stub_catch));
-		. = . ;
-#endif
-
 #else
 	.text : AT(ADDR(.text) - LOAD_OFFSET) {
 		ALIGN_FUNCTION();
 #endif
 		/* careful! __ftr_alt_* sections need to be close to .text */
-		*(.text.hot TEXT_MAIN .text.fixup .text.unlikely .fixup __ftr_alt_* .ref.text);
+		*(.text .fixup __ftr_alt_* .ref.text)
 		SCHED_TEXT
 		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
 		SOFTIRQENTRY_TEXT
-		/*
-		 * -Os builds call FP save/restore functions. The powerpc64
-		 * linker generates those on demand in the .sfpr section.
-		 * .sfpr gets placed at the beginning of a group of input
-		 * sections, which can break start-of-text offset if it is
-		 * included with the main text sections, so put it by itself.
-		 */
-		*(.sfpr);
 		MEM_KEEP(init.text)
 		MEM_KEEP(exit.text)
 
@@ -130,7 +130,7 @@ SECTIONS
 	PROVIDE32 (etext = .);
 
 	/* Read-only data */
-	RO_DATA(PAGE_SIZE)
+	RODATA
 
 #ifdef CONFIG_PPC64
 	. = ALIGN(8);
@@ -138,6 +138,20 @@ SECTIONS
 		__start___stf_entry_barrier_fixup = .;
 		*(__stf_entry_barrier_fixup)
 		__stop___stf_entry_barrier_fixup = .;
+	}
+
+	. = ALIGN(8);
+	__uaccess_flush_fixup : AT(ADDR(__uaccess_flush_fixup) - LOAD_OFFSET) {
+		__start___uaccess_flush_fixup = .;
+		*(__uaccess_flush_fixup)
+		__stop___uaccess_flush_fixup = .;
+	}
+
+	. = ALIGN(8);
+	__entry_flush_fixup : AT(ADDR(__entry_flush_fixup) - LOAD_OFFSET) {
+		__start___entry_flush_fixup = .;
+		*(__entry_flush_fixup)
+		__stop___entry_flush_fixup = .;
 	}
 
 	. = ALIGN(8);
@@ -187,7 +201,7 @@ SECTIONS
 /*
  * Init sections discarded at runtime
  */
-	. = ALIGN(STRICT_ALIGN_SIZE);
+	. = ALIGN(PAGE_SIZE);
 	__init_begin = .;
 	INIT_TEXT_SECTION(PAGE_SIZE) :kernel
 
@@ -201,10 +215,10 @@ SECTIONS
 	.init.data : AT(ADDR(.init.data) - LOAD_OFFSET) {
 		INIT_DATA
 		__vtop_table_begin = .;
-		KEEP(*(.vtop_fixup));
+		*(.vtop_fixup);
 		__vtop_table_end = .;
 		__ptov_table_begin = .;
-		KEEP(*(.ptov_fixup));
+		*(.ptov_fixup);
 		__ptov_table_end = .;
 	}
 
@@ -225,26 +239,26 @@ SECTIONS
 	. = ALIGN(8);
 	__ftr_fixup : AT(ADDR(__ftr_fixup) - LOAD_OFFSET) {
 		__start___ftr_fixup = .;
-		KEEP(*(__ftr_fixup))
+		*(__ftr_fixup)
 		__stop___ftr_fixup = .;
 	}
 	. = ALIGN(8);
 	__mmu_ftr_fixup : AT(ADDR(__mmu_ftr_fixup) - LOAD_OFFSET) {
 		__start___mmu_ftr_fixup = .;
-		KEEP(*(__mmu_ftr_fixup))
+		*(__mmu_ftr_fixup)
 		__stop___mmu_ftr_fixup = .;
 	}
 	. = ALIGN(8);
 	__lwsync_fixup : AT(ADDR(__lwsync_fixup) - LOAD_OFFSET) {
 		__start___lwsync_fixup = .;
-		KEEP(*(__lwsync_fixup))
+		*(__lwsync_fixup)
 		__stop___lwsync_fixup = .;
 	}
 #ifdef CONFIG_PPC64
 	. = ALIGN(8);
 	__fw_ftr_fixup : AT(ADDR(__fw_ftr_fixup) - LOAD_OFFSET) {
 		__start___fw_ftr_fixup = .;
-		KEEP(*(__fw_ftr_fixup))
+		*(__fw_ftr_fixup)
 		__stop___fw_ftr_fixup = .;
 	}
 #endif
@@ -257,7 +271,7 @@ SECTIONS
 	. = ALIGN(8);
 	.machine.desc : AT(ADDR(.machine.desc) - LOAD_OFFSET) {
 		__machine_desc_start = . ;
-		KEEP(*(.machine.desc))
+		*(.machine.desc)
 		__machine_desc_end = . ;
 	}
 #ifdef CONFIG_RELOCATABLE
@@ -304,15 +318,8 @@ SECTIONS
 #ifdef CONFIG_PPC32
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {
 		DATA_DATA
-#ifdef CONFIG_UBSAN
-		*(.data..Lubsan_data*)
-		*(.data..Lubsan_type*)
-#endif
-		*(.data.rel*)
-		*(SDATA_MAIN)
-		*(.sdata2)
+		*(.sdata)
 		*(.got.plt) *(.got)
-		*(.plt)
 	}
 #else
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {
@@ -322,10 +329,14 @@ SECTIONS
 		*(.branch_lt)
 	}
 
+#ifdef CONFIG_DEBUG_INFO_BTF
+	.BTF : AT(ADDR(.BTF) - LOAD_OFFSET) {
+		*(.BTF)
+	}
+#endif
+
 	.opd : AT(ADDR(.opd) - LOAD_OFFSET) {
-		__start_opd = .;
-		KEEP(*(.opd))
-		__end_opd = .;
+		*(.opd)
 	}
 
 	. = ALIGN(256);
@@ -361,8 +372,6 @@ SECTIONS
 		NOSAVE_DATA
 	}
 
-	BUG_TABLE
-
 	. = ALIGN(PAGE_SIZE);
 	_edata  =  .;
 	PROVIDE32 (edata = .);
@@ -377,16 +386,6 @@ SECTIONS
 	_end = . ;
 	PROVIDE32 (end = .);
 
-	STABS_DEBUG
-
-	DWARF_DEBUG
-
+	/* Sections to be discarded. */
 	DISCARDS
-	/DISCARD/ : {
-		*(*.EMB.apuinfo)
-		*(.glink .iplt .plt .rela* .comment)
-		*(.gnu.version*)
-		*(.gnu.attributes)
-		*(.eh_frame)
-	}
 }

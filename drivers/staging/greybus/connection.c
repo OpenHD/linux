@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Greybus connections
  *
  * Copyright 2014 Google Inc.
  * Copyright 2014 Linaro Ltd.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/workqueue.h>
@@ -364,9 +365,6 @@ static int gb_connection_hd_cport_quiesce(struct gb_connection *connection)
 
 	if (connection->mode_switch)
 		peer_space += sizeof(struct gb_operation_msg_hdr);
-
-	if (!hd->driver->cport_quiesce)
-		return 0;
 
 	ret = hd->driver->cport_quiesce(hd, connection->hd_cport_id,
 					peer_space,

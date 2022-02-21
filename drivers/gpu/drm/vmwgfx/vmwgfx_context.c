@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0 OR MIT
 /**************************************************************************
  *
- * Copyright 2009-2015 VMware, Inc., Palo Alto, CA., USA
+ * Copyright © 2009-2015 VMware, Inc., Palo Alto, CA., USA
+ * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -25,11 +25,10 @@
  *
  **************************************************************************/
 
-#include <drm/ttm/ttm_placement.h>
-
 #include "vmwgfx_drv.h"
 #include "vmwgfx_resource_priv.h"
 #include "vmwgfx_binding.h"
+#include "ttm/ttm_placement.h"
 
 struct vmw_user_context {
 	struct ttm_base_object base;
@@ -38,7 +37,7 @@ struct vmw_user_context {
 	struct vmw_cmdbuf_res_manager *man;
 	struct vmw_resource *cotables[SVGA_COTABLE_DX10_MAX];
 	spinlock_t cotable_lock;
-	struct vmw_buffer_object *dx_query_mob;
+	struct vmw_dma_buffer *dx_query_mob;
 };
 
 static void vmw_user_context_free(struct vmw_resource *res);
@@ -210,8 +209,8 @@ static int vmw_gb_context_init(struct vmw_private *dev_priv,
 		for (i = 0; i < SVGA_COTABLE_DX10_MAX; ++i) {
 			uctx->cotables[i] = vmw_cotable_alloc(dev_priv,
 							      &uctx->res, i);
-			if (unlikely(IS_ERR(uctx->cotables[i]))) {
-				ret = PTR_ERR(uctx->cotables[i]);
+			if (unlikely(uctx->cotables[i] == NULL)) {
+				ret = -ENOMEM;
 				goto out_cotables;
 			}
 		}
@@ -424,7 +423,7 @@ static int vmw_gb_context_unbind(struct vmw_resource *res,
 	(void) vmw_execbuf_fence_commands(NULL, dev_priv,
 					  &fence, NULL);
 
-	vmw_bo_fence_single(bo, fence);
+	vmw_fence_single_bo(bo, fence);
 
 	if (likely(fence != NULL))
 		vmw_fence_obj_unreference(&fence);
@@ -648,7 +647,7 @@ static int vmw_dx_context_unbind(struct vmw_resource *res,
 	(void) vmw_execbuf_fence_commands(NULL, dev_priv,
 					  &fence, NULL);
 
-	vmw_bo_fence_single(bo, fence);
+	vmw_fence_single_bo(bo, fence);
 
 	if (likely(fence != NULL))
 		vmw_fence_obj_unreference(&fence);
@@ -746,10 +745,6 @@ static int vmw_context_define(struct drm_device *dev, void *data,
 	struct vmw_resource *tmp;
 	struct drm_vmw_context_arg *arg = (struct drm_vmw_context_arg *)data;
 	struct ttm_object_file *tfile = vmw_fpriv(file_priv)->tfile;
-	struct ttm_operation_ctx ttm_opt_ctx = {
-		.interruptible = true,
-		.no_wait_gpu = false
-	};
 	int ret;
 
 	if (!dev_priv->has_dx && dx) {
@@ -772,7 +767,7 @@ static int vmw_context_define(struct drm_device *dev, void *data,
 
 	ret = ttm_mem_global_alloc(vmw_mem_glob(dev_priv),
 				   vmw_user_context_size,
-				   &ttm_opt_ctx);
+				   false, true);
 	if (unlikely(ret != 0)) {
 		if (ret != -ERESTARTSYS)
 			DRM_ERROR("Out of graphics memory for context"
@@ -781,7 +776,7 @@ static int vmw_context_define(struct drm_device *dev, void *data,
 	}
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-	if (unlikely(!ctx)) {
+	if (unlikely(ctx == NULL)) {
 		ttm_mem_global_free(vmw_mem_glob(dev_priv),
 				    vmw_user_context_size);
 		ret = -ENOMEM;
@@ -900,7 +895,7 @@ vmw_context_binding_state(struct vmw_resource *ctx)
  * specified in the parameter.  0 otherwise.
  */
 int vmw_context_bind_dx_query(struct vmw_resource *ctx_res,
-			      struct vmw_buffer_object *mob)
+			      struct vmw_dma_buffer *mob)
 {
 	struct vmw_user_context *uctx =
 		container_of(ctx_res, struct vmw_user_context, res);
@@ -908,7 +903,7 @@ int vmw_context_bind_dx_query(struct vmw_resource *ctx_res,
 	if (mob == NULL) {
 		if (uctx->dx_query_mob) {
 			uctx->dx_query_mob->dx_query_ctx = NULL;
-			vmw_bo_unreference(&uctx->dx_query_mob);
+			vmw_dmabuf_unreference(&uctx->dx_query_mob);
 			uctx->dx_query_mob = NULL;
 		}
 
@@ -922,7 +917,7 @@ int vmw_context_bind_dx_query(struct vmw_resource *ctx_res,
 	mob->dx_query_ctx  = ctx_res;
 
 	if (!uctx->dx_query_mob)
-		uctx->dx_query_mob = vmw_bo_reference(mob);
+		uctx->dx_query_mob = vmw_dmabuf_reference(mob);
 
 	return 0;
 }
@@ -932,7 +927,7 @@ int vmw_context_bind_dx_query(struct vmw_resource *ctx_res,
  *
  * @ctx_res: The context resource
  */
-struct vmw_buffer_object *
+struct vmw_dma_buffer *
 vmw_context_get_dx_query_mob(struct vmw_resource *ctx_res)
 {
 	struct vmw_user_context *uctx =

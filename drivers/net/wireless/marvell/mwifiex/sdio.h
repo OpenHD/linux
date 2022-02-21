@@ -21,7 +21,6 @@
 #define	_MWIFIEX_SDIO_H
 
 
-#include <linux/completion.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/mmc/sdio_func.h>
@@ -155,6 +154,11 @@
 	a->mpa_rx.start_port = 0;					\
 } while (0)
 
+struct mwifiex_plt_wake_cfg {
+	int irq_wifi;
+	bool wake_by_wifi;
+};
+
 /* data structure for SDIO MPA TX */
 struct mwifiex_sdio_mpa_tx {
 	/* multiport tx aggregation buffer pointer */
@@ -238,8 +242,9 @@ struct mwifiex_sdio_card_reg {
 struct sdio_mmc_card {
 	struct sdio_func *func;
 	struct mwifiex_adapter *adapter;
+	struct device_node *plt_of_node;
+	struct mwifiex_plt_wake_cfg *plt_wake_cfg;
 
-	struct completion fw_done;
 	const char *firmware;
 	const struct mwifiex_sdio_card_reg *reg;
 	u8 max_ports;
@@ -268,8 +273,8 @@ struct sdio_mmc_card {
 	struct mwifiex_sdio_mpa_tx mpa_tx;
 	struct mwifiex_sdio_mpa_rx mpa_rx;
 
-	struct work_struct work;
-	unsigned long work_flags;
+	/* needed for card reset */
+	const struct sdio_device_id *device_id;
 };
 
 struct mwifiex_sdio_device {

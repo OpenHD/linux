@@ -1,9 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _INET_ECN_H_
 #define _INET_ECN_H_
 
 #include <linux/ip.h>
 #include <linux/skbuff.h>
+#include <linux/if_vlan.h>
 
 #include <net/inet_sock.h>
 #include <net/dsfield.h>
@@ -132,6 +132,11 @@ static inline int IP6_ECN_set_ce(struct sk_buff *skb, struct ipv6hdr *iph)
 		skb->csum = csum_add(csum_sub(skb->csum, (__force __wsum)from),
 				     (__force __wsum)to);
 	return 1;
+}
+
+static inline void IP6_ECN_clear(struct ipv6hdr *iph)
+{
+	*(__be32*)iph &= ~htonl(INET_ECN_MASK << 20);
 }
 
 static inline void ipv6_copy_dscp(unsigned int dscp, struct ipv6hdr *inner)

@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This file is based on code from OCTEON SDK by Cavium Networks.
  *
  * Copyright (c) 2003-2007 Cavium Networks
+ *
+ * This file is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, Version 2, as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/platform_device.h>
@@ -13,6 +16,7 @@
 #include <linux/phy.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
+#include <linux/of_mdio.h>
 #include <linux/of_net.h>
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
@@ -225,17 +229,17 @@ static struct net_device_stats *cvm_oct_common_get_stats(struct net_device *dev)
 			cvmx_pko_get_port_status(priv->port, 1, &tx_status);
 		}
 
-		dev->stats.rx_packets += rx_status.inb_packets;
-		dev->stats.tx_packets += tx_status.packets;
-		dev->stats.rx_bytes += rx_status.inb_octets;
-		dev->stats.tx_bytes += tx_status.octets;
-		dev->stats.multicast += rx_status.multicast_packets;
-		dev->stats.rx_crc_errors += rx_status.inb_errors;
-		dev->stats.rx_frame_errors += rx_status.fcs_align_err_packets;
-		dev->stats.rx_dropped += rx_status.dropped_packets;
+		priv->stats.rx_packets += rx_status.inb_packets;
+		priv->stats.tx_packets += tx_status.packets;
+		priv->stats.rx_bytes += rx_status.inb_octets;
+		priv->stats.tx_bytes += tx_status.octets;
+		priv->stats.multicast += rx_status.multicast_packets;
+		priv->stats.rx_crc_errors += rx_status.inb_errors;
+		priv->stats.rx_frame_errors += rx_status.fcs_align_err_packets;
+		priv->stats.rx_dropped += rx_status.dropped_packets;
 	}
 
-	return &dev->stats;
+	return &priv->stats;
 }
 
 /**
@@ -256,6 +260,17 @@ static int cvm_oct_common_change_mtu(struct net_device *dev, int new_mtu)
 #endif
 	int mtu_overhead = ETH_HLEN + ETH_FCS_LEN + vlan_bytes;
 
+	/*
+	 * Limit the MTU to make sure the ethernet packets are between
+	 * 64 bytes and 65535 bytes.
+	 */
+	if ((new_mtu + mtu_overhead < VLAN_ETH_ZLEN) ||
+	    (new_mtu + mtu_overhead > OCTEON_MAX_MTU)) {
+		pr_err("MTU must be between %d and %d.\n",
+		       VLAN_ETH_ZLEN - mtu_overhead,
+		       OCTEON_MAX_MTU - mtu_overhead);
+		return -EINVAL;
+	}
 	dev->mtu = new_mtu;
 
 	if ((interface < 2) &&
@@ -443,7 +458,7 @@ int cvm_oct_common_init(struct net_device *dev)
 	dev->ethtool_ops = &cvm_oct_ethtool_ops;
 
 	cvm_oct_set_mac_filter(dev);
-	dev_set_mtu(dev, dev->mtu);
+	dev->netdev_ops->ndo_change_mtu(dev, dev->mtu);
 
 	/*
 	 * Zero out stats for port so we won't mistakenly show
@@ -671,11 +686,6 @@ static int cvm_oct_probe(struct platform_device *pdev)
 	int fau = FAU_NUM_PACKET_BUFFERS_TO_FREE;
 	int qos;
 	struct device_node *pip;
-	int mtu_overhead = ETH_HLEN + ETH_FCS_LEN;
-
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
-	mtu_overhead += VLAN_HLEN;
-#endif
 
 	octeon_mdiobus_force_mod_depencency();
 
@@ -775,8 +785,6 @@ static int cvm_oct_probe(struct platform_device *pdev)
 			strcpy(dev->name, "pow%d");
 			for (qos = 0; qos < 16; qos++)
 				skb_queue_head_init(&priv->tx_free_list[qos]);
-			dev->min_mtu = VLAN_ETH_ZLEN - mtu_overhead;
-			dev->max_mtu = OCTEON_MAX_MTU - mtu_overhead;
 
 			if (register_netdev(dev) < 0) {
 				pr_err("Failed to register ethernet device for POW\n");
@@ -831,8 +839,6 @@ static int cvm_oct_probe(struct platform_device *pdev)
 			for (qos = 0; qos < cvmx_pko_get_num_queues(port);
 			     qos++)
 				cvmx_fau_atomic_write32(priv->fau + qos * 4, 0);
-			dev->min_mtu = VLAN_ETH_ZLEN - mtu_overhead;
-			dev->max_mtu = OCTEON_MAX_MTU - mtu_overhead;
 
 			switch (priv->imode) {
 			/* These types don't support ports to IPD/PKO */
@@ -875,6 +881,14 @@ static int cvm_oct_probe(struct platform_device *pdev)
 				break;
 			}
 
+			if (priv->of_node && of_phy_is_fixed_link(priv->of_node)) {
+				if (of_phy_register_fixed_link(priv->of_node)) {
+					netdev_err(dev, "Failed to register fixed link for interface %d, port %d\n",
+						   interface, priv->port);
+					dev->netdev_ops = NULL;
+				}
+			}
+
 			if (!dev->netdev_ops) {
 				free_netdev(dev);
 			} else if (register_netdev(dev) < 0) {
@@ -886,8 +900,7 @@ static int cvm_oct_probe(struct platform_device *pdev)
 				fau -=
 				    cvmx_pko_get_num_queues(priv->port) *
 				    sizeof(u32);
-				schedule_delayed_work(&priv->port_periodic_work,
-						      HZ);
+				schedule_delayed_work(&priv->port_periodic_work, HZ);
 			}
 		}
 	}

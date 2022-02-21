@@ -2,14 +2,14 @@
 
 .. _ca_fclose:
 
-=====================
-Digital TV CA close()
-=====================
+==============
+DVB CA close()
+==============
 
 Name
 ----
 
-Digital TV CA close()
+DVB CA close()
 
 
 Synopsis
@@ -34,10 +34,13 @@ This system call closes a previously opened CA device.
 Return Value
 ------------
 
-On success 0 is returned.
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
 
-On error -1 is returned, and the ``errno`` variable is set
-appropriately.
 
-Generic error codes are described at the
-:ref:`Generic Error Codes <gen-errors>` chapter.
+    -  .. row 1
+
+       -  ``EBADF``
+
+       -  fd is not a valid open file descriptor.

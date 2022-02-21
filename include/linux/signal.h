@@ -1,42 +1,47 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_SIGNAL_H
 #define _LINUX_SIGNAL_H
 
+#include <linux/list.h>
 #include <linux/bug.h>
-#include <linux/signal_types.h>
-#include <linux/string.h>
+#include <uapi/linux/signal.h>
 
 struct task_struct;
 
 /* for sysctl */
 extern int print_fatal_signals;
+/*
+ * Real Time signals may be queued.
+ */
 
-static inline void copy_siginfo(struct siginfo *to, const struct siginfo *from)
-{
-	memcpy(to, from, sizeof(*to));
-}
-
-static inline void clear_siginfo(struct siginfo *info)
-{
-	memset(info, 0, sizeof(*info));
-}
-
-int copy_siginfo_to_user(struct siginfo __user *to, const struct siginfo *from);
-
-enum siginfo_layout {
-	SIL_KILL,
-	SIL_TIMER,
-	SIL_POLL,
-	SIL_FAULT,
-	SIL_FAULT_MCEERR,
-	SIL_FAULT_BNDERR,
-	SIL_FAULT_PKUERR,
-	SIL_CHLD,
-	SIL_RT,
-	SIL_SYS,
+struct sigqueue {
+	struct list_head list;
+	int flags;
+	siginfo_t info;
+	struct user_struct *user;
 };
 
-enum siginfo_layout siginfo_layout(unsigned sig, int si_code);
+/* flags values. */
+#define SIGQUEUE_PREALLOC	1
+
+struct sigpending {
+	struct list_head list;
+	sigset_t signal;
+};
+
+#ifndef HAVE_ARCH_COPY_SIGINFO
+
+#include <linux/string.h>
+
+static inline void copy_siginfo(struct siginfo *to, struct siginfo *from)
+{
+	if (from->si_code < 0)
+		memcpy(to, from, sizeof(*to));
+	else
+		/* _sigchld is currently the largest know union member */
+		memcpy(to, from, __ARCH_SI_PREAMBLE_SIZE + sizeof(from->_sifields._sigchld));
+}
+
+#endif
 
 /*
  * Define some primitives to manipulate sigset_t.
@@ -254,20 +259,56 @@ static inline int valid_signal(unsigned long sig)
 
 struct timespec;
 struct pt_regs;
-enum pid_type;
 
 extern int next_signal(struct sigpending *pending, sigset_t *mask);
 extern int do_send_sig_info(int sig, struct siginfo *info,
-				struct task_struct *p, enum pid_type type);
-extern int group_send_sig_info(int sig, struct siginfo *info,
-			       struct task_struct *p, enum pid_type type);
+				struct task_struct *p, bool group);
+extern int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p);
 extern int __group_send_sig_info(int, struct siginfo *, struct task_struct *);
+extern int do_sigtimedwait(const sigset_t *, siginfo_t *,
+				const struct timespec *);
 extern int sigprocmask(int, sigset_t *, sigset_t *);
 extern void set_current_blocked(sigset_t *);
 extern void __set_current_blocked(const sigset_t *);
 extern int show_unhandled_signals;
 
-extern bool get_signal(struct ksignal *ksig);
+struct sigaction {
+#ifndef __ARCH_HAS_IRIX_SIGACTION
+	__sighandler_t	sa_handler;
+	unsigned long	sa_flags;
+#else
+	unsigned int	sa_flags;
+	__sighandler_t	sa_handler;
+#endif
+#ifdef __ARCH_HAS_SA_RESTORER
+	__sigrestore_t sa_restorer;
+#endif
+	sigset_t	sa_mask;	/* mask last for extensibility */
+};
+
+struct k_sigaction {
+	struct sigaction sa;
+#ifdef __ARCH_HAS_KA_RESTORER
+	__sigrestore_t ka_restorer;
+#endif
+};
+ 
+#ifdef CONFIG_OLD_SIGACTION
+struct old_sigaction {
+	__sighandler_t sa_handler;
+	old_sigset_t sa_mask;
+	unsigned long sa_flags;
+	__sigrestore_t sa_restorer;
+};
+#endif
+
+struct ksignal {
+	struct k_sigaction ka;
+	siginfo_t info;
+	int sig;
+};
+
+extern int get_signal(struct ksignal *ksig);
 extern void signal_setup_done(int failed, struct ksignal *ksig, int stepping);
 extern void exit_signals(struct task_struct *tsk);
 extern void kernel_sigaction(int, __sighandler_t);
@@ -302,7 +343,7 @@ static inline void disallow_signal(int sig)
 
 extern struct kmem_cache *sighand_cachep;
 
-extern bool unhandled_signal(struct task_struct *tsk, int sig);
+int unhandled_signal(struct task_struct *tsk, int sig);
 
 /*
  * In POSIX a signal is sent either to a specific thread (Linux task)
@@ -412,18 +453,14 @@ extern bool unhandled_signal(struct task_struct *tsk, int sig);
         rt_sigmask(SIGCONT)   |  rt_sigmask(SIGCHLD)   | \
 	rt_sigmask(SIGWINCH)  |  rt_sigmask(SIGURG)    )
 
-#define SIG_SPECIFIC_SICODES_MASK (\
-	rt_sigmask(SIGILL)    |  rt_sigmask(SIGFPE)    | \
-	rt_sigmask(SIGSEGV)   |  rt_sigmask(SIGBUS)    | \
-	rt_sigmask(SIGTRAP)   |  rt_sigmask(SIGCHLD)   | \
-	rt_sigmask(SIGPOLL)   |  rt_sigmask(SIGSYS)    | \
-	SIGEMT_MASK                                    )
-
 #define sig_kernel_only(sig)		siginmask(sig, SIG_KERNEL_ONLY_MASK)
 #define sig_kernel_coredump(sig)	siginmask(sig, SIG_KERNEL_COREDUMP_MASK)
 #define sig_kernel_ignore(sig)		siginmask(sig, SIG_KERNEL_IGNORE_MASK)
 #define sig_kernel_stop(sig)		siginmask(sig, SIG_KERNEL_STOP_MASK)
-#define sig_specific_sicodes(sig)	siginmask(sig, SIG_SPECIFIC_SICODES_MASK)
+
+#define sig_user_defined(t, signr) \
+	(((t)->sighand->action[(signr)-1].sa.sa_handler != SIG_DFL) &&	\
+	 ((t)->sighand->action[(signr)-1].sa.sa_handler != SIG_IGN))
 
 #define sig_fatal(t, signr) \
 	(!siginmask(signr, SIG_KERNEL_IGNORE_MASK|SIG_KERNEL_STOP_MASK) && \

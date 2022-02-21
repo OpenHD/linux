@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <odm.h>
 
 #define IQK_DELAY_TIME_88E	    10

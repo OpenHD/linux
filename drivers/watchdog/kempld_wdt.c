@@ -146,7 +146,12 @@ static int kempld_wdt_set_stage_timeout(struct kempld_wdt_data *wdt_data,
 	u32 remainder;
 	u8 stage_cfg;
 
+#if GCC_VERSION < 40400
+	/* work around a bug compiling do_div() */
+	prescaler = READ_ONCE(kempld_prescaler[PRESCALER_21]);
+#else
 	prescaler = kempld_prescaler[PRESCALER_21];
+#endif
 
 	if (!stage)
 		return -EINVAL;
@@ -424,7 +429,7 @@ static int kempld_wdt_probe_stages(struct watchdog_device *wdd)
 	return 0;
 }
 
-static const struct watchdog_info kempld_wdt_info = {
+static struct watchdog_info kempld_wdt_info = {
 	.identity	= "KEMPLD Watchdog",
 	.options	= WDIOF_SETTIMEOUT |
 			WDIOF_KEEPALIVEPING |

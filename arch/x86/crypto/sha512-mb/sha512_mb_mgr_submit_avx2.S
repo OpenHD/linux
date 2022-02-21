@@ -209,9 +209,8 @@ return_null:
 	xor     job_rax, job_rax
 	jmp     return
 ENDPROC(sha512_mb_mgr_submit_avx2)
+.data
 
-/* UNUSED?
-.section	.rodata.cst16, "aM", @progbits, 16
 .align 16
 H0:     .int  0x6a09e667
 H1:     .int  0xbb67ae85
@@ -221,4 +220,3 @@ H4:     .int  0x510e527f
 H5:     .int  0x9b05688c
 H6:     .int  0x1f83d9ab
 H7:     .int  0x5be0cd19
-*/

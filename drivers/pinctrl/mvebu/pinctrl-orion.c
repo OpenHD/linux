@@ -20,6 +20,7 @@
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/of.h>
@@ -31,8 +32,7 @@
 static void __iomem *mpp_base;
 static void __iomem *high_mpp_base;
 
-static int orion_mpp_ctrl_get(struct mvebu_mpp_ctrl_data *data,
-			      unsigned pid, unsigned long *config)
+static int orion_mpp_ctrl_get(unsigned pid, unsigned long *config)
 {
 	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
 
@@ -47,8 +47,7 @@ static int orion_mpp_ctrl_get(struct mvebu_mpp_ctrl_data *data,
 	return 0;
 }
 
-static int orion_mpp_ctrl_set(struct mvebu_mpp_ctrl_data *data,
-			      unsigned pid, unsigned long config)
+static int orion_mpp_ctrl_set(unsigned pid, unsigned long config)
 {
 	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
 
@@ -162,7 +161,7 @@ static struct mvebu_mpp_mode orion_mpp_modes[] = {
 		 MPP_VAR_FUNCTION(0x5, "gpio", NULL,        V_5182)),
 };
 
-static const struct mvebu_mpp_ctrl orion_mpp_controls[] = {
+static struct mvebu_mpp_ctrl orion_mpp_controls[] = {
 	MPP_FUNC_CTRL(0, 19, NULL, orion_mpp_ctrl),
 };
 
@@ -248,4 +247,9 @@ static struct platform_driver orion_pinctrl_driver = {
 	},
 	.probe = orion_pinctrl_probe,
 };
-builtin_platform_driver(orion_pinctrl_driver);
+
+module_platform_driver(orion_pinctrl_driver);
+
+MODULE_AUTHOR("Thomas Petazzoni <thomas.petazzoni@free-electrons.com>");
+MODULE_DESCRIPTION("Marvell Orion pinctrl driver");
+MODULE_LICENSE("GPL v2");

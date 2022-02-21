@@ -339,7 +339,7 @@ static int __init twd_local_timer_common_register(struct device_node *np)
 	}
 
 	cpuhp_setup_state_nocalls(CPUHP_AP_ARM_TWD_STARTING,
-				  "arm/timer/twd:starting",
+				  "AP_ARM_TWD_STARTING",
 				  twd_timer_starting_cpu, twd_timer_dying_cpu);
 
 	twd_get_clock(np);
@@ -403,7 +403,7 @@ out:
 	WARN(err, "twd_local_timer_of_register failed (%d)\n", err);
 	return err;
 }
-TIMER_OF_DECLARE(arm_twd_a9, "arm,cortex-a9-twd-timer", twd_local_timer_of_register);
-TIMER_OF_DECLARE(arm_twd_a5, "arm,cortex-a5-twd-timer", twd_local_timer_of_register);
-TIMER_OF_DECLARE(arm_twd_11mp, "arm,arm11mp-twd-timer", twd_local_timer_of_register);
+CLOCKSOURCE_OF_DECLARE(arm_twd_a9, "arm,cortex-a9-twd-timer", twd_local_timer_of_register);
+CLOCKSOURCE_OF_DECLARE(arm_twd_a5, "arm,cortex-a5-twd-timer", twd_local_timer_of_register);
+CLOCKSOURCE_OF_DECLARE(arm_twd_11mp, "arm,arm11mp-twd-timer", twd_local_timer_of_register);
 #endif

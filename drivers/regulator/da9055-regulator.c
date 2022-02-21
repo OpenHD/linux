@@ -16,7 +16,6 @@
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
@@ -456,7 +455,8 @@ static int da9055_gpio_init(struct da9055_regulator *regulator,
 		char name[18];
 		int gpio_mux = pdata->gpio_ren[id];
 
-		config->ena_gpiod = pdata->ena_gpiods[id];
+		config->ena_gpio = pdata->ena_gpio[id];
+		config->ena_gpio_flags = GPIOF_OUT_INIT_HIGH;
 		config->ena_gpio_invert = 1;
 
 		/*

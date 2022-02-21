@@ -19,7 +19,6 @@
  */
 
 #include <asm/ppc_asm.h>
-#include <asm/linkage.h>
 #include <asm/asm-offsets.h>
 #include <asm/export.h>
 
@@ -29,7 +28,7 @@ PPC64_CACHES:
 	.section	".text"
 
 /**
- * __clear_user: - Zero a block of memory in user space, with less checking.
+ * __arch_clear_user: - Zero a block of memory in user space, with less checking.
  * @to:   Destination address, in user space.
  * @n:    Number of bytes to zero.
  *
@@ -42,17 +41,26 @@ PPC64_CACHES:
 
 	.macro err1
 100:
-	EX_TABLE(100b,.Ldo_err1)
+	.section __ex_table,"a"
+	.align 3
+	.llong 100b,.Ldo_err1
+	.previous
 	.endm
 
 	.macro err2
 200:
-	EX_TABLE(200b,.Ldo_err2)
+	.section __ex_table,"a"
+	.align 3
+	.llong 200b,.Ldo_err2
+	.previous
 	.endm
 
 	.macro err3
 300:
-	EX_TABLE(300b,.Ldo_err3)
+	.section __ex_table,"a"
+	.align 3
+	.llong 300b,.Ldo_err3
+	.previous
 	.endm
 
 .Ldo_err1:
@@ -70,7 +78,7 @@ err3;	stb	r0,0(r3)
 	mr	r3,r4
 	blr
 
-_GLOBAL_TOC(__clear_user)
+_GLOBAL_TOC(__arch_clear_user)
 	cmpdi	r4,32
 	neg	r6,r3
 	li	r0,0
@@ -152,9 +160,9 @@ err2;	std	r0,0(r3)
 	addi	r3,r3,8
 	addi	r4,r4,-8
 
-	/* Destination is 16 byte aligned, need to get it cache block aligned */
-11:	lwz	r7,DCACHEL1LOGBLOCKSIZE(r5)
-	lwz	r9,DCACHEL1BLOCKSIZE(r5)
+	/* Destination is 16 byte aligned, need to get it cacheline aligned */
+11:	lwz	r7,DCACHEL1LOGLINESIZE(r5)
+	lwz	r9,DCACHEL1LINESIZE(r5)
 
 	/*
 	 * With worst case alignment the long clear loop takes a minimum
@@ -193,4 +201,4 @@ err1;	dcbz	0,r3
 	cmpdi	r4,32
 	blt	.Lshort_clear
 	b	.Lmedium_clear
-EXPORT_SYMBOL(__clear_user)
+EXPORT_SYMBOL(__arch_clear_user)

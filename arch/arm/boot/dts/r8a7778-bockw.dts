@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Reference Device Tree Source for the Bock-W board
  *
@@ -9,6 +8,10 @@
  *
  * Copyright (C) 2013 Renesas Solutions Corp.
  * Copyright (C) 2013 Simon Horman
+ *
+ * This file is licensed under the terms of the GNU General Public License
+ * version 2.  This program is licensed "as is" without any warranty of any
+ * kind, whether express or implied.
  */
 
 /dts-v1/;
@@ -226,4 +229,5 @@
 
 &scif_clk {
 	clock-frequency = <14745600>;
+	status = "okay";
 };

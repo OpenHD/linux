@@ -14,7 +14,6 @@
 #include <media/v4l2-ctrls.h>
 #include <video/omapfb_dss.h>
 #include <video/omapvrfb.h>
-#include <linux/dmaengine.h>
 
 #define YUYV_BPP        2
 #define RGB565_BPP      2
@@ -82,9 +81,8 @@ enum vout_rotaion_type {
  * for VRFB hidden buffer
  */
 struct vid_vrfb_dma {
-	struct dma_chan *chan;
-	struct dma_interleaved_template *xt;
-
+	int dev_id;
+	int dma_ch;
 	int req_status;
 	int tx_status;
 	wait_queue_head_t wait;

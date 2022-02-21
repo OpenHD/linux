@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/compiler.h>
 #include <elfutils/libdw.h>
 #include <elfutils/libdwfl.h>
@@ -13,7 +12,6 @@
 #include "event.h"
 #include "perf_regs.h"
 #include "callchain.h"
-#include "util.h"
 
 static char *debuginfo_path;
 
@@ -28,11 +26,10 @@ static int __report_module(struct addr_location *al, u64 ip,
 {
 	Dwfl_Module *mod;
 	struct dso *dso = NULL;
-	/*
-	 * Some callers will use al->sym, so we can't just use the
-	 * cheaper thread__find_map() here.
-	 */
-	thread__find_symbol(ui->thread, PERF_RECORD_MISC_USER, ip, al);
+
+	thread__find_addr_location(ui->thread,
+				   PERF_RECORD_MISC_USER,
+				   MAP__FUNCTION, ip, al);
 
 	if (al->map)
 		dso = al->map->dso;
@@ -77,7 +74,7 @@ static int entry(u64 ip, struct unwind_info *ui)
 	if (__report_module(&al, ip, ui))
 		return -1;
 
-	e->ip  = ip;
+	e->ip  = al.addr;
 	e->map = al.map;
 	e->sym = al.sym;
 
@@ -104,7 +101,19 @@ static int access_dso_mem(struct unwind_info *ui, Dwarf_Addr addr,
 	struct addr_location al;
 	ssize_t size;
 
-	if (!thread__find_map(ui->thread, PERF_RECORD_MISC_USER, addr, &al)) {
+	thread__find_addr_map(ui->thread, PERF_RECORD_MISC_USER,
+			      MAP__FUNCTION, addr, &al);
+	if (!al.map) {
+		/*
+		 * We've seen cases (softice) where DWARF unwinder went
+		 * through non executable mmaps, which we need to lookup
+		 * in MAP__VARIABLE tree.
+		 */
+		thread__find_addr_map(ui->thread, PERF_RECORD_MISC_USER,
+				      MAP__VARIABLE, addr, &al);
+	}
+
+	if (!al.map) {
 		pr_debug("unwind: no map for %lx\n", (unsigned long)addr);
 		return -1;
 	}
@@ -168,14 +177,6 @@ frame_callback(Dwfl_Frame *state, void *arg)
 	Dwarf_Addr pc;
 	bool isactivation;
 
-	if (!dwfl_frame_pc(state, &pc, NULL)) {
-		pr_err("%s", dwfl_errmsg(-1));
-		return DWARF_CB_ABORT;
-	}
-
-	// report the module before we query for isactivation
-	report_module(pc, ui);
-
 	if (!dwfl_frame_pc(state, &pc, &isactivation)) {
 		pr_err("%s", dwfl_errmsg(-1));
 		return DWARF_CB_ABORT;
@@ -225,8 +226,7 @@ int unwind__get_entries(unwind_entry_cb_t cb, void *arg,
 	if (err)
 		goto out;
 
-	err = !dwfl_attach_state(ui->dwfl, EM_NONE, thread->tid, &callbacks, ui);
-	if (err)
+	if (!dwfl_attach_state(ui->dwfl, EM_NONE, thread->tid, &callbacks, ui))
 		goto out;
 
 	err = dwfl_getthread_frames(ui->dwfl, thread->tid, frame_callback, ui);

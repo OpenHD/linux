@@ -207,7 +207,7 @@ handle_errors:
 void rtsx_add_cmd(struct rtsx_chip *chip,
 		  u8 cmd_type, u16 reg_addr, u8 mask, u8 data)
 {
-	__le32 *cb = (__le32 *)(chip->host_cmds_ptr);
+	u32 *cb = (u32 *)(chip->host_cmds_ptr);
 	u32 val = 0;
 
 	val |= (u32)(cmd_type & 0x03) << 30;
@@ -275,6 +275,7 @@ int rtsx_send_cmd(struct rtsx_chip *chip, u8 card, int timeout)
 		dev_dbg(rtsx_dev(chip), "chip->int_reg = 0x%x\n",
 			chip->int_reg);
 		err = -ETIMEDOUT;
+		rtsx_trace(chip);
 		goto finish_send_cmd;
 	}
 
@@ -299,7 +300,7 @@ finish_send_cmd:
 static inline void rtsx_add_sg_tbl(
 	struct rtsx_chip *chip, u32 addr, u32 len, u8 option)
 {
-	__le64 *sgb = (__le64 *)(chip->host_sg_tbl_ptr);
+	u64 *sgb = (u64 *)(chip->host_sg_tbl_ptr);
 	u64 val = 0;
 	u32 temp_len = 0;
 	u8  temp_opt = 0;
@@ -307,7 +308,7 @@ static inline void rtsx_add_sg_tbl(
 	do {
 		if (len > 0x80000) {
 			temp_len = 0x80000;
-			temp_opt = option & (~RTSX_SG_END);
+			temp_opt = option & (~SG_END);
 		} else {
 			temp_len = len;
 			temp_opt = option;
@@ -406,9 +407,9 @@ static int rtsx_transfer_sglist_adma_partial(struct rtsx_chip *chip, u8 card,
 			*index = *index + 1;
 		}
 		if ((i == (sg_cnt - 1)) || !resid)
-			option = RTSX_SG_VALID | RTSX_SG_END | RTSX_SG_TRANS_DATA;
+			option = SG_VALID | SG_END | SG_TRANS_DATA;
 		else
-			option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
+			option = SG_VALID | SG_TRANS_DATA;
 
 		rtsx_add_sg_tbl(chip, (u32)addr, (u32)len, option);
 
@@ -554,9 +555,9 @@ static int rtsx_transfer_sglist_adma(struct rtsx_chip *chip, u8 card,
 				(unsigned int)addr, len);
 
 			if (j == (sg_cnt - 1))
-				option = RTSX_SG_VALID | RTSX_SG_END | RTSX_SG_TRANS_DATA;
+				option = SG_VALID | SG_END | SG_TRANS_DATA;
 			else
-				option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
+				option = SG_VALID | SG_TRANS_DATA;
 
 			rtsx_add_sg_tbl(chip, (u32)addr, (u32)len, option);
 
@@ -765,7 +766,8 @@ int rtsx_transfer_data(struct rtsx_chip *chip, u8 card, void *buf, size_t len,
 		return -EIO;
 
 	if (use_sg) {
-		err = rtsx_transfer_sglist_adma(chip, card, buf,
+		err = rtsx_transfer_sglist_adma(chip, card,
+						(struct scatterlist *)buf,
 						use_sg, dma_dir, timeout);
 	} else {
 		err = rtsx_transfer_buf(chip, card, buf, len, dma_dir, timeout);

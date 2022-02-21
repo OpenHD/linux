@@ -15,6 +15,7 @@
 #include "io.h"
 #include "farch_regs.h"
 #include "mcdi_pcol.h"
+#include "phy.h"
 
 /**************************************************************************
  *
@@ -48,7 +49,7 @@ struct efx_mcdi_async_param {
 	/* followed by request/response buffer */
 };
 
-static void efx_mcdi_timeout_async(struct timer_list *t);
+static void efx_mcdi_timeout_async(unsigned long context);
 static int efx_mcdi_drv_attach(struct efx_nic *efx, bool driver_operating,
 			       bool *was_attached_out);
 static bool efx_mcdi_poll_once(struct efx_nic *efx);
@@ -87,7 +88,8 @@ int efx_mcdi_init(struct efx_nic *efx)
 	mcdi->mode = MCDI_MODE_POLL;
 	spin_lock_init(&mcdi->async_lock);
 	INIT_LIST_HEAD(&mcdi->async_list);
-	timer_setup(&mcdi->async_timer, efx_mcdi_timeout_async, 0);
+	setup_timer(&mcdi->async_timer, efx_mcdi_timeout_async,
+		    (unsigned long)mcdi);
 
 	(void) efx_mcdi_poll_reboot(efx);
 	mcdi->new_epoch = true;
@@ -127,7 +129,7 @@ fail:
 	return rc;
 }
 
-void efx_mcdi_detach(struct efx_nic *efx)
+void efx_mcdi_fini(struct efx_nic *efx)
 {
 	if (!efx->mcdi)
 		return;
@@ -136,12 +138,6 @@ void efx_mcdi_detach(struct efx_nic *efx)
 
 	/* Relinquish the device (back to the BMC, if this is a LOM) */
 	efx_mcdi_drv_attach(efx, false, NULL);
-}
-
-void efx_mcdi_fini(struct efx_nic *efx)
-{
-	if (!efx->mcdi)
-		return;
 
 #ifdef CONFIG_SFC_MCDI_LOGGING
 	free_page((unsigned long)efx->mcdi->iface.logging_buffer);
@@ -375,7 +371,7 @@ static int efx_mcdi_poll(struct efx_nic *efx)
 	 * because generally mcdi responses are fast. After that, back off
 	 * and poll once a jiffy (approximately)
 	 */
-	spins = USER_TICK_USEC;
+	spins = TICK_USEC;
 	finish = jiffies + MCDI_RPC_TIMEOUT;
 
 	while (1) {
@@ -607,9 +603,9 @@ static void efx_mcdi_ev_cpl(struct efx_nic *efx, unsigned int seqno,
 	}
 }
 
-static void efx_mcdi_timeout_async(struct timer_list *t)
+static void efx_mcdi_timeout_async(unsigned long context)
 {
-	struct efx_mcdi_iface *mcdi = from_timer(mcdi, t, async_timer);
+	struct efx_mcdi_iface *mcdi = (struct efx_mcdi_iface *)context;
 
 	efx_mcdi_complete_async(mcdi, true);
 }
@@ -721,11 +717,8 @@ static int _efx_mcdi_rpc_finish(struct efx_nic *efx, unsigned int cmd,
 		if (cmd == MC_CMD_REBOOT && rc == -EIO) {
 			/* Don't reset if MC_CMD_REBOOT returns EIO */
 		} else if (rc == -EIO || rc == -EINTR) {
-			netif_err(efx, hw, efx->net_dev, "MC reboot detected\n");
-			netif_dbg(efx, hw, efx->net_dev, "MC rebooted during command %d rc %d\n",
-				  cmd, -rc);
-			if (efx->type->mcdi_reboot_detected)
-				efx->type->mcdi_reboot_detected(efx);
+			netif_err(efx, hw, efx->net_dev, "MC fatal error %d\n",
+				  -rc);
 			efx_schedule_reset(efx, RESET_TYPE_MC_FAILURE);
 		} else if (proxy_handle && (rc == -EPROTO) &&
 			   efx_mcdi_get_proxy_handle(efx, hdr_len, data_len,
@@ -845,9 +838,11 @@ static int _efx_mcdi_rpc(struct efx_nic *efx, unsigned int cmd,
 						  outbuf, outlen, outlen_actual,
 						  quiet, NULL, raw_rc);
 		} else {
-			netif_cond_dbg(efx, hw, efx->net_dev, rc == -EPERM, err,
-				       "MC command 0x%x failed after proxy auth rc=%d\n",
-				       cmd, rc);
+			netif_printk(efx, hw,
+				     rc == -EPERM ? KERN_DEBUG : KERN_ERR,
+				     efx->net_dev,
+				     "MC command 0x%x failed after proxy auth rc=%d\n",
+				     cmd, rc);
 
 			if (rc == -EINTR || rc == -EIO)
 				efx_schedule_reset(efx, RESET_TYPE_MC_FAILURE);
@@ -1090,9 +1085,10 @@ void efx_mcdi_display_error(struct efx_nic *efx, unsigned cmd,
 		code = MCDI_DWORD(outbuf, ERR_CODE);
 	if (outlen >= MC_CMD_ERR_ARG_OFST + 4)
 		err_arg = MCDI_DWORD(outbuf, ERR_ARG);
-	netif_cond_dbg(efx, hw, efx->net_dev, rc == -EPERM, err,
-		       "MC command 0x%x inlen %zu failed rc=%d (raw=%d) arg=%d\n",
-		       cmd, inlen, rc, code, err_arg);
+	netif_printk(efx, hw, rc == -EPERM ? KERN_DEBUG : KERN_ERR,
+		     efx->net_dev,
+		     "MC command 0x%x inlen %zu failed rc=%d (raw=%d) arg=%d\n",
+		     cmd, inlen, rc, code, err_arg);
 }
 
 /* Switch to polled MCDI completions.  This can be called in various
@@ -1300,7 +1296,7 @@ static void efx_mcdi_abandon(struct efx_nic *efx)
 	efx_schedule_reset(efx, RESET_TYPE_MCDI_TIMEOUT);
 }
 
-/* Called from efx_farch_ev_process and efx_ef10_ev_process for MCDI events */
+/* Called from  falcon_process_eventq for MCDI events */
 void efx_mcdi_process_event(struct efx_channel *channel,
 			    efx_qword_t *event)
 {
@@ -1388,9 +1384,8 @@ void efx_mcdi_process_event(struct efx_channel *channel,
 				MCDI_EVENT_FIELD(*event, PROXY_RESPONSE_RC));
 		break;
 	default:
-		netif_err(efx, hw, efx->net_dev,
-			  "Unknown MCDI event " EFX_QWORD_FMT "\n",
-			  EFX_QWORD_VAL(*event));
+		netif_err(efx, hw, efx->net_dev, "Unknown MCDI event 0x%x\n",
+			  code);
 	}
 }
 
@@ -2063,8 +2058,8 @@ fail:
 	/* Older firmware lacks GET_WORKAROUNDS and this isn't especially
 	 * terrifying.  The call site will have to deal with it though.
 	 */
-	netif_cond_dbg(efx, hw, efx->net_dev, rc == -ENOSYS, err,
-		       "%s: failed rc=%d\n", __func__, rc);
+	netif_printk(efx, hw, rc == -ENOSYS ? KERN_DEBUG : KERN_ERR,
+		     efx->net_dev, "%s: failed rc=%d\n", __func__, rc);
 	return rc;
 }
 

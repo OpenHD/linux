@@ -8,7 +8,7 @@
 
 #include "./bebob.h"
 
-static const enum snd_bebob_clock_type phase88_rack_clk_src_types[] = {
+static enum snd_bebob_clock_type phase88_rack_clk_src_types[] = {
 	SND_BEBOB_CLOCK_TYPE_INTERNAL,
 	SND_BEBOB_CLOCK_TYPE_EXTERNAL,	/* S/PDIF */
 	SND_BEBOB_CLOCK_TYPE_EXTERNAL,	/* Word Clock */

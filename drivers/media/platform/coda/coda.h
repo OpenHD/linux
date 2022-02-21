@@ -16,7 +16,6 @@
 #define __CODA_H__
 
 #include <linux/debugfs.h>
-#include <linux/idr.h>
 #include <linux/irqreturn.h>
 #include <linux/mutex.h>
 #include <linux/kfifo.h>
@@ -29,7 +28,7 @@
 
 #include "coda_regs.h"
 
-#define CODA_MAX_FRAMEBUFFERS	19
+#define CODA_MAX_FRAMEBUFFERS	8
 #define FMO_SLICE_SAVE_BUF_SIZE	(32)
 
 enum {
@@ -44,7 +43,6 @@ enum coda_inst_type {
 
 enum coda_product {
 	CODA_DX6 = 0xf001,
-	CODA_HX4 = 0xf00a,
 	CODA_7541 = 0xf012,
 	CODA_960 = 0xf020,
 };
@@ -52,7 +50,7 @@ enum coda_product {
 struct coda_video_device;
 
 struct coda_devtype {
-	char			*firmware[3];
+	char			*firmware[2];
 	enum coda_product	product;
 	const struct coda_codec	*codecs;
 	unsigned int		num_codecs;
@@ -77,7 +75,6 @@ struct coda_dev {
 	struct platform_device	*plat_dev;
 	const struct coda_devtype *devtype;
 	int			firmware;
-	struct vdoa_data	*vdoa;
 
 	void __iomem		*regs_base;
 	struct clk		*clk_per;
@@ -96,7 +93,7 @@ struct coda_dev {
 	struct workqueue_struct	*workqueue;
 	struct v4l2_m2m_dev	*m2m_dev;
 	struct list_head	instances;
-	struct ida		ida;
+	unsigned long		instance_mask;
 	struct dentry		*debugfs_root;
 };
 
@@ -116,11 +113,9 @@ struct coda_params {
 	u8			h264_inter_qp;
 	u8			h264_min_qp;
 	u8			h264_max_qp;
-	u8			h264_disable_deblocking_filter_idc;
-	s8			h264_slice_alpha_c0_offset_div2;
-	s8			h264_slice_beta_offset_div2;
-	u8			h264_profile_idc;
-	u8			h264_level_idc;
+	u8			h264_deblk_enabled;
+	u8			h264_deblk_alpha;
+	u8			h264_deblk_beta;
 	u8			mpeg4_intra_qp;
 	u8			mpeg4_inter_qp;
 	u8			gop_size;
@@ -137,7 +132,6 @@ struct coda_params {
 	u32			vbv_size;
 	u32			slice_max_bits;
 	u32			slice_max_mb;
-	bool			force_ipicture;
 };
 
 struct coda_buffer_meta {
@@ -185,7 +179,6 @@ struct coda_context_ops {
 	int (*start_streaming)(struct coda_ctx *ctx);
 	int (*prepare_run)(struct coda_ctx *ctx);
 	void (*finish_run)(struct coda_ctx *ctx);
-	void (*run_timeout)(struct coda_ctx *ctx);
 	void (*seq_end_work)(struct work_struct *work);
 	void (*release)(struct coda_ctx *ctx);
 };
@@ -210,13 +203,8 @@ struct coda_ctx {
 	enum coda_inst_type		inst_type;
 	const struct coda_codec		*codec;
 	enum v4l2_colorspace		colorspace;
-	enum v4l2_xfer_func		xfer_func;
-	enum v4l2_ycbcr_encoding	ycbcr_enc;
-	enum v4l2_quantization		quantization;
 	struct coda_params		params;
 	struct v4l2_ctrl_handler	ctrls;
-	struct v4l2_ctrl		*h264_profile_ctrl;
-	struct v4l2_ctrl		*h264_level_ctrl;
 	struct v4l2_fh			fh;
 	int				gopcounter;
 	int				runcounter;
@@ -248,8 +236,6 @@ struct coda_ctx {
 	int				display_idx;
 	struct dentry			*debugfs_entry;
 	bool				use_bit;
-	bool				use_vdoa;
-	struct vdoa_ctx			*vdoa;
 };
 
 extern int coda_debug;
@@ -270,7 +256,7 @@ int coda_decoder_queue_init(void *priv, struct vb2_queue *src_vq,
 
 int coda_hw_reset(struct coda_ctx *ctx);
 
-void coda_fill_bitstream(struct coda_ctx *ctx, struct list_head *buffer_list);
+void coda_fill_bitstream(struct coda_ctx *ctx, bool streaming);
 
 void coda_set_gdi_regs(struct coda_ctx *ctx);
 
@@ -301,13 +287,7 @@ void coda_bit_stream_end_flag(struct coda_ctx *ctx);
 void coda_m2m_buf_done(struct coda_ctx *ctx, struct vb2_v4l2_buffer *buf,
 		       enum vb2_buffer_state state);
 
-int coda_h264_filler_nal(int size, char *p);
 int coda_h264_padding(int size, char *p);
-int coda_h264_profile(int profile_idc);
-int coda_h264_level(int level_idc);
-int coda_sps_parse_profile(struct coda_ctx *ctx, struct vb2_buffer *vb);
-int coda_h264_sps_fixup(struct coda_ctx *ctx, int width, int height, char *buf,
-			int *size, int max_size);
 
 bool coda_jpeg_check_buffer(struct coda_ctx *ctx, struct vb2_buffer *vb);
 int coda_jpeg_write_tables(struct coda_ctx *ctx);

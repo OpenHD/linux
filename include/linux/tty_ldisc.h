@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_TTY_LDISC_H
 #define _LINUX_TTY_LDISC_H
 
@@ -119,13 +118,13 @@
 
 #include <linux/fs.h>
 #include <linux/wait.h>
-#include <linux/atomic.h>
+
 
 /*
  * the semaphore definition
  */
 struct ld_semaphore {
-	atomic_long_t		count;
+	long			count;
 	raw_spinlock_t		wait_lock;
 	unsigned int		wait_readers;
 	struct list_head	read_wait;
@@ -187,7 +186,7 @@ struct tty_ldisc_ops {
 	long	(*compat_ioctl)(struct tty_struct *tty, struct file *file,
 				unsigned int cmd, unsigned long arg);
 	void	(*set_termios)(struct tty_struct *tty, struct ktermios *old);
-	__poll_t (*poll)(struct tty_struct *, struct file *,
+	unsigned int (*poll)(struct tty_struct *, struct file *,
 			     struct poll_table_struct *);
 	int	(*hangup)(struct tty_struct *tty);
 

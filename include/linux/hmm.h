@@ -11,12 +11,12 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Authors: JÃ©rÃ´me Glisse <jglisse@redhat.com>
+ * Authors: Jérôme Glisse <jglisse@redhat.com>
  */
 /*
  * Heterogeneous Memory Management (HMM)
  *
- * See Documentation/vm/hmm.rst for reasons and overview of what HMM is and it
+ * See Documentation/vm/hmm.txt for reasons and overview of what HMM is and it
  * is for. Here we focus on the HMM API description, with some explanation of
  * the underlying implementation.
  *
@@ -433,8 +433,7 @@ struct hmm_devmem_ops {
 	 * @page: pointer to struct page backing virtual address (unreliable)
 	 * @flags: FAULT_FLAG_* (see include/linux/mm.h)
 	 * @pmdp: page middle directory
-	 * Returns: VM_FAULT_MINOR/MAJOR on success or one of VM_FAULT_ERROR
-	 *   on error
+	 * Returns: 0 on success one of VM_FAULT_ERROR on error
 	 *
 	 * The callback occurs whenever there is a CPU page fault or GUP on a
 	 * virtual address. This means that the device driver must migrate the
@@ -499,7 +498,8 @@ struct hmm_devmem {
  * enough and allocate struct page for it.
  *
  * The device driver can wrap the hmm_devmem struct inside a private device
- * driver struct.
+ * driver struct. The device driver must call hmm_devmem_remove() before the
+ * device goes away and before freeing the hmm_devmem struct memory.
  */
 struct hmm_devmem *hmm_devmem_add(const struct hmm_devmem_ops *ops,
 				  struct device *device,
@@ -507,6 +507,7 @@ struct hmm_devmem *hmm_devmem_add(const struct hmm_devmem_ops *ops,
 struct hmm_devmem *hmm_devmem_add_resource(const struct hmm_devmem_ops *ops,
 					   struct device *device,
 					   struct resource *res);
+void hmm_devmem_remove(struct hmm_devmem *devmem);
 
 /*
  * hmm_devmem_page_set_drvdata - set per-page driver data field
@@ -520,7 +521,9 @@ struct hmm_devmem *hmm_devmem_add_resource(const struct hmm_devmem_ops *ops,
 static inline void hmm_devmem_page_set_drvdata(struct page *page,
 					       unsigned long data)
 {
-	page->hmm_data = data;
+	unsigned long *drvdata = (unsigned long *)&page->pgmap;
+
+	drvdata[1] = data;
 }
 
 /*
@@ -531,7 +534,9 @@ static inline void hmm_devmem_page_set_drvdata(struct page *page,
  */
 static inline unsigned long hmm_devmem_page_get_drvdata(const struct page *page)
 {
-	return page->hmm_data;
+	const unsigned long *drvdata = (const unsigned long *)&page->pgmap;
+
+	return drvdata[1];
 }
 
 
@@ -555,6 +560,7 @@ struct hmm_device *hmm_device_new(void *drvdata);
 void hmm_device_put(struct hmm_device *hmm_device);
 #endif /* CONFIG_DEVICE_PRIVATE || CONFIG_DEVICE_PUBLIC */
 #else /* IS_ENABLED(CONFIG_HMM) */
+/* Below are for HMM internal use only! Not to be used by device driver! */
 static inline void hmm_mm_destroy(struct mm_struct *mm) {}
 static inline void hmm_mm_init(struct mm_struct *mm) {}
 #endif /* IS_ENABLED(CONFIG_HMM) */

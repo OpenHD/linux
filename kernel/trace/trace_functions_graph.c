@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * Function graph tracer.
@@ -66,7 +65,10 @@ struct fgraph_data {
 
 #define TRACE_GRAPH_INDENT	2
 
-unsigned int fgraph_max_depth;
+/* Flag options */
+#define TRACE_GRAPH_PRINT_FLAT		0x80
+
+static unsigned int max_depth;
 
 static struct tracer_opt trace_opts[] = {
 	/* Display overruns? (for self-debug purpose) */
@@ -89,6 +91,8 @@ static struct tracer_opt trace_opts[] = {
 	{ TRACER_OPT(sleep-time, TRACE_GRAPH_SLEEP_TIME) },
 	/* Include time within nested functions */
 	{ TRACER_OPT(graph-time, TRACE_GRAPH_GRAPH_TIME) },
+	/* Use standard trace formatting rather than hierarchical */
+	{ TRACER_OPT(funcgraph-flat, TRACE_GRAPH_PRINT_FLAT) },
 	{ } /* Empty entry */
 };
 
@@ -118,8 +122,8 @@ print_graph_duration(struct trace_array *tr, unsigned long long duration,
 		     struct trace_seq *s, u32 flags);
 
 /* Add a function return address to the trace stack on thread info.*/
-static int
-ftrace_push_return_trace(unsigned long ret, unsigned long func,
+int
+ftrace_push_return_trace(unsigned long ret, unsigned long func, int *depth,
 			 unsigned long frame_pointer, unsigned long *retp)
 {
 	unsigned long long calltime;
@@ -177,31 +181,9 @@ ftrace_push_return_trace(unsigned long ret, unsigned long func,
 #ifdef HAVE_FUNCTION_GRAPH_RET_ADDR_PTR
 	current->ret_stack[index].retp = retp;
 #endif
-	return 0;
-}
-
-int function_graph_enter(unsigned long ret, unsigned long func,
-			 unsigned long frame_pointer, unsigned long *retp)
-{
-	struct ftrace_graph_ent trace;
-
-	trace.func = func;
-	trace.depth = ++current->curr_ret_depth;
-
-	if (ftrace_push_return_trace(ret, func,
-				     frame_pointer, retp))
-		goto out;
-
-	/* Only trace if the calling function expects to */
-	if (!ftrace_graph_entry(&trace))
-		goto out_ret;
+	*depth = current->curr_ret_stack;
 
 	return 0;
- out_ret:
-	current->curr_ret_stack--;
- out:
-	current->curr_ret_depth--;
-	return -EBUSY;
 }
 
 /* Retrieve a function return address to the trace stack on thread info.*/
@@ -263,13 +245,7 @@ ftrace_pop_return_trace(struct ftrace_graph_ret *trace, unsigned long *ret,
 	trace->func = current->ret_stack[index].func;
 	trace->calltime = current->ret_stack[index].calltime;
 	trace->overrun = atomic_read(&current->trace_overrun);
-	trace->depth = current->curr_ret_depth--;
-	/*
-	 * We still want to trace interrupts coming in if
-	 * max_depth is set to 1. Make sure the decrement is
-	 * seen before ftrace_graph_return.
-	 */
-	barrier();
+	trace->depth = index;
 }
 
 /*
@@ -283,12 +259,6 @@ unsigned long ftrace_return_to_handler(unsigned long frame_pointer)
 
 	ftrace_pop_return_trace(&trace, &ret, frame_pointer);
 	trace.rettime = trace_clock_local();
-	ftrace_graph_return(&trace);
-	/*
-	 * The ftrace_graph_return() may still access the current
-	 * ret_stack structure, we need to make sure the update of
-	 * curr_ret_stack is after that.
-	 */
 	barrier();
 	current->curr_ret_stack--;
 	/*
@@ -300,6 +270,13 @@ unsigned long ftrace_return_to_handler(unsigned long frame_pointer)
 		current->curr_ret_stack += FTRACE_NOTRACE_DEPTH;
 		return ret;
 	}
+
+	/*
+	 * The trace should run after decrementing the ret counter
+	 * in case an interrupt were to come in. We don't want to
+	 * lose the interrupt if max_depth is set.
+	 */
+	ftrace_graph_return(&trace);
 
 	if (unlikely(!ret)) {
 		ftrace_graph_stop();
@@ -386,7 +363,7 @@ int __trace_graph_entry(struct trace_array *tr,
 	entry	= ring_buffer_event_data(event);
 	entry->graph_ent			= *trace;
 	if (!call_filter_check_discard(call, entry, buffer, event))
-		trace_buffer_unlock_commit_nostack(buffer, event);
+		__buffer_unlock_commit(buffer, event);
 
 	return 1;
 }
@@ -412,10 +389,10 @@ int trace_graph_entry(struct ftrace_graph_ent *trace)
 	if (!ftrace_trace_task(tr))
 		return 0;
 
-	if (ftrace_graph_ignore_func(trace))
-		return 0;
-
-	if (ftrace_graph_ignore_irqs())
+	/* trace it when it is-nested-in or is a function enabled. */
+	if ((!(trace->depth || ftrace_graph_addr(trace->func)) ||
+	     ftrace_graph_ignore_irqs()) || (trace->depth < 0) ||
+	    (max_depth && trace->depth >= max_depth))
 		return 0;
 
 	/*
@@ -497,7 +474,7 @@ void __trace_graph_return(struct trace_array *tr,
 	entry	= ring_buffer_event_data(event);
 	entry->ret				= *trace;
 	if (!call_filter_check_discard(call, entry, buffer, event))
-		trace_buffer_unlock_commit_nostack(buffer, event);
+		__buffer_unlock_commit(buffer, event);
 }
 
 void trace_graph_return(struct ftrace_graph_ret *trace)
@@ -508,8 +485,6 @@ void trace_graph_return(struct ftrace_graph_ret *trace)
 	long disabled;
 	int cpu;
 	int pc;
-
-	ftrace_graph_addr_finish(trace);
 
 	local_irq_save(flags);
 	cpu = raw_smp_processor_id();
@@ -534,8 +509,6 @@ void set_graph_array(struct trace_array *tr)
 
 static void trace_graph_thresh_return(struct ftrace_graph_ret *trace)
 {
-	ftrace_graph_addr_finish(trace);
-
 	if (tracing_thresh &&
 	    (trace->rettime - trace->calltime < tracing_thresh))
 		return;
@@ -1278,6 +1251,9 @@ print_graph_function_flags(struct trace_iterator *iter, u32 flags)
 	int cpu = iter->cpu;
 	int ret;
 
+	if (flags & TRACE_GRAPH_PRINT_FLAT)
+		return TRACE_TYPE_UNHANDLED;
+
 	if (data && per_cpu_ptr(data->cpu_data, cpu)->ignore) {
 		per_cpu_ptr(data->cpu_data, cpu)->ignore = 0;
 		return TRACE_TYPE_HANDLED;
@@ -1333,13 +1309,6 @@ static enum print_line_t
 print_graph_function(struct trace_iterator *iter)
 {
 	return print_graph_function_flags(iter, tracer_flags.val);
-}
-
-static enum print_line_t
-print_graph_function_event(struct trace_iterator *iter, int flags,
-			   struct trace_event *event)
-{
-	return print_graph_function(iter);
 }
 
 static void print_lat_header(struct seq_file *s, u32 flags)
@@ -1409,6 +1378,11 @@ void print_graph_headers_flags(struct seq_file *s, u32 flags)
 {
 	struct trace_iterator *iter = s->private;
 	struct trace_array *tr = iter->tr;
+
+	if (flags & TRACE_GRAPH_PRINT_FLAT) {
+		trace_default_header(s);
+		return;
+	}
 
 	if (!(tr->trace_flags & TRACE_ITER_CONTEXT_INFO))
 		return;
@@ -1491,19 +1465,6 @@ func_graph_set_flag(struct trace_array *tr, u32 old_flags, u32 bit, int set)
 	return 0;
 }
 
-static struct trace_event_functions graph_functions = {
-	.trace		= print_graph_function_event,
-};
-
-static struct trace_event graph_trace_entry_event = {
-	.type		= TRACE_GRAPH_ENT,
-	.funcs		= &graph_functions,
-};
-
-static struct trace_event graph_trace_ret_event = {
-	.type		= TRACE_GRAPH_RET,
-	.funcs		= &graph_functions
-};
 
 static struct tracer graph_trace __tracer_data = {
 	.name		= "function_graph",
@@ -1535,7 +1496,7 @@ graph_depth_write(struct file *filp, const char __user *ubuf, size_t cnt,
 	if (ret)
 		return ret;
 
-	fgraph_max_depth = val;
+	max_depth = val;
 
 	*ppos += cnt;
 
@@ -1549,7 +1510,7 @@ graph_depth_read(struct file *filp, char __user *ubuf, size_t cnt,
 	char buf[15]; /* More than enough to hold UINT_MAX + "\n"*/
 	int n;
 
-	n = sprintf(buf, "%d\n", fgraph_max_depth);
+	n = sprintf(buf, "%d\n", max_depth);
 
 	return simple_read_from_buffer(ubuf, cnt, ppos, buf, n);
 }
@@ -1578,17 +1539,7 @@ fs_initcall(init_graph_tracefs);
 
 static __init int init_graph_trace(void)
 {
-	max_bytes_for_cpu = snprintf(NULL, 0, "%u", nr_cpu_ids - 1);
-
-	if (!register_trace_event(&graph_trace_entry_event)) {
-		pr_warn("Warning: could not register graph trace events\n");
-		return 1;
-	}
-
-	if (!register_trace_event(&graph_trace_ret_event)) {
-		pr_warn("Warning: could not register graph trace events\n");
-		return 1;
-	}
+	max_bytes_for_cpu = snprintf(NULL, 0, "%d", nr_cpu_ids - 1);
 
 	return register_tracer(&graph_trace);
 }

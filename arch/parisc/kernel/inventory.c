@@ -40,11 +40,6 @@
 
 int pdc_type __read_mostly = PDC_TYPE_ILLEGAL;
 
-/* cell number and location (PAT firmware only) */
-unsigned long parisc_cell_num __read_mostly;
-unsigned long parisc_cell_loc __read_mostly;
-
-
 void __init setup_pdc(void)
 {
 	long status;
@@ -83,10 +78,6 @@ void __init setup_pdc(void)
 	if (status == PDC_OK) {
 		pdc_type = PDC_TYPE_PAT;
 		pr_cont("64 bit PAT.\n");
-		parisc_cell_num = cell_info.cell_num;
-		parisc_cell_loc = cell_info.cell_loc;
-		pr_info("PAT: Running on cell %lu and location %lu.\n",
-			parisc_cell_num, parisc_cell_loc);
 		return;
 	}
 #endif
@@ -225,9 +216,9 @@ pat_query_module(ulong pcell_loc, ulong mod_index)
 	register_parisc_device(dev);	/* advertise device */
 
 #ifdef DEBUG_PAT
+	pdc_pat_cell_mod_maddr_block_t io_pdc_cell;
 	/* dump what we see so far... */
 	switch (PAT_GET_ENTITY(dev->mod_info)) {
-		pdc_pat_cell_mod_maddr_block_t io_pdc_cell;
 		unsigned long i;
 
 	case PAT_ENTITY_PROC:
@@ -268,9 +259,9 @@ pat_query_module(ulong pcell_loc, ulong mod_index)
 				pa_pdc_cell->mod[4 + i * 3]);	/* finish (ie end) */
 			printk(KERN_DEBUG 
 				"  IO_VIEW %ld: 0x%016lx 0x%016lx 0x%016lx\n", 
-				i, io_pdc_cell.mod[2 + i * 3],	/* type */
-				io_pdc_cell.mod[3 + i * 3],	/* start */
-				io_pdc_cell.mod[4 + i * 3]);	/* finish (ie end) */
+				i, io_pdc_cell->mod[2 + i * 3],	/* type */
+				io_pdc_cell->mod[3 + i * 3],	/* start */
+				io_pdc_cell->mod[4 + i * 3]);	/* finish (ie end) */
 		}
 		printk(KERN_DEBUG "\n");
 		break;

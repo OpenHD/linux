@@ -24,7 +24,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/mmu_context.h>
-#include <linux/sched/mm.h>
 
 #include "async_pf.h"
 #include <trace/events/kvm.h>
@@ -77,20 +76,16 @@ static void async_pf_execute(struct work_struct *work)
 	struct kvm_vcpu *vcpu = apf->vcpu;
 	unsigned long addr = apf->addr;
 	gva_t gva = apf->gva;
-	int locked = 1;
 
 	might_sleep();
 
 	/*
 	 * This work is run asynchromously to the task which owns
 	 * mm and might be done in another context, so we must
-	 * access remotely.
+	 * use FOLL_REMOTE.
 	 */
-	down_read(&mm->mmap_sem);
-	get_user_pages_remote(NULL, mm, addr, 1, FOLL_WRITE, NULL, NULL,
-			&locked);
-	if (locked)
-		up_read(&mm->mmap_sem);
+	__get_user_pages_unlocked(NULL, mm, addr, 1, NULL,
+			FOLL_WRITE | FOLL_REMOTE);
 
 	kvm_async_page_present_sync(vcpu, apf);
 
@@ -106,8 +101,12 @@ static void async_pf_execute(struct work_struct *work)
 
 	trace_kvm_async_pf_completed(addr, gva);
 
-	if (swq_has_sleeper(&vcpu->wq))
-		swake_up_one(&vcpu->wq);
+	/*
+	 * This memory barrier pairs with prepare_to_wait's set_current_state()
+	 */
+	smp_mb();
+	if (swait_active(&vcpu->wq))
+		swake_up(&vcpu->wq);
 
 	mmput(mm);
 	kvm_put_kvm(vcpu->kvm);
@@ -201,7 +200,7 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, unsigned long hva,
 	work->addr = hva;
 	work->arch = *arch;
 	work->mm = current->mm;
-	mmget(work->mm);
+	atomic_inc(&work->mm->mm_users);
 	kvm_get_kvm(work->vcpu->kvm);
 
 	/* this can't really happen otherwise gfn_to_pfn_async

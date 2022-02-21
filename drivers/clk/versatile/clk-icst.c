@@ -22,7 +22,6 @@
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 
-#include "icst.h"
 #include "clk-icst.h"
 
 /* Magic unlocking token used on all Versatile boards */
@@ -359,13 +358,16 @@ static struct clk *icst_clk_setup(struct device *dev,
 	struct clk_init_data init;
 	struct icst_params *pclone;
 
-	icst = kzalloc(sizeof(*icst), GFP_KERNEL);
-	if (!icst)
+	icst = kzalloc(sizeof(struct clk_icst), GFP_KERNEL);
+	if (!icst) {
+		pr_err("could not allocate ICST clock!\n");
 		return ERR_PTR(-ENOMEM);
+	}
 
 	pclone = kmemdup(desc->params, sizeof(*pclone), GFP_KERNEL);
 	if (!pclone) {
 		kfree(icst);
+		pr_err("could not clone ICST params\n");
 		return ERR_PTR(-ENOMEM);
 	}
 

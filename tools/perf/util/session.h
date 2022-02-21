@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PERF_SESSION_H
 #define __PERF_SESSION_H
 
@@ -6,14 +5,14 @@
 #include "event.h"
 #include "header.h"
 #include "machine.h"
+#include "symbol.h"
+#include "thread.h"
 #include "data.h"
 #include "ordered-events.h"
-#include <linux/kernel.h>
 #include <linux/rbtree.h>
 #include <linux/perf_event.h>
 
 struct ip_callchain;
-struct symbol;
 struct thread;
 
 struct auxtrace;
@@ -33,13 +32,13 @@ struct perf_session {
 	void			*one_mmap_addr;
 	u64			one_mmap_offset;
 	struct ordered_events	ordered_events;
-	struct perf_data	*data;
+	struct perf_data_file	*file;
 	struct perf_tool	*tool;
 };
 
 struct perf_tool;
 
-struct perf_session *perf_session__new(struct perf_data *data,
+struct perf_session *perf_session__new(struct perf_data_file *file,
 				       bool repipe, struct perf_tool *tool);
 void perf_session__delete(struct perf_session *session);
 
@@ -53,7 +52,7 @@ int perf_session__peek_event(struct perf_session *session, off_t file_offset,
 int perf_session__process_events(struct perf_session *session);
 
 int perf_session__queue_event(struct perf_session *s, union perf_event *event,
-			      u64 timestamp, u64 file_offset);
+			      struct perf_sample *sample, u64 file_offset);
 
 void perf_tool__fill_defaults(struct perf_tool *tool);
 
@@ -114,7 +113,7 @@ int __perf_session__set_tracepoints_handlers(struct perf_session *session,
 
 extern volatile int session_done;
 
-#define session_done()	READ_ONCE(session_done)
+#define session_done()	ACCESS_ONCE(session_done)
 
 int perf_session__deliver_synth_event(struct perf_session *session,
 				      union perf_event *event,

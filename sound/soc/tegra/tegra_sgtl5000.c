@@ -82,7 +82,7 @@ static int tegra_sgtl5000_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static const struct snd_soc_ops tegra_sgtl5000_ops = {
+static struct snd_soc_ops tegra_sgtl5000_ops = {
 	.hw_params = tegra_sgtl5000_hw_params,
 };
 
@@ -120,10 +120,13 @@ static int tegra_sgtl5000_driver_probe(struct platform_device *pdev)
 
 	machine = devm_kzalloc(&pdev->dev, sizeof(struct tegra_sgtl5000),
 			       GFP_KERNEL);
-	if (!machine)
+	if (!machine) {
+		dev_err(&pdev->dev, "Can't allocate tegra_sgtl5000 struct\n");
 		return -ENOMEM;
+	}
 
 	card->dev = &pdev->dev;
+	platform_set_drvdata(pdev, card);
 	snd_soc_card_set_drvdata(card, machine);
 
 	ret = snd_soc_of_parse_card_name(card, "nvidia,model");

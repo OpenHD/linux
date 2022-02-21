@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <dt-bindings/clock/tegra210-car.h>
 #include <dt-bindings/gpio/tegra-gpio.h>
 #include <dt-bindings/memory/tegra210-mc.h>
@@ -11,71 +10,6 @@
 	interrupt-parent = <&lic>;
 	#address-cells = <2>;
 	#size-cells = <2>;
-
-	pcie@1003000 {
-		compatible = "nvidia,tegra210-pcie";
-		device_type = "pci";
-		reg = <0x0 0x01003000 0x0 0x00000800   /* PADS registers */
-		       0x0 0x01003800 0x0 0x00000800   /* AFI registers */
-		       0x0 0x02000000 0x0 0x10000000>; /* configuration space */
-		reg-names = "pads", "afi", "cs";
-		interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>, /* controller interrupt */
-			     <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>; /* MSI interrupt */
-		interrupt-names = "intr", "msi";
-
-		#interrupt-cells = <1>;
-		interrupt-map-mask = <0 0 0 0>;
-		interrupt-map = <0 0 0 0 &gic GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
-
-		bus-range = <0x00 0xff>;
-		#address-cells = <3>;
-		#size-cells = <2>;
-
-		ranges = <0x82000000 0 0x01000000 0x0 0x01000000 0 0x00001000   /* port 0 configuration space */
-			  0x82000000 0 0x01001000 0x0 0x01001000 0 0x00001000   /* port 1 configuration space */
-			  0x81000000 0 0x0        0x0 0x12000000 0 0x00010000   /* downstream I/O (64 KiB) */
-			  0x82000000 0 0x13000000 0x0 0x13000000 0 0x0d000000   /* non-prefetchable memory (208 MiB) */
-			  0xc2000000 0 0x20000000 0x0 0x20000000 0 0x20000000>; /* prefetchable memory (512 MiB) */
-
-		clocks = <&tegra_car TEGRA210_CLK_PCIE>,
-			 <&tegra_car TEGRA210_CLK_AFI>,
-			 <&tegra_car TEGRA210_CLK_PLL_E>,
-			 <&tegra_car TEGRA210_CLK_CML0>;
-		clock-names = "pex", "afi", "pll_e", "cml";
-		resets = <&tegra_car 70>,
-			 <&tegra_car 72>,
-			 <&tegra_car 74>;
-		reset-names = "pex", "afi", "pcie_x";
-		status = "disabled";
-
-		pci@1,0 {
-			device_type = "pci";
-			assigned-addresses = <0x82000800 0 0x01000000 0 0x1000>;
-			reg = <0x000800 0 0 0 0>;
-			bus-range = <0x00 0xff>;
-			status = "disabled";
-
-			#address-cells = <3>;
-			#size-cells = <2>;
-			ranges;
-
-			nvidia,num-lanes = <4>;
-		};
-
-		pci@2,0 {
-			device_type = "pci";
-			assigned-addresses = <0x82001000 0 0x01001000 0 0x1000>;
-			reg = <0x001000 0 0 0 0>;
-			bus-range = <0x00 0xff>;
-			status = "disabled";
-
-			#address-cells = <3>;
-			#size-cells = <2>;
-			ranges;
-
-			nvidia,num-lanes = <1>;
-		};
-	};
 
 	host1x@50000000 {
 		compatible = "nvidia,tegra210-host1x", "simple-bus";
@@ -91,8 +25,6 @@
 		#size-cells = <2>;
 
 		ranges = <0x0 0x54000000 0x0 0x54000000 0x0 0x01000000>;
-
-		iommus = <&mc TEGRA_SWGROUP_HC>;
 
 		dpaux1: dpaux@54040000 {
 			compatible = "nvidia,tegra210-dpaux";
@@ -190,14 +122,7 @@
 		vic@54340000 {
 			compatible = "nvidia,tegra210-vic";
 			reg = <0x0 0x54340000 0x0 0x00040000>;
-			interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&tegra_car TEGRA210_CLK_VIC03>;
-			clock-names = "vic";
-			resets = <&tegra_car 178>;
-			reset-names = "vic";
-
-			iommus = <&mc TEGRA_SWGROUP_VIC>;
-			power-domains = <&pd_vic>;
+			status = "disabled";
 		};
 
 		nvjpg@54380000 {
@@ -266,11 +191,11 @@
 			reg = <0x0 0x54580000 0x0 0x00040000>;
 			interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&tegra_car TEGRA210_CLK_SOR1>,
-				 <&tegra_car TEGRA210_CLK_SOR1_OUT>,
+				 <&tegra_car TEGRA210_CLK_SOR1_SRC>,
 				 <&tegra_car TEGRA210_CLK_PLL_D2_OUT0>,
 				 <&tegra_car TEGRA210_CLK_PLL_DP>,
 				 <&tegra_car TEGRA210_CLK_SOR_SAFE>;
-			clock-names = "sor", "out", "parent", "dp", "safe";
+			clock-names = "sor", "source", "parent", "dp", "safe";
 			resets = <&tegra_car 183>;
 			reset-names = "sor";
 			pinctrl-0 = <&state_dpaux1_aux>;
@@ -767,14 +692,6 @@
 				resets = <&tegra_car TEGRA210_CLK_XUSB_HOST>;
 				#power-domain-cells = <0>;
 			};
-
-			pd_vic: vic {
-				clocks = <&tegra_car TEGRA210_CLK_VIC03>;
-				clock-names = "vic";
-				resets = <&tegra_car 178>;
-				reset-names = "vic";
-				#power-domain-cells = <0>;
-			};
 		};
 	};
 
@@ -796,22 +713,6 @@
 		interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
 
 		#iommu-cells = <1>;
-	};
-
-	sata@70020000 {
-		compatible = "nvidia,tegra210-ahci";
-		reg = <0x0 0x70027000 0x0 0x2000>, /* AHCI */
-		      <0x0 0x70020000 0x0 0x7000>, /* SATA */
-		      <0x0 0x70001100 0x0 0x1000>; /* SATA AUX */
-		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>;
-		clocks = <&tegra_car TEGRA210_CLK_SATA>,
-			 <&tegra_car TEGRA210_CLK_SATA_OOB>;
-		clock-names = "sata", "sata-oob";
-		resets = <&tegra_car 124>,
-			 <&tegra_car 123>,
-			 <&tegra_car 129>;
-		reset-names = "sata", "sata-oob", "sata-cold";
-		status = "disabled";
 	};
 
 	hda@70030000 {

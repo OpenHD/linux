@@ -1,7 +1,7 @@
 /*
  * Junction temperature thermal driver for Maxim Max77620.
  *
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
  *	   Mallikarjun Kasoju <mkasoju@nvidia.com>
@@ -21,7 +21,7 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 
-#define MAX77620_NORMAL_OPERATING_TEMP	100000
+#define MAX77620_NORMAL_OPERATING_TEMP	50000
 #define MAX77620_TJALARM1_TEMP		120000
 #define MAX77620_TJALARM2_TEMP		140000
 
@@ -112,10 +112,12 @@ static int max77620_thermal_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * The reference taken to the parent's node which will be balanced on
-	 * reprobe or on platform-device release.
+	 * Drop any current reference to a device-tree node and get a
+	 * reference to the parent's node which will be balanced on reprobe or
+	 * on platform-device release.
 	 */
-	device_set_of_node_from_dev(&pdev->dev, pdev->dev.parent);
+	of_node_put(pdev->dev.of_node);
+	pdev->dev.of_node = of_node_get(pdev->dev.parent->of_node);
 
 	mtherm->tz_device = devm_thermal_zone_of_sensor_register(&pdev->dev, 0,
 				mtherm, &max77620_thermal_ops);
@@ -153,7 +155,6 @@ static struct platform_device_id max77620_thermal_devtype[] = {
 	{ .name = "max77620-thermal", },
 	{},
 };
-MODULE_DEVICE_TABLE(platform, max77620_thermal_devtype);
 
 static struct platform_driver max77620_thermal_driver = {
 	.driver = {

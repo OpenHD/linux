@@ -14,6 +14,10 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "saa7134.h"
@@ -1200,7 +1204,7 @@ static int video_release(struct file *file)
 	saa_andorb(SAA7134_OFMT_DATA_A, 0x1f, 0);
 	saa_andorb(SAA7134_OFMT_DATA_B, 0x1f, 0);
 
-	saa_call_all(dev, tuner, standby);
+	saa_call_all(dev, core, s_power, 0);
 	if (vdev->vfl_type == VFL_TYPE_RADIO)
 		saa_call_all(dev, core, ioctl, SAA6588_CMD_CLOSE, &cmd);
 	mutex_unlock(&dev->lock);
@@ -1227,20 +1231,20 @@ static ssize_t radio_read(struct file *file, char __user *data,
 	return cmd.result;
 }
 
-static __poll_t radio_poll(struct file *file, poll_table *wait)
+static unsigned int radio_poll(struct file *file, poll_table *wait)
 {
 	struct saa7134_dev *dev = video_drvdata(file);
 	struct saa6588_command cmd;
-	__poll_t rc = v4l2_ctrl_poll(file, wait);
+	unsigned int rc = v4l2_ctrl_poll(file, wait);
 
 	cmd.instance = file;
 	cmd.event_list = wait;
-	cmd.poll_mask = 0;
+	cmd.result = 0;
 	mutex_lock(&dev->lock);
 	saa_call_all(dev, core, ioctl, SAA6588_CMD_POLL, &cmd);
 	mutex_unlock(&dev->lock);
 
-	return rc | cmd.poll_mask;
+	return rc | cmd.result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1531,8 +1535,6 @@ int saa7134_querycap(struct file *file, void *priv,
 	case VFL_TYPE_VBI:
 		cap->device_caps |= vbi_caps;
 		break;
-	default:
-		return -EINVAL;
 	}
 	cap->capabilities = radio_caps | video_caps | vbi_caps |
 		cap->device_caps | V4L2_CAP_DEVICE_CAPS;
@@ -2043,14 +2045,14 @@ static const struct v4l2_ioctl_ops radio_ioctl_ops = {
 struct video_device saa7134_video_template = {
 	.name				= "saa7134-video",
 	.fops				= &video_fops,
-	.ioctl_ops			= &video_ioctl_ops,
+	.ioctl_ops 			= &video_ioctl_ops,
 	.tvnorms			= SAA7134_NORMS,
 };
 
 struct video_device saa7134_radio_template = {
 	.name			= "saa7134-radio",
 	.fops			= &radio_fops,
-	.ioctl_ops		= &radio_ioctl_ops,
+	.ioctl_ops 		= &radio_ioctl_ops,
 };
 
 static const struct v4l2_ctrl_ops saa7134_ctrl_ops = {
@@ -2147,7 +2149,9 @@ int saa7134_video_init1(struct saa7134_dev *dev)
 	dev->automute       = 0;
 
 	INIT_LIST_HEAD(&dev->video_q.queue);
-	timer_setup(&dev->video_q.timeout, saa7134_buffer_timeout, 0);
+	init_timer(&dev->video_q.timeout);
+	dev->video_q.timeout.function = saa7134_buffer_timeout;
+	dev->video_q.timeout.data     = (unsigned long)(&dev->video_q);
 	dev->video_q.dev              = dev;
 	dev->fmt = format_by_fourcc(V4L2_PIX_FMT_BGR24);
 	dev->width    = 720;

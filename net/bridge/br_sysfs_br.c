@@ -19,7 +19,6 @@
 #include <linux/rtnetlink.h>
 #include <linux/spinlock.h>
 #include <linux/times.h>
-#include <linux/sched/signal.h>
 
 #include "br_private.h"
 
@@ -264,7 +263,7 @@ static ssize_t gc_timer_show(struct device *d, struct device_attribute *attr,
 			     char *buf)
 {
 	struct net_bridge *br = to_bridge(d);
-	return sprintf(buf, "%ld\n", br_timer_value(&br->gc_work.timer));
+	return sprintf(buf, "%ld\n", br_timer_value(&br->gc_timer));
 }
 static DEVICE_ATTR_RO(gc_timer);
 
@@ -272,7 +271,10 @@ static ssize_t group_addr_show(struct device *d,
 			       struct device_attribute *attr, char *buf)
 {
 	struct net_bridge *br = to_bridge(d);
-	return sprintf(buf, "%pM\n", br->group_addr);
+	return sprintf(buf, "%x:%x:%x:%x:%x:%x\n",
+		       br->group_addr[0], br->group_addr[1],
+		       br->group_addr[2], br->group_addr[3],
+		       br->group_addr[4], br->group_addr[5]);
 }
 
 static ssize_t group_addr_store(struct device *d,
@@ -281,11 +283,14 @@ static ssize_t group_addr_store(struct device *d,
 {
 	struct net_bridge *br = to_bridge(d);
 	u8 new_addr[6];
+	int i;
 
 	if (!ns_capable(dev_net(br->dev)->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
-	if (!mac_pton(buf, new_addr))
+	if (sscanf(buf, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+		   &new_addr[0], &new_addr[1], &new_addr[2],
+		   &new_addr[3], &new_addr[4], &new_addr[5]) != 6)
 		return -EINVAL;
 
 	if (!is_link_local_ether_addr(new_addr))
@@ -300,7 +305,8 @@ static ssize_t group_addr_store(struct device *d,
 		return restart_syscall();
 
 	spin_lock_bh(&br->lock);
-	ether_addr_copy(br->group_addr, new_addr);
+	for (i = 0; i < 6; i++)
+		br->group_addr[i] = new_addr[i];
 	spin_unlock_bh(&br->lock);
 
 	br->group_addr_set = true;
@@ -433,23 +439,6 @@ static ssize_t hash_max_store(struct device *d, struct device_attribute *attr,
 	return store_bridge_parm(d, buf, len, br_multicast_set_hash_max);
 }
 static DEVICE_ATTR_RW(hash_max);
-
-static ssize_t multicast_igmp_version_show(struct device *d,
-					   struct device_attribute *attr,
-					   char *buf)
-{
-	struct net_bridge *br = to_bridge(d);
-
-	return sprintf(buf, "%u\n", br->multicast_igmp_version);
-}
-
-static ssize_t multicast_igmp_version_store(struct device *d,
-					    struct device_attribute *attr,
-					    const char *buf, size_t len)
-{
-	return store_bridge_parm(d, buf, len, br_multicast_set_igmp_version);
-}
-static DEVICE_ATTR_RW(multicast_igmp_version);
 
 static ssize_t multicast_last_member_count_show(struct device *d,
 						struct device_attribute *attr,
@@ -653,25 +642,6 @@ static ssize_t multicast_stats_enabled_store(struct device *d,
 	return store_bridge_parm(d, buf, len, set_stats_enabled);
 }
 static DEVICE_ATTR_RW(multicast_stats_enabled);
-
-#if IS_ENABLED(CONFIG_IPV6)
-static ssize_t multicast_mld_version_show(struct device *d,
-					  struct device_attribute *attr,
-					  char *buf)
-{
-	struct net_bridge *br = to_bridge(d);
-
-	return sprintf(buf, "%u\n", br->multicast_mld_version);
-}
-
-static ssize_t multicast_mld_version_store(struct device *d,
-					   struct device_attribute *attr,
-					   const char *buf, size_t len)
-{
-	return store_bridge_parm(d, buf, len, br_multicast_set_mld_version);
-}
-static DEVICE_ATTR_RW(multicast_mld_version);
-#endif
 #endif
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 static ssize_t nf_call_iptables_show(
@@ -839,10 +809,6 @@ static struct attribute *bridge_attrs[] = {
 	&dev_attr_multicast_query_response_interval.attr,
 	&dev_attr_multicast_startup_query_interval.attr,
 	&dev_attr_multicast_stats_enabled.attr,
-	&dev_attr_multicast_igmp_version.attr,
-#if IS_ENABLED(CONFIG_IPV6)
-	&dev_attr_multicast_mld_version.attr,
-#endif
 #endif
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	&dev_attr_nf_call_iptables.attr,
@@ -858,7 +824,7 @@ static struct attribute *bridge_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group bridge_group = {
+static struct attribute_group bridge_group = {
 	.name = SYSFS_BRIDGE_ATTR,
 	.attrs = bridge_attrs,
 };
@@ -893,7 +859,7 @@ static ssize_t brforward_read(struct file *filp, struct kobject *kobj,
 
 static struct bin_attribute bridge_forward = {
 	.attr = { .name = SYSFS_BRIDGE_FDB,
-		  .mode = 0444, },
+		  .mode = S_IRUGO, },
 	.read = brforward_read,
 };
 

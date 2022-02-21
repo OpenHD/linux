@@ -697,9 +697,11 @@ static int si476x_core_probe(struct i2c_client *client,
 	int              cell_num;
 
 	core = devm_kzalloc(&client->dev, sizeof(*core), GFP_KERNEL);
-	if (!core)
+	if (!core) {
+		dev_err(&client->dev,
+			"failed to allocate 'struct si476x_core'\n");
 		return -ENOMEM;
-
+	}
 	core->client = client;
 
 	core->regmap = devm_regmap_init_si476x(core);
@@ -751,7 +753,7 @@ static int si476x_core_probe(struct i2c_client *client,
 				       ARRAY_SIZE(core->supplies),
 				       core->supplies);
 	if (rval) {
-		dev_err(&client->dev, "Failed to get all of the regulators\n");
+		dev_err(&client->dev, "Failet to gett all of the regulators\n");
 		goto free_gpio;
 	}
 

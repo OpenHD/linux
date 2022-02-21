@@ -33,7 +33,7 @@
 #include <sound/ac97_codec.h>
 #include "cs5535audio.h"
 
-static const struct snd_pcm_hardware snd_cs5535audio_playback =
+static struct snd_pcm_hardware snd_cs5535audio_playback =
 {
 	.info =			(
 				SNDRV_PCM_INFO_MMAP |
@@ -62,7 +62,7 @@ static const struct snd_pcm_hardware snd_cs5535audio_playback =
 	.fifo_size =		0,
 };
 
-static const struct snd_pcm_hardware snd_cs5535audio_capture =
+static struct snd_pcm_hardware snd_cs5535audio_capture =
 {
 	.info =			(
 				SNDRV_PCM_INFO_MMAP |

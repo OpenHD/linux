@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _S390_TLBFLUSH_H
 #define _S390_TLBFLUSH_H
 
@@ -21,15 +20,10 @@ static inline void __tlb_flush_local(void)
  */
 static inline void __tlb_flush_idte(unsigned long asce)
 {
-	unsigned long opt;
-
-	opt = IDTE_PTOA;
-	if (MACHINE_HAS_TLB_GUEST)
-		opt |= IDTE_GUEST_ASCE;
 	/* Global TLB flush for the mm */
 	asm volatile(
 		"	.insn	rrf,0xb98e0000,0,%0,%1,0"
-		: : "a" (opt), "a" (asce) : "cc");
+		: : "a" (2048), "a" (asce) : "cc");
 }
 
 #ifdef CONFIG_SMP

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/usb/misc/lvstest.c
  *
@@ -6,6 +5,10 @@
  *
  * Copyright (C) 2014 ST Microelectronics
  * Pratyush Anand <pratyush.anand@gmail.com>
+ *
+ * This file is licensed under the terms of the GNU General Public
+ * License version 2. This program is licensed "as is" without any
+ * warranty of any kind, whether express or implied.
  */
 
 #include <linux/init.h>
@@ -209,7 +212,7 @@ static ssize_t u2_timeout_store(struct device *dev,
 		return ret;
 	}
 
-	if (val > 127)
+	if (val < 0 || val > 127)
 		return -EINVAL;
 
 	ret = lvs_rh_set_port_feature(hdev, lvs->portnum | (val << 8),
@@ -238,7 +241,7 @@ static ssize_t u1_timeout_store(struct device *dev,
 		return ret;
 	}
 
-	if (val > 127)
+	if (val < 0 || val > 127)
 		return -EINVAL;
 
 	ret = lvs_rh_set_port_feature(hdev, lvs->portnum | (val << 8),
@@ -405,9 +408,10 @@ static int lvs_rh_probe(struct usb_interface *intf,
 	hdev = interface_to_usbdev(intf);
 	desc = intf->cur_altsetting;
 
-	ret = usb_find_int_in_endpoint(desc, &endpoint);
-	if (ret)
-		return ret;
+	if (desc->desc.bNumEndpoints < 1)
+		return -ENODEV;
+
+	endpoint = &desc->endpoint[0].desc;
 
 	/* valid only for SS root hub */
 	if (hdev->descriptor.bDeviceProtocol != USB_HUB_PR_SS || hdev->parent) {
@@ -429,7 +433,7 @@ static int lvs_rh_probe(struct usb_interface *intf,
 			USB_DT_SS_HUB_SIZE, USB_CTRL_GET_TIMEOUT);
 	if (ret < (USB_DT_HUB_NONVAR_SIZE + 2)) {
 		dev_err(&hdev->dev, "wrong root hub descriptor read %d\n", ret);
-		return ret;
+		return ret < 0 ? ret : -EINVAL;
 	}
 
 	/* submit urb to poll interrupt endpoint */

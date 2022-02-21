@@ -26,16 +26,17 @@
 #define _HYPERV_H
 
 #include <uapi/linux/hyperv.h>
+#include <uapi/asm/hyperv.h>
 
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 #include <linux/list.h>
 #include <linux/timer.h>
+#include <linux/workqueue.h>
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/mod_devicetable.h>
-#include <linux/interrupt.h>
-#include <linux/reciprocal_div.h>
+
 
 #define MAX_PAGE_BUFFER_COUNT				32
 #define MAX_MULTIPAGE_BUFFER_COUNT			32 /* 128K */
@@ -89,33 +90,18 @@ struct hv_ring_buffer {
 	u32 interrupt_mask;
 
 	/*
-	 * WS2012/Win8 and later versions of Hyper-V implement interrupt
-	 * driven flow management. The feature bit feat_pending_send_sz
-	 * is set by the host on the host->guest ring buffer, and by the
-	 * guest on the guest->host ring buffer.
+	 * Win8 uses some of the reserved bits to implement
+	 * interrupt driven flow management. On the send side
+	 * we can request that the receiver interrupt the sender
+	 * when the ring transitions from being full to being able
+	 * to handle a message of size "pending_send_sz".
 	 *
-	 * The meaning of the feature bit is a bit complex in that it has
-	 * semantics that apply to both ring buffers.  If the guest sets
-	 * the feature bit in the guest->host ring buffer, the guest is
-	 * telling the host that:
-	 * 1) It will set the pending_send_sz field in the guest->host ring
-	 *    buffer when it is waiting for space to become available, and
-	 * 2) It will read the pending_send_sz field in the host->guest
-	 *    ring buffer and interrupt the host when it frees enough space
-	 *
-	 * Similarly, if the host sets the feature bit in the host->guest
-	 * ring buffer, the host is telling the guest that:
-	 * 1) It will set the pending_send_sz field in the host->guest ring
-	 *    buffer when it is waiting for space to become available, and
-	 * 2) It will read the pending_send_sz field in the guest->host
-	 *    ring buffer and interrupt the guest when it frees enough space
-	 *
-	 * If either the guest or host does not set the feature bit that it
-	 * owns, that guest or host must do polling if it encounters a full
-	 * ring buffer, and not signal the other end with an interrupt.
+	 * Add necessary state for this enhancement.
 	 */
 	u32 pending_send_sz;
+
 	u32 reserved1[12];
+
 	union {
 		struct {
 			u32 feat_pending_send_sz:1;
@@ -136,15 +122,39 @@ struct hv_ring_buffer {
 struct hv_ring_buffer_info {
 	struct hv_ring_buffer *ring_buffer;
 	u32 ring_size;			/* Include the shared header */
-	struct reciprocal_value ring_size_div10_reciprocal;
 	spinlock_t ring_lock;
 
 	u32 ring_datasize;		/* < ring_size */
+	u32 ring_data_startoffset;
+	u32 priv_write_index;
 	u32 priv_read_index;
+	u32 cached_read_index;
 };
 
+/*
+ *
+ * hv_get_ringbuffer_availbytes()
+ *
+ * Get number of bytes available to read and to write to
+ * for the specified ring buffer
+ */
+static inline void
+hv_get_ringbuffer_availbytes(struct hv_ring_buffer_info *rbi,
+			  u32 *read, u32 *write)
+{
+	u32 read_loc, write_loc, dsize;
 
-static inline u32 hv_get_bytes_to_read(const struct hv_ring_buffer_info *rbi)
+	/* Capture the read/write indices before they changed */
+	read_loc = rbi->ring_buffer->read_index;
+	write_loc = rbi->ring_buffer->write_index;
+	dsize = rbi->ring_datasize;
+
+	*write = write_loc >= read_loc ? dsize - (write_loc - read_loc) :
+		read_loc - write_loc;
+	*read = dsize - *write;
+}
+
+static inline u32 hv_get_bytes_to_read(struct hv_ring_buffer_info *rbi)
 {
 	u32 read_loc, write_loc, dsize, read;
 
@@ -158,7 +168,7 @@ static inline u32 hv_get_bytes_to_read(const struct hv_ring_buffer_info *rbi)
 	return read;
 }
 
-static inline u32 hv_get_bytes_to_write(const struct hv_ring_buffer_info *rbi)
+static inline u32 hv_get_bytes_to_write(struct hv_ring_buffer_info *rbi)
 {
 	u32 read_loc, write_loc, dsize, write;
 
@@ -171,16 +181,19 @@ static inline u32 hv_get_bytes_to_write(const struct hv_ring_buffer_info *rbi)
 	return write;
 }
 
-static inline u32 hv_get_avail_to_write_percent(
-		const struct hv_ring_buffer_info *rbi)
+static inline u32 hv_get_cached_bytes_to_write(
+	const struct hv_ring_buffer_info *rbi)
 {
-	u32 avail_write = hv_get_bytes_to_write(rbi);
+	u32 read_loc, write_loc, dsize, write;
 
-	return reciprocal_divide(
-			(avail_write  << 3) + (avail_write << 1),
-			rbi->ring_size_div10_reciprocal);
+	dsize = rbi->ring_datasize;
+	read_loc = rbi->cached_read_index;
+	write_loc = rbi->ring_buffer->write_index;
+
+	write = write_loc >= read_loc ? dsize - (write_loc - read_loc) :
+		read_loc - write_loc;
+	return write;
 }
-
 /*
  * VMBUS version is 32 bit entity broken up into
  * two 16 bit quantities: major_number. minor_number.
@@ -190,7 +203,6 @@ static inline u32 hv_get_avail_to_write_percent(
  * 2 . 4  (Windows 8)
  * 3 . 0  (Windows 8 R2)
  * 4 . 0  (Windows 10)
- * 5 . 0  (Newer Windows 10)
  */
 
 #define VERSION_WS2008  ((0 << 16) | (13))
@@ -198,11 +210,10 @@ static inline u32 hv_get_avail_to_write_percent(
 #define VERSION_WIN8    ((2 << 16) | (4))
 #define VERSION_WIN8_1    ((3 << 16) | (0))
 #define VERSION_WIN10	((4 << 16) | (0))
-#define VERSION_WIN10_V5 ((5 << 16) | (0))
 
 #define VERSION_INVAL -1
 
-#define VERSION_CURRENT VERSION_WIN10_V5
+#define VERSION_CURRENT VERSION_WIN10
 
 /* Make maximum size of pipe payload of 16K */
 #define MAX_PIPE_DATA_PAYLOAD		(sizeof(u8) * 16384)
@@ -481,12 +492,6 @@ struct vmbus_channel_rescind_offer {
 	u32 child_relid;
 } __packed;
 
-static inline u32
-hv_ringbuffer_pending_size(const struct hv_ring_buffer_info *rbi)
-{
-	return rbi->ring_buffer->pending_send_sz;
-}
-
 /*
  * Request Offer -- no parameters, SynIC message contains the partition ID
  * Set Snoop -- no parameters, SynIC message contains the partition ID
@@ -520,10 +525,10 @@ struct vmbus_channel_open_channel {
 	u32 target_vp;
 
 	/*
-	 * The upstream ring buffer begins at offset zero in the memory
-	 * described by RingBufferGpadlHandle. The downstream ring buffer
-	 * follows it at this offset (in pages).
-	 */
+	* The upstream ring buffer begins at offset zero in the memory
+	* described by RingBufferGpadlHandle. The downstream ring buffer
+	* follows it at this offset (in pages).
+	*/
 	u32 downstream_ringbuffer_pageoffset;
 
 	/* User-specific data to be passed along to the server endpoint. */
@@ -599,14 +604,7 @@ struct vmbus_channel_initiate_contact {
 	struct vmbus_channel_message_header header;
 	u32 vmbus_version_requested;
 	u32 target_vcpu; /* The VCPU the host should respond to */
-	union {
-		u64 interrupt_page;
-		struct {
-			u8	msg_sint;
-			u8	padding1[3];
-			u32	padding2;
-		};
-	};
+	u64 interrupt_page;
 	u64 monitor_page1;
 	u64 monitor_page2;
 } __packed;
@@ -621,19 +619,6 @@ struct vmbus_channel_tl_connect_request {
 struct vmbus_channel_version_response {
 	struct vmbus_channel_message_header header;
 	u8 version_supported;
-
-	u8 connection_state;
-	u16 padding;
-
-	/*
-	 * On new hosts that support VMBus protocol 5.0, we must use
-	 * VMBUS_MESSAGE_CONNECTION_ID_4 for the Initiate Contact Message,
-	 * and for subsequent messages, we must use the Message Connection ID
-	 * field in the host-returned Version Response Message.
-	 *
-	 * On old hosts, we should always use VMBUS_MESSAGE_CONNECTION_ID (1).
-	 */
-	u32 msg_conn_id;
 } __packed;
 
 enum vmbus_channel_state {
@@ -687,6 +672,23 @@ union hv_connection_id {
 	} u;
 };
 
+/* Definition of the hv_signal_event hypercall input structure. */
+struct hv_input_signal_event {
+	union hv_connection_id connectionid;
+	u16 flag_number;
+	u16 rsvdz;
+};
+
+struct hv_input_signal_event_buffer {
+	u64 align8;
+	struct hv_input_signal_event event;
+};
+
+enum hv_signal_policy {
+	HV_SIGNAL_POLICY_DEFAULT = 0,
+	HV_SIGNAL_POLICY_EXPLICIT,
+};
+
 enum hv_numa_policy {
 	HV_BALANCED = 0,
 	HV_LOCALIZED,
@@ -709,7 +711,7 @@ enum vmbus_device_type {
 	HV_FCOPY,
 	HV_BACKUP,
 	HV_DM,
-	HV_UNKNOWN,
+	HV_UNKOWN,
 };
 
 struct vmbus_device {
@@ -734,46 +736,42 @@ struct vmbus_channel {
 	u8 monitor_bit;
 
 	bool rescind; /* got rescind msg */
-	struct completion rescind_event;
 
 	u32 ringbuffer_gpadlhandle;
 
 	/* Allocated memory for ring buffer */
-	struct page *ringbuffer_page;
+	void *ringbuffer_pages;
 	u32 ringbuffer_pagecount;
 	struct hv_ring_buffer_info outbound;	/* send to parent */
 	struct hv_ring_buffer_info inbound;	/* receive from parent */
+	spinlock_t inbound_lock;
 
 	struct vmbus_close_msg close_msg;
 
-	/* Statistics */
-	u64	interrupts;	/* Host to Guest interrupts */
-	u64	sig_events;	/* Guest to Host events */
+	/* Channel callback are invoked in this workqueue context */
+	/* HANDLE dataWorkQueue; */
 
-	/* Channel callback's invoked in softirq context */
-	struct tasklet_struct callback_event;
 	void (*onchannel_callback)(void *context);
 	void *channel_callback_context;
 
 	/*
-	 * A channel can be marked for one of three modes of reading:
-	 *   BATCHED - callback called from taslket and should read
-	 *            channel until empty. Interrupts from the host
-	 *            are masked while read is in process (default).
-	 *   DIRECT - callback called from tasklet (softirq).
-	 *   ISR - callback called in interrupt context and must
-	 *         invoke its own deferred processing.
-	 *         Host interrupts are disabled and must be re-enabled
-	 *         when ring is empty.
+	 * A channel can be marked for efficient (batched)
+	 * reading:
+	 * If batched_reading is set to "true", we read until the
+	 * channel is empty and hold off interrupts from the host
+	 * during the entire read process.
+	 * If batched_reading is set to "false", the client is not
+	 * going to perform batched reading.
+	 *
+	 * By default we will enable batched reading; specific
+	 * drivers that don't want this behavior can turn it off.
 	 */
-	enum hv_callback_mode {
-		HV_CALL_BATCHED,
-		HV_CALL_DIRECT,
-		HV_CALL_ISR
-	} callback_mode;
+
+	bool batched_reading;
 
 	bool is_dedicated_interrupt;
-	u64 sig_event;
+	struct hv_input_signal_event_buffer sig_buf;
+	struct hv_input_signal_event *sig_event;
 
 	/*
 	 * Starting with win8, this field will be used to specify
@@ -852,18 +850,23 @@ struct vmbus_channel {
 	 * link up channels based on their CPU affinity.
 	 */
 	struct list_head percpu_list;
-
 	/*
-	 * Defer freeing channel until after all cpu's have
-	 * gone through grace period.
+	 * Host signaling policy: The default policy will be
+	 * based on the ring buffer state. We will also support
+	 * a policy where the client driver can have explicit
+	 * signaling control.
 	 */
-	struct rcu_head rcu;
-
+	enum hv_signal_policy  signal_policy;
 	/*
-	 * For sysfs per-channel properties.
+	 * On the channel send side, many of the VMBUS
+	 * device drivers explicity serialize access to the
+	 * outgoing ring buffer. Give more control to the
+	 * VMBUS device drivers in terms how to serialize
+	 * accesss to the outgoing ring buffer.
+	 * The default behavior will be to aquire the
+	 * ring lock to preserve the current behavior.
 	 */
-	struct kobject			kobj;
-
+	bool acquire_ring_lock;
 	/*
 	 * For performance critical channels (storage, networking
 	 * etc,), Hyper-V has a mechanism to enhance the throughput
@@ -892,7 +895,7 @@ struct vmbus_channel {
 
 	/*
 	 * NUMA distribution policy:
-	 * We support two policies:
+	 * We support teo policies:
 	 * 1) Balanced: Here all performance critical channels are
 	 *    distributed evenly amongst all the NUMA nodes.
 	 *    This policy will be the default policy.
@@ -902,21 +905,23 @@ struct vmbus_channel {
 	 */
 	enum hv_numa_policy affinity_policy;
 
-	bool probe_done;
-
-	/*
-	 * We must offload the handling of the primary/sub channels
-	 * from the single-threaded vmbus_connection.work_queue to
-	 * two different workqueue, otherwise we can block
-	 * vmbus_connection.work_queue and hang: see vmbus_process_offer().
-	 */
-	struct work_struct add_channel_work;
 };
+
+static inline void set_channel_lock_state(struct vmbus_channel *c, bool state)
+{
+	c->acquire_ring_lock = state;
+}
 
 static inline bool is_hvsock_channel(const struct vmbus_channel *c)
 {
 	return !!(c->offermsg.offer.chn_flags &
 		  VMBUS_CHANNEL_TLNPI_PROVIDER_OFFER);
+}
+
+static inline void set_channel_signal_state(struct vmbus_channel *c,
+					    enum hv_signal_policy policy)
+{
+	c->signal_policy = policy;
 }
 
 static inline void set_channel_affinity_state(struct vmbus_channel *c,
@@ -925,10 +930,9 @@ static inline void set_channel_affinity_state(struct vmbus_channel *c,
 	c->affinity_policy = policy;
 }
 
-static inline void set_channel_read_mode(struct vmbus_channel *c,
-					enum hv_callback_mode mode)
+static inline void set_channel_read_state(struct vmbus_channel *c, bool state)
 {
-	c->callback_mode = mode;
+	c->batched_reading = state;
 }
 
 static inline void set_per_channel_state(struct vmbus_channel *c, void *s)
@@ -1034,7 +1038,7 @@ extern int vmbus_open(struct vmbus_channel *channel,
 			    u32 recv_ringbuffersize,
 			    void *userdata,
 			    u32 userdatalen,
-			    void (*onchannel_callback)(void *context),
+			    void(*onchannel_callback)(void *context),
 			    void *context);
 
 extern void vmbus_close(struct vmbus_channel *channel);
@@ -1046,12 +1050,35 @@ extern int vmbus_sendpacket(struct vmbus_channel *channel,
 				  enum vmbus_packet_type type,
 				  u32 flags);
 
+extern int vmbus_sendpacket_ctl(struct vmbus_channel *channel,
+				  void *buffer,
+				  u32 bufferLen,
+				  u64 requestid,
+				  enum vmbus_packet_type type,
+				  u32 flags,
+				  bool kick_q);
+
 extern int vmbus_sendpacket_pagebuffer(struct vmbus_channel *channel,
 					    struct hv_page_buffer pagebuffers[],
 					    u32 pagecount,
 					    void *buffer,
 					    u32 bufferlen,
 					    u64 requestid);
+
+extern int vmbus_sendpacket_pagebuffer_ctl(struct vmbus_channel *channel,
+					   struct hv_page_buffer pagebuffers[],
+					   u32 pagecount,
+					   void *buffer,
+					   u32 bufferlen,
+					   u64 requestid,
+					   u32 flags,
+					   bool kick_q);
+
+extern int vmbus_sendpacket_multipagebuffer(struct vmbus_channel *channel,
+					struct hv_multipage_buffer *mpb,
+					void *buffer,
+					u32 bufferlen,
+					u64 requestid);
 
 extern int vmbus_sendpacket_mpb_desc(struct vmbus_channel *channel,
 				     struct vmbus_packet_mpb_array *mpb,
@@ -1067,8 +1094,6 @@ extern int vmbus_establish_gpadl(struct vmbus_channel *channel,
 
 extern int vmbus_teardown_gpadl(struct vmbus_channel *channel,
 				     u32 gpadl_handle);
-
-void vmbus_reset_channel_cb(struct vmbus_channel *channel);
 
 extern int vmbus_recvpacket(struct vmbus_channel *channel,
 				  void *buffer,
@@ -1109,12 +1134,6 @@ struct hv_driver {
 
 	struct device_driver driver;
 
-	/* dynamic device GUID's */
-	struct  {
-		spinlock_t lock;
-		struct list_head list;
-	} dynids;
-
 	int (*probe)(struct hv_device *, const struct hv_vmbus_device_id *);
 	int (*remove)(struct hv_device *);
 	void (*shutdown)(struct hv_device *);
@@ -1134,7 +1153,6 @@ struct hv_device {
 	struct device device;
 
 	struct vmbus_channel *channel;
-	struct kset	     *channels_kset;
 };
 
 
@@ -1158,18 +1176,6 @@ static inline void *hv_get_drvdata(struct hv_device *dev)
 	return dev_get_drvdata(&dev->device);
 }
 
-struct hv_ring_buffer_debug_info {
-	u32 current_interrupt_mask;
-	u32 current_read_index;
-	u32 current_write_index;
-	u32 bytes_avail_toread;
-	u32 bytes_avail_towrite;
-};
-
-
-int hv_ringbuffer_get_debuginfo(const struct hv_ring_buffer_info *ring_info,
-				struct hv_ring_buffer_debug_info *debug_info);
-
 /* Vmbus interface */
 #define vmbus_driver_register(driver)	\
 	__vmbus_driver_register(driver, THIS_MODULE, KBUILD_MODNAME)
@@ -1185,6 +1191,8 @@ int vmbus_allocate_mmio(struct resource **new, struct hv_device *device_obj,
 			resource_size_t size, resource_size_t align,
 			bool fb_overlap_ok);
 void vmbus_free_mmio(resource_size_t start, resource_size_t size);
+int vmbus_cpu_number_to_vp_number(int cpu_number);
+u64 hv_do_hypercall(u64 control, void *input, void *output);
 
 /*
  * GUID definitions of various offer types - services offered to the guest.
@@ -1441,16 +1449,18 @@ struct hyperv_service_callback {
 	char *log_msg;
 	uuid_le data;
 	struct vmbus_channel *channel;
-	void (*callback)(void *context);
+	void (*callback) (void *context);
 };
 
 #define MAX_SRV_VER	0x7ffffff
-extern bool vmbus_prep_negotiate_resp(struct icmsg_hdr *icmsghdrp, u8 *buf,
-				const int *fw_version, int fw_vercnt,
-				const int *srv_version, int srv_vercnt,
-				int *nego_fw_version, int *nego_srv_version);
+extern bool vmbus_prep_negotiate_resp(struct icmsg_hdr *,
+					struct icmsg_negotiate *, u8 *, int,
+					int);
 
-void hv_process_channel_removal(u32 relid);
+void hv_event_tasklet_disable(struct vmbus_channel *channel);
+void hv_event_tasklet_enable(struct vmbus_channel *channel);
+
+void hv_process_channel_removal(struct vmbus_channel *channel, u32 relid);
 
 void vmbus_setevent(struct vmbus_channel *channel);
 /*
@@ -1465,86 +1475,143 @@ void vmbus_set_event(struct vmbus_channel *channel);
 
 /* Get the start of the ring buffer. */
 static inline void *
-hv_get_ring_buffer(const struct hv_ring_buffer_info *ring_info)
+hv_get_ring_buffer(struct hv_ring_buffer_info *ring_info)
 {
-	return ring_info->ring_buffer->buffer;
+	return (void *)ring_info->ring_buffer->buffer;
 }
 
 /*
- * Mask off host interrupt callback notifications
+ * To optimize the flow management on the send-side,
+ * when the sender is blocked because of lack of
+ * sufficient space in the ring buffer, potential the
+ * consumer of the ring buffer can signal the producer.
+ * This is controlled by the following parameters:
+ *
+ * 1. pending_send_sz: This is the size in bytes that the
+ *    producer is trying to send.
+ * 2. The feature bit feat_pending_send_sz set to indicate if
+ *    the consumer of the ring will signal when the ring
+ *    state transitions from being full to a state where
+ *    there is room for the producer to send the pending packet.
  */
-static inline void hv_begin_read(struct hv_ring_buffer_info *rbi)
+
+static inline  void hv_signal_on_read(struct vmbus_channel *channel)
 {
-	rbi->ring_buffer->interrupt_mask = 1;
-
-	/* make sure mask update is not reordered */
-	virt_mb();
-}
-
-/*
- * Re-enable host callback and return number of outstanding bytes
- */
-static inline u32 hv_end_read(struct hv_ring_buffer_info *rbi)
-{
-
-	rbi->ring_buffer->interrupt_mask = 0;
-
-	/* make sure mask update is not reordered */
-	virt_mb();
+	u32 cur_write_sz, cached_write_sz;
+	u32 pending_sz;
+	struct hv_ring_buffer_info *rbi = &channel->inbound;
 
 	/*
-	 * Now check to see if the ring buffer is still empty.
-	 * If it is not, we raced and we need to process new
-	 * incoming messages.
+	 * Issue a full memory barrier before making the signaling decision.
+	 * Here is the reason for having this barrier:
+	 * If the reading of the pend_sz (in this function)
+	 * were to be reordered and read before we commit the new read
+	 * index (in the calling function)  we could
+	 * have a problem. If the host were to set the pending_sz after we
+	 * have sampled pending_sz and go to sleep before we commit the
+	 * read index, we could miss sending the interrupt. Issue a full
+	 * memory barrier to address this.
 	 */
-	return hv_get_bytes_to_read(rbi);
+	virt_mb();
+
+	pending_sz = READ_ONCE(rbi->ring_buffer->pending_send_sz);
+	/* If the other end is not blocked on write don't bother. */
+	if (pending_sz == 0)
+		return;
+
+	cur_write_sz = hv_get_bytes_to_write(rbi);
+
+	if (cur_write_sz <= pending_sz)
+		return;
+
+	cached_write_sz = hv_get_cached_bytes_to_write(rbi);
+	if (cached_write_sz <= pending_sz)
+		vmbus_setevent(channel);
+
+	return;
+}
+
+static inline void
+init_cached_read_index(struct vmbus_channel *channel)
+{
+	struct hv_ring_buffer_info *rbi = &channel->inbound;
+
+	rbi->cached_read_index = rbi->ring_buffer->read_index;
 }
 
 /*
  * An API to support in-place processing of incoming VMBUS packets.
  */
+#define VMBUS_PKT_TRAILER	8
 
-/* Get data payload associated with descriptor */
-static inline void *hv_pkt_data(const struct vmpacket_descriptor *desc)
+static inline struct vmpacket_descriptor *
+get_next_pkt_raw(struct vmbus_channel *channel)
 {
-	return (void *)((unsigned long)desc + (desc->offset8 << 3));
+	struct hv_ring_buffer_info *ring_info = &channel->inbound;
+	u32 priv_read_loc = ring_info->priv_read_index;
+	void *ring_buffer = hv_get_ring_buffer(ring_info);
+	u32 dsize = ring_info->ring_datasize;
+	/*
+	 * delta is the difference between what is available to read and
+	 * what was already consumed in place. We commit read index after
+	 * the whole batch is processed.
+	 */
+	u32 delta = priv_read_loc >= ring_info->ring_buffer->read_index ?
+		priv_read_loc - ring_info->ring_buffer->read_index :
+		(dsize - ring_info->ring_buffer->read_index) + priv_read_loc;
+	u32 bytes_avail_toread = (hv_get_bytes_to_read(ring_info) - delta);
+
+	if (bytes_avail_toread < sizeof(struct vmpacket_descriptor))
+		return NULL;
+
+	return ring_buffer + priv_read_loc;
 }
-
-/* Get data size associated with descriptor */
-static inline u32 hv_pkt_datalen(const struct vmpacket_descriptor *desc)
-{
-	return (desc->len8 << 3) - (desc->offset8 << 3);
-}
-
-
-struct vmpacket_descriptor *
-hv_pkt_iter_first(struct vmbus_channel *channel);
-
-struct vmpacket_descriptor *
-__hv_pkt_iter_next(struct vmbus_channel *channel,
-		   const struct vmpacket_descriptor *pkt);
-
-void hv_pkt_iter_close(struct vmbus_channel *channel);
 
 /*
- * Get next packet descriptor from iterator
- * If at end of list, return NULL and update host.
+ * A helper function to step through packets "in-place"
+ * This API is to be called after each successful call
+ * get_next_pkt_raw().
  */
-static inline struct vmpacket_descriptor *
-hv_pkt_iter_next(struct vmbus_channel *channel,
-		 const struct vmpacket_descriptor *pkt)
+static inline void put_pkt_raw(struct vmbus_channel *channel,
+				struct vmpacket_descriptor *desc)
 {
-	struct vmpacket_descriptor *nxt;
+	struct hv_ring_buffer_info *ring_info = &channel->inbound;
+	u32 packetlen = desc->len8 << 3;
+	u32 dsize = ring_info->ring_datasize;
 
-	nxt = __hv_pkt_iter_next(channel, pkt);
-	if (!nxt)
-		hv_pkt_iter_close(channel);
-
-	return nxt;
+	/*
+	 * Include the packet trailer.
+	 */
+	ring_info->priv_read_index += packetlen + VMBUS_PKT_TRAILER;
+	ring_info->priv_read_index %= dsize;
 }
 
-#define foreach_vmbus_pkt(pkt, channel) \
-	for (pkt = hv_pkt_iter_first(channel); pkt; \
-	    pkt = hv_pkt_iter_next(channel, pkt))
+/*
+ * This call commits the read index and potentially signals the host.
+ * Here is the pattern for using the "in-place" consumption APIs:
+ *
+ * init_cached_read_index();
+ *
+ * while (get_next_pkt_raw() {
+ *	process the packet "in-place";
+ *	put_pkt_raw();
+ * }
+ * if (packets processed in place)
+ *	commit_rd_index();
+ */
+static inline void commit_rd_index(struct vmbus_channel *channel)
+{
+	struct hv_ring_buffer_info *ring_info = &channel->inbound;
+	/*
+	 * Make sure all reads are done before we update the read index since
+	 * the writer may start writing to the read area once the read index
+	 * is updated.
+	 */
+	virt_rmb();
+	ring_info->ring_buffer->read_index = ring_info->priv_read_index;
+
+	hv_signal_on_read(channel);
+}
+
 
 #endif /* _HYPERV_H */

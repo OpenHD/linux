@@ -27,7 +27,6 @@
 
 #include <asm/bootinfo.h>
 #include <asm/reboot.h>
-#include <asm/setup.h>
 #include <asm/sibyte/board.h>
 #include <asm/smp-ops.h>
 
@@ -230,8 +229,8 @@ static int __init initrd_setup(char *str)
 
 #endif
 
-extern const struct plat_smp_ops sb_smp_ops;
-extern const struct plat_smp_ops bcm1480_smp_ops;
+extern struct plat_smp_ops sb_smp_ops;
+extern struct plat_smp_ops bcm1480_smp_ops;
 
 /*
  * prom_init is called just after the cpu type is determined, from setup_arch()

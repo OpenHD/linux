@@ -7,7 +7,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/iversion.h>
 #include "fat.h"
 
 /* Characters that are undesirable in an MS-DOS file name */
@@ -225,7 +224,7 @@ static struct dentry *msdos_lookup(struct inode *dir, struct dentry *dentry,
 /***** Creates a directory entry (name is already formatted). */
 static int msdos_add_entry(struct inode *dir, const unsigned char *name,
 			   int is_dir, int is_hid, int cluster,
-			   struct timespec64 *ts, struct fat_slot_info *sinfo)
+			   struct timespec *ts, struct fat_slot_info *sinfo)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(dir->i_sb);
 	struct msdos_dir_entry de;
@@ -266,7 +265,7 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode = NULL;
 	struct fat_slot_info sinfo;
-	struct timespec64 ts;
+	struct timespec ts;
 	unsigned char msdos_name[MSDOS_NAME];
 	int err, is_hid;
 
@@ -314,6 +313,10 @@ static int msdos_rmdir(struct inode *dir, struct dentry *dentry)
 	int err;
 
 	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	/*
+	 * Check whether the directory is not in use, then check
+	 * whether it is empty.
+	 */
 	err = fat_dir_empty(inode);
 	if (err)
 		goto out;
@@ -344,7 +347,7 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	struct fat_slot_info sinfo;
 	struct inode *inode;
 	unsigned char msdos_name[MSDOS_NAME];
-	struct timespec64 ts;
+	struct timespec ts;
 	int err, is_hid, cluster;
 
 	mutex_lock(&MSDOS_SB(sb)->s_lock);
@@ -432,7 +435,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 	struct msdos_dir_entry *dotdot_de;
 	struct inode *old_inode, *new_inode;
 	struct fat_slot_info old_sinfo, sinfo;
-	struct timespec64 ts;
+	struct timespec ts;
 	loff_t new_i_pos;
 	int err, old_attrs, is_dir, update_dotdot, corrupt = 0;
 
@@ -477,7 +480,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 			} else
 				mark_inode_dirty(old_inode);
 
-			inode_inc_iversion(old_dir);
+			old_dir->i_version++;
 			old_dir->i_ctime = old_dir->i_mtime = current_time(old_dir);
 			if (IS_DIRSYNC(old_dir))
 				(void)fat_sync_inode(old_dir);
@@ -505,7 +508,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 			goto out;
 		new_i_pos = sinfo.i_pos;
 	}
-	inode_inc_iversion(new_dir);
+	new_dir->i_version++;
 
 	fat_detach(old_inode);
 	fat_attach(old_inode, new_i_pos);
@@ -537,7 +540,7 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 	old_sinfo.bh = NULL;
 	if (err)
 		goto error_dotdot;
-	inode_inc_iversion(old_dir);
+	old_dir->i_version++;
 	old_dir->i_ctime = old_dir->i_mtime = ts;
 	if (IS_DIRSYNC(old_dir))
 		(void)fat_sync_inode(old_dir);
@@ -643,7 +646,7 @@ static void setup(struct super_block *sb)
 {
 	MSDOS_SB(sb)->dir_ops = &msdos_dir_inode_operations;
 	sb->s_d_op = &msdos_dentry_operations;
-	sb->s_flags |= SB_NOATIME;
+	sb->s_flags |= MS_NOATIME;
 }
 
 static int msdos_fill_super(struct super_block *sb, void *data, int silent)

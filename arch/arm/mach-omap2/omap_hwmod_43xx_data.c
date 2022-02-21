@@ -14,6 +14,8 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/platform_data/gpio-omap.h>
+#include <linux/platform_data/spi-omap2-mcspi.h>
 #include "omap_hwmod.h"
 #include "omap_hwmod_33xx_43xx_common_data.h"
 #include "prcm43xx.h"
@@ -105,6 +107,7 @@ static struct omap_hwmod am43xx_gpio0_hwmod = {
 	},
 	.opt_clks	= gpio0_opt_clks,
 	.opt_clks_cnt	= ARRAY_SIZE(gpio0_opt_clks),
+	.dev_attr	= &gpio_dev_attr,
 };
 
 static struct omap_hwmod_class_sysconfig am43xx_synctimer_sysc = {
@@ -236,6 +239,7 @@ static struct omap_hwmod am43xx_spi2_hwmod = {
 			.modulemode   = MODULEMODE_SWCTRL,
 		},
 	},
+	.dev_attr	= &mcspi_attrib,
 };
 
 static struct omap_hwmod am43xx_spi3_hwmod = {
@@ -249,6 +253,7 @@ static struct omap_hwmod am43xx_spi3_hwmod = {
 			.modulemode   = MODULEMODE_SWCTRL,
 		},
 	},
+	.dev_attr	= &mcspi_attrib,
 };
 
 static struct omap_hwmod am43xx_spi4_hwmod = {
@@ -262,6 +267,7 @@ static struct omap_hwmod am43xx_spi4_hwmod = {
 			.modulemode   = MODULEMODE_SWCTRL,
 		},
 	},
+	.dev_attr	= &mcspi_attrib,
 };
 
 static struct omap_hwmod_opt_clk gpio4_opt_clks[] = {
@@ -282,6 +288,7 @@ static struct omap_hwmod am43xx_gpio4_hwmod = {
 	},
 	.opt_clks	= gpio4_opt_clks,
 	.opt_clks_cnt	= ARRAY_SIZE(gpio4_opt_clks),
+	.dev_attr	= &gpio_dev_attr,
 };
 
 static struct omap_hwmod_opt_clk gpio5_opt_clks[] = {
@@ -302,6 +309,7 @@ static struct omap_hwmod am43xx_gpio5_hwmod = {
 	},
 	.opt_clks	= gpio5_opt_clks,
 	.opt_clks_cnt	= ARRAY_SIZE(gpio5_opt_clks),
+	.dev_attr	= &gpio_dev_attr,
 };
 
 static struct omap_hwmod_class am43xx_ocp2scp_hwmod_class = {
@@ -378,7 +386,6 @@ static struct omap_hwmod am43xx_usb_otg_ss1_hwmod = {
 };
 
 static struct omap_hwmod_class_sysconfig am43xx_qspi_sysc = {
-	.rev_offs	= 0,
 	.sysc_offs      = 0x0010,
 	.sysc_flags     = SYSC_HAS_SIDLEMODE,
 	.idlemodes      = (SIDLE_FORCE | SIDLE_NO | SIDLE_SMART |
@@ -431,31 +438,6 @@ static struct omap_hwmod am43xx_adc_tsc_hwmod = {
 		.omap4  = {
 			.clkctrl_offs   = AM43XX_CM_WKUP_ADC_TSC_CLKCTRL_OFFSET,
 			.modulemode     = MODULEMODE_SWCTRL,
-		},
-	},
-};
-
-static struct omap_hwmod_class_sysconfig am43xx_des_sysc = {
-	.rev_offs	= 0x30,
-	.sysc_offs	= 0x34,
-	.syss_offs	= 0x38,
-	.sysc_flags	= SYSS_HAS_RESET_STATUS,
-};
-
-static struct omap_hwmod_class am43xx_des_hwmod_class = {
-	.name		= "des",
-	.sysc		= &am43xx_des_sysc,
-};
-
-static struct omap_hwmod am43xx_des_hwmod = {
-	.name		= "des",
-	.class		= &am43xx_des_hwmod_class,
-	.clkdm_name	= "l3_clkdm",
-	.main_clk	= "l3_gclk",
-	.prcm		= {
-		.omap4	= {
-			.clkctrl_offs	= AM43XX_CM_PER_DES_CLKCTRL_OFFSET,
-			.modulemode	= MODULEMODE_SWCTRL,
 		},
 	},
 };
@@ -888,13 +870,6 @@ static struct omap_hwmod_ocp_if am43xx_l4_ls__vpfe1 = {
 	.user           = OCP_USER_MPU | OCP_USER_SDMA,
 };
 
-static struct omap_hwmod_ocp_if am43xx_l3_main__des = {
-	.master		= &am33xx_l3_main_hwmod,
-	.slave		= &am43xx_des_hwmod,
-	.clk		= "l3_gclk",
-	.user		= OCP_USER_MPU,
-};
-
 static struct omap_hwmod_ocp_if *am43xx_hwmod_ocp_ifs[] __initdata = {
 	&am33xx_l4_wkup__synctimer,
 	&am43xx_l4_ls__timer8,
@@ -942,7 +917,6 @@ static struct omap_hwmod_ocp_if *am43xx_hwmod_ocp_ifs[] __initdata = {
 	&am33xx_l4_per__i2c2,
 	&am33xx_l4_per__i2c3,
 	&am33xx_l4_per__mailbox,
-	&am33xx_l4_per__rng,
 	&am33xx_l4_ls__mcasp0,
 	&am33xx_l4_ls__mcasp1,
 	&am33xx_l4_ls__mmc0,
@@ -976,7 +950,6 @@ static struct omap_hwmod_ocp_if *am43xx_hwmod_ocp_ifs[] __initdata = {
 	&am33xx_cpgmac0__mdio,
 	&am33xx_l3_main__sha0,
 	&am33xx_l3_main__aes0,
-	&am43xx_l3_main__des,
 	&am43xx_l4_ls__ocp2scp0,
 	&am43xx_l4_ls__ocp2scp1,
 	&am43xx_l3_s__usbotgss0,

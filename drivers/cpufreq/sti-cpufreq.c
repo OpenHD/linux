@@ -65,8 +65,8 @@ static int sti_cpufreq_fetch_major(void) {
 	ret = of_property_read_u32_index(np, "st,syscfg",
 					 MAJOR_ID_INDEX, &major_offset);
 	if (ret) {
-		dev_err(dev, "No major number offset provided in %pOF [%d]\n",
-			np, ret);
+		dev_err(dev, "No major number offset provided in %s [%d]\n",
+			np->full_name, ret);
 		return ret;
 	}
 
@@ -92,8 +92,8 @@ static int sti_cpufreq_fetch_minor(void)
 					 MINOR_ID_INDEX, &minor_offset);
 	if (ret) {
 		dev_err(dev,
-			"No minor number offset provided %pOF [%d]\n",
-			np, ret);
+			"No minor number offset provided %s [%d]\n",
+			np->full_name, ret);
 		return ret;
 	}
 
@@ -144,7 +144,8 @@ static const struct reg_field sti_stih407_dvfs_regfields[DVFS_MAX_REGFIELDS] = {
 static const struct reg_field *sti_cpufreq_match(void)
 {
 	if (of_machine_is_compatible("st,stih407") ||
-	    of_machine_is_compatible("st,stih410"))
+	    of_machine_is_compatible("st,stih410") ||
+	    of_machine_is_compatible("st,stih418"))
 		return sti_stih407_dvfs_regfields;
 
 	return NULL;
@@ -160,7 +161,6 @@ static int sti_cpufreq_set_opp_info(void)
 	int pcode, substrate, major, minor;
 	int ret;
 	char name[MAX_PCODE_NAME_LEN];
-	struct opp_table *opp_table;
 
 	reg_fields = sti_cpufreq_match();
 	if (!reg_fields) {
@@ -212,20 +212,20 @@ use_defaults:
 
 	snprintf(name, MAX_PCODE_NAME_LEN, "pcode%d", pcode);
 
-	opp_table = dev_pm_opp_set_prop_name(dev, name);
-	if (IS_ERR(opp_table)) {
+	ret = dev_pm_opp_set_prop_name(dev, name);
+	if (ret) {
 		dev_err(dev, "Failed to set prop name\n");
-		return PTR_ERR(opp_table);
+		return ret;
 	}
 
 	version[0] = BIT(major);
 	version[1] = BIT(minor);
 	version[2] = BIT(substrate);
 
-	opp_table = dev_pm_opp_set_supported_hw(dev, version, VERSION_ELEMENTS);
-	if (IS_ERR(opp_table)) {
+	ret = dev_pm_opp_set_supported_hw(dev, version, VERSION_ELEMENTS);
+	if (ret) {
 		dev_err(dev, "Failed to set supported hardware\n");
-		return PTR_ERR(opp_table);
+		return ret;
 	}
 
 	dev_dbg(dev, "pcode: %d major: %d minor: %d substrate: %d\n",
@@ -236,7 +236,7 @@ use_defaults:
 	return 0;
 }
 
-static int sti_cpufreq_fetch_syscon_registers(void)
+static int sti_cpufreq_fetch_syscon_regsiters(void)
 {
 	struct device *dev = ddata.cpu;
 	struct device_node *np = dev->of_node;
@@ -261,7 +261,8 @@ static int sti_cpufreq_init(void)
 	int ret;
 
 	if ((!of_machine_is_compatible("st,stih407")) &&
-		(!of_machine_is_compatible("st,stih410")))
+		(!of_machine_is_compatible("st,stih410")) &&
+		(!of_machine_is_compatible("st,stih418")))
 		return -ENODEV;
 
 	ddata.cpu = get_cpu_device(0);
@@ -275,7 +276,7 @@ static int sti_cpufreq_init(void)
 		goto skip_voltage_scaling;
 	}
 
-	ret = sti_cpufreq_fetch_syscon_registers();
+	ret = sti_cpufreq_fetch_syscon_regsiters();
 	if (ret)
 		goto skip_voltage_scaling;
 
@@ -292,6 +293,13 @@ register_cpufreq_dt:
 	return 0;
 }
 module_init(sti_cpufreq_init);
+
+static const struct of_device_id __maybe_unused sti_cpufreq_of_match[] = {
+	{ .compatible = "st,stih407" },
+	{ .compatible = "st,stih410" },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, sti_cpufreq_of_match);
 
 MODULE_DESCRIPTION("STMicroelectronics CPUFreq/OPP driver");
 MODULE_AUTHOR("Ajitpal Singh <ajitpal.singh@st.com>");

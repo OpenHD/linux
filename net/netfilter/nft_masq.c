@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Arturo Borrero Gonzalez <arturo@debian.org>
+ * Copyright (c) 2014 Arturo Borrero Gonzalez <arturo.borrero.glez@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -46,6 +46,10 @@ int nft_masq_init(const struct nft_ctx *ctx,
 	struct nft_masq *priv = nft_expr_priv(expr);
 	int err;
 
+	err = nft_masq_validate(ctx, expr, NULL);
+	if (err)
+		return err;
+
 	if (tb[NFTA_MASQ_FLAGS]) {
 		priv->flags = ntohl(nla_get_be32(tb[NFTA_MASQ_FLAGS]));
 		if (priv->flags & ~NF_NAT_RANGE_MASK)
@@ -73,7 +77,7 @@ int nft_masq_init(const struct nft_ctx *ctx,
 		}
 	}
 
-	return nf_ct_netns_get(ctx->net, ctx->family);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(nft_masq_init);
 
@@ -101,4 +105,4 @@ nla_put_failure:
 EXPORT_SYMBOL_GPL(nft_masq_dump);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Arturo Borrero Gonzalez <arturo@debian.org>");
+MODULE_AUTHOR("Arturo Borrero Gonzalez <arturo.borrero.glez@gmail.com>");

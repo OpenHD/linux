@@ -1,12 +1,25 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2003-2008 Takahiro Hirofuchi
+ *
+ * This is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+ * USA.
  */
 
 #include <linux/string.h>
 #include <linux/module.h>
 #include <linux/device.h>
-#include <linux/scatterlist.h>
 
 #include "usbip_common.h"
 #include "stub.h"
@@ -148,7 +161,7 @@ out:
 	return ret;
 }
 
-static ssize_t match_busid_show(struct device_driver *drv, char *buf)
+static ssize_t show_match_busid(struct device_driver *drv, char *buf)
 {
 	int i;
 	char *out = buf;
@@ -166,7 +179,7 @@ static ssize_t match_busid_show(struct device_driver *drv, char *buf)
 	return out - buf;
 }
 
-static ssize_t match_busid_store(struct device_driver *dev, const char *buf,
+static ssize_t store_match_busid(struct device_driver *dev, const char *buf,
 				 size_t count)
 {
 	int len;
@@ -198,7 +211,8 @@ static ssize_t match_busid_store(struct device_driver *dev, const char *buf,
 
 	return -EINVAL;
 }
-static DRIVER_ATTR_RW(match_busid);
+static DRIVER_ATTR(match_busid, S_IRUSR | S_IWUSR, show_match_busid,
+		   store_match_busid);
 
 static int do_rebind(char *busid, struct bus_id_priv *busid_priv)
 {
@@ -284,47 +298,11 @@ static struct stub_priv *stub_priv_pop_from_listhead(struct list_head *listhead)
 	struct stub_priv *priv, *tmp;
 
 	list_for_each_entry_safe(priv, tmp, listhead, list) {
-		list_del_init(&priv->list);
+		list_del(&priv->list);
 		return priv;
 	}
 
 	return NULL;
-}
-
-void stub_free_priv_and_urb(struct stub_priv *priv)
-{
-	struct urb *urb;
-	int i;
-
-	for (i = 0; i < priv->num_urbs; i++) {
-		urb = priv->urbs[i];
-
-		if (!urb)
-			return;
-
-		kfree(urb->setup_packet);
-		urb->setup_packet = NULL;
-
-
-		if (urb->transfer_buffer && !priv->sgl) {
-			kfree(urb->transfer_buffer);
-			urb->transfer_buffer = NULL;
-		}
-
-		if (urb->num_sgs) {
-			sgl_free(urb->sg);
-			urb->sg = NULL;
-			urb->num_sgs = 0;
-		}
-
-		usb_free_urb(urb);
-	}
-	if (!list_empty(&priv->list))
-		list_del(&priv->list);
-	if (priv->sgl)
-		sgl_free(priv->sgl);
-	kfree(priv->urbs);
-	kmem_cache_free(stub_priv_cache, priv);
 }
 
 static struct stub_priv *stub_priv_pop(struct stub_device *sdev)
@@ -353,15 +331,25 @@ done:
 void stub_device_cleanup_urbs(struct stub_device *sdev)
 {
 	struct stub_priv *priv;
-	int i;
+	struct urb *urb;
 
 	dev_dbg(&sdev->udev->dev, "Stub device cleaning up urbs\n");
 
 	while ((priv = stub_priv_pop(sdev))) {
-		for (i = 0; i < priv->num_urbs; i++)
-			usb_kill_urb(priv->urbs[i]);
+		urb = priv->urb;
+		dev_dbg(&sdev->udev->dev, "free urb seqnum %lu\n",
+			priv->seqnum);
+		usb_kill_urb(urb);
 
-		stub_free_priv_and_urb(priv);
+		kmem_cache_free(stub_priv_cache, priv);
+
+		kfree(urb->transfer_buffer);
+		urb->transfer_buffer = NULL;
+
+		kfree(urb->setup_packet);
+		urb->setup_packet = NULL;
+
+		usb_free_urb(urb);
 	}
 }
 
@@ -397,6 +385,7 @@ static int __init usbip_host_init(void)
 		goto err_create_file;
 	}
 
+	pr_info(DRIVER_DESC " v" USBIP_VERSION "\n");
 	return ret;
 
 err_create_file:
@@ -432,3 +421,4 @@ module_exit(usbip_host_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+MODULE_VERSION(USBIP_VERSION);

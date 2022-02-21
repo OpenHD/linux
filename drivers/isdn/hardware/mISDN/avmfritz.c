@@ -361,7 +361,6 @@ modehdlc(struct bchannel *bch, int protocol)
 	switch (protocol) {
 	case -1: /* used for init */
 		bch->state = -1;
-		/* fall through */
 	case ISDN_P_NONE:
 		if (bch->state == ISDN_P_NONE)
 			break;
@@ -1143,7 +1142,7 @@ fritz_remove_pci(struct pci_dev *pdev)
 			pr_info("%s: drvdata already removed\n", __func__);
 }
 
-static const struct pci_device_id fcpci_ids[] = {
+static struct pci_device_id fcpci_ids[] = {
 	{ PCI_VENDOR_ID_AVM, PCI_DEVICE_ID_AVM_A1, PCI_ANY_ID, PCI_ANY_ID,
 	  0, 0, (unsigned long) "Fritz!Card PCI"},
 	{ PCI_VENDOR_ID_AVM, PCI_DEVICE_ID_AVM_A1_V2, PCI_ANY_ID, PCI_ANY_ID,

@@ -215,7 +215,6 @@ static const struct of_device_id ltc4151_match[] = {
 	{ .compatible = "lltc,ltc4151" },
 	{},
 };
-MODULE_DEVICE_TABLE(of, ltc4151_match);
 
 /* This is the driver that will be inserted */
 static struct i2c_driver ltc4151_driver = {

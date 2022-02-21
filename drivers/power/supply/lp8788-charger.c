@@ -384,6 +384,9 @@ static int lp8788_update_charger_params(struct platform_device *pdev,
 	for (i = 0; i < pdata->num_chg_params; i++) {
 		param = pdata->chg_params + i;
 
+		if (!param)
+			continue;
+
 		if (lp8788_is_valid_charger_register(param->addr)) {
 			ret = lp8788_write_byte(lp, param->addr, param->val);
 			if (ret)
@@ -600,25 +603,12 @@ static void lp8788_setup_adc_channel(struct device *dev,
 		return;
 
 	/* ADC channel for battery voltage */
-	chan = iio_channel_get(dev, pdata->adc_vbatt);
+	chan = devm_iio_channel_get(dev, pdata->adc_vbatt);
 	pchg->chan[LP8788_VBATT] = IS_ERR(chan) ? NULL : chan;
 
 	/* ADC channel for battery temperature */
-	chan = iio_channel_get(dev, pdata->adc_batt_temp);
+	chan = devm_iio_channel_get(dev, pdata->adc_batt_temp);
 	pchg->chan[LP8788_BATT_TEMP] = IS_ERR(chan) ? NULL : chan;
-}
-
-static void lp8788_release_adc_channel(struct lp8788_charger *pchg)
-{
-	int i;
-
-	for (i = 0; i < LP8788_NUM_CHG_ADC; i++) {
-		if (!pchg->chan[i])
-			continue;
-
-		iio_channel_release(pchg->chan[i]);
-		pchg->chan[i] = NULL;
-	}
 }
 
 static ssize_t lp8788_show_charger_status(struct device *dev,
@@ -626,7 +616,7 @@ static ssize_t lp8788_show_charger_status(struct device *dev,
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
 	enum lp8788_charging_state state;
-	static const char * const desc[LP8788_MAX_CHG_STATE] = {
+	char *desc[LP8788_MAX_CHG_STATE] = {
 		[LP8788_OFF] = "CHARGER OFF",
 		[LP8788_WARM_UP] = "WARM UP",
 		[LP8788_LOW_INPUT] = "LOW INPUT STATE",
@@ -650,10 +640,8 @@ static ssize_t lp8788_show_eoc_time(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
-	static const char * const stime[] = {
-		"400ms", "5min", "10min", "15min",
-		"20min", "25min", "30min", "No timeout"
-	};
+	char *stime[] = { "400ms", "5min", "10min", "15min",
+			"20min", "25min", "30min", "No timeout" };
 	u8 val;
 
 	lp8788_read_byte(pchg->lp, LP8788_CHG_EOC, &val);
@@ -667,13 +655,9 @@ static ssize_t lp8788_show_eoc_level(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
-	static const char * const abs_level[] = {
-			"25mA", "49mA", "75mA", "98mA"
-	};
-	static const char * const relative_level[] = {
-			"5%", "10%", "15%", "20%"
-	};
-	const char *level;
+	char *abs_level[] = { "25mA", "49mA", "75mA", "98mA" };
+	char *relative_level[] = { "5%", "10%", "15%", "20%" };
+	char *level;
 	u8 val;
 	u8 mode;
 
@@ -747,7 +731,6 @@ static int lp8788_charger_remove(struct platform_device *pdev)
 	lp8788_irq_unregister(pdev, pchg);
 	sysfs_remove_group(&pdev->dev.kobj, &lp8788_attr_group);
 	lp8788_psy_unregister(pchg);
-	lp8788_release_adc_channel(pchg);
 
 	return 0;
 }

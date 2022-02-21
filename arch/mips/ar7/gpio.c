@@ -18,8 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/gpio.h>
 
 #include <asm/mach-ar7/ar7.h>

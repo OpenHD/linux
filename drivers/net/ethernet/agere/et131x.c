@@ -176,8 +176,6 @@ MODULE_DESCRIPTION("10/100/1000 Base-T Ethernet Driver for the ET1310 by Agere S
 #define NUM_FBRS		2
 
 #define MAX_PACKETS_HANDLED	256
-#define ET131X_MIN_MTU		64
-#define ET131X_MAX_MTU		9216
 
 #define ALCATEL_MULTICAST_PKT	0x01000000
 #define ALCATEL_BROADCAST_PKT	0x02000000
@@ -2282,7 +2280,7 @@ static struct rfd *nic_rx_pkts(struct et131x_adapter *adapter)
 
 	adapter->netdev->stats.rx_bytes += rfd->len;
 
-	skb_put_data(skb, fbr->virt[buff_index], rfd->len);
+	memcpy(skb_put(skb, rfd->len), fbr->virt[buff_index], rfd->len);
 
 	skb->protocol = eth_type_trans(skb, adapter->netdev);
 	skb->ip_summed = CHECKSUM_NONE;
@@ -3080,9 +3078,9 @@ err_out:
  * The routine called when the error timer expires, to track the number of
  * recurring errors.
  */
-static void et131x_error_timer_handler(struct timer_list *t)
+static void et131x_error_timer_handler(unsigned long data)
 {
-	struct et131x_adapter *adapter = from_timer(adapter, t, error_timer);
+	struct et131x_adapter *adapter = (struct et131x_adapter *)data;
 	struct phy_device *phydev = adapter->netdev->phydev;
 
 	if (et1310_in_phy_coma(adapter)) {
@@ -3575,7 +3573,7 @@ static int et131x_poll(struct napi_struct *napi, int budget)
 	et131x_handle_send_pkts(adapter);
 
 	if (work_done < budget) {
-		napi_complete_done(&adapter->napi, work_done);
+		napi_complete(&adapter->napi);
 		et131x_enable_interrupts(adapter);
 	}
 
@@ -3624,9 +3622,11 @@ static int et131x_open(struct net_device *netdev)
 	int result;
 
 	/* Start the timer to track NIC errors */
-	timer_setup(&adapter->error_timer, et131x_error_timer_handler, 0);
+	init_timer(&adapter->error_timer);
 	adapter->error_timer.expires = jiffies +
 		msecs_to_jiffies(TX_ERROR_PERIOD);
+	adapter->error_timer.function = et131x_error_timer_handler;
+	adapter->error_timer.data = (unsigned long)adapter;
 	add_timer(&adapter->error_timer);
 
 	result = request_irq(irq, et131x_isr,
@@ -3869,6 +3869,9 @@ static int et131x_change_mtu(struct net_device *netdev, int new_mtu)
 	int result = 0;
 	struct et131x_adapter *adapter = netdev_priv(netdev);
 
+	if (new_mtu < 64 || new_mtu > 9216)
+		return -EINVAL;
+
 	et131x_disable_txrx(netdev);
 
 	netdev->mtu = new_mtu;
@@ -3955,8 +3958,6 @@ static int et131x_pci_setup(struct pci_dev *pdev,
 
 	netdev->watchdog_timeo = ET131X_TX_TIMEOUT;
 	netdev->netdev_ops     = &et131x_netdev_ops;
-	netdev->min_mtu        = ET131X_MIN_MTU;
-	netdev->max_mtu        = ET131X_MAX_MTU;
 
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 	netdev->ethtool_ops = &et131x_ethtool_ops;

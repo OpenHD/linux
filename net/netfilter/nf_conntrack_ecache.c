@@ -11,8 +11,6 @@
  * published by the Free Software Foundation.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/types.h>
 #include <linux/netfilter.h>
 #include <linux/skbuff.h>
@@ -197,7 +195,7 @@ void nf_ct_deliver_cached_events(struct nf_conn *ct)
 
 	events = xchg(&e->cache, 0);
 
-	if (!nf_ct_is_confirmed(ct) || nf_ct_is_dying(ct))
+	if (!nf_ct_is_confirmed(ct) || nf_ct_is_dying(ct) || !events)
 		goto out_unlock;
 
 	/* We make a copy of the missed event cache without taking
@@ -214,7 +212,7 @@ void nf_ct_deliver_cached_events(struct nf_conn *ct)
 
 	ret = notify->fcn(events | missed, &item);
 
-	if (likely(ret == 0 && !missed))
+	if (likely(ret >= 0 && !missed))
 		goto out_unlock;
 
 	spin_lock_bh(&ct->lock);
@@ -349,7 +347,7 @@ static struct ctl_table event_sysctl_table[] = {
 };
 #endif /* CONFIG_SYSCTL */
 
-static const struct nf_ct_ext_type event_extend = {
+static struct nf_ct_ext_type event_extend __read_mostly = {
 	.len	= sizeof(struct nf_conntrack_ecache),
 	.align	= __alignof__(struct nf_conntrack_ecache),
 	.id	= NF_CT_EXT_ECACHE,
@@ -374,7 +372,7 @@ static int nf_conntrack_event_init_sysctl(struct net *net)
 	net->ct.event_sysctl_header =
 		register_net_sysctl(net, "net/netfilter", table);
 	if (!net->ct.event_sysctl_header) {
-		pr_err("can't register to sysctl\n");
+		printk(KERN_ERR "nf_ct_event: can't register to sysctl.\n");
 		goto out_register;
 	}
 	return 0;
@@ -421,10 +419,7 @@ int nf_conntrack_ecache_init(void)
 {
 	int ret = nf_ct_extend_register(&event_extend);
 	if (ret < 0)
-		pr_err("Unable to register event extension\n");
-
-	BUILD_BUG_ON(__IPCT_MAX >= 16);	/* ctmask, missed use u16 */
-
+		pr_err("nf_ct_event: Unable to register event extension.\n");
 	return ret;
 }
 

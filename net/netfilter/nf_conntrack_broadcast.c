@@ -20,6 +20,7 @@
 #include <net/netfilter/nf_conntrack_expect.h>
 
 int nf_conntrack_broadcast_help(struct sk_buff *skb,
+				unsigned int protoff,
 				struct nf_conn *ct,
 				enum ip_conntrack_info ctinfo,
 				unsigned int timeout)
@@ -32,13 +33,14 @@ int nf_conntrack_broadcast_help(struct sk_buff *skb,
 	__be32 mask = 0;
 
 	/* we're only interested in locally generated packets */
-	if (skb->sk == NULL || !net_eq(nf_ct_net(ct), sock_net(skb->sk)))
+	if (skb->sk == NULL)
 		goto out;
 	if (rt == NULL || !(rt->rt_flags & RTCF_BROADCAST))
 		goto out;
 	if (CTINFO2DIR(ctinfo) != IP_CT_DIR_ORIGINAL)
 		goto out;
 
+	rcu_read_lock();
 	in_dev = __in_dev_get_rcu(rt->dst.dev);
 	if (in_dev != NULL) {
 		for_primary_ifa(in_dev) {
@@ -48,6 +50,7 @@ int nf_conntrack_broadcast_help(struct sk_buff *skb,
 			}
 		} endfor_ifa(in_dev);
 	}
+	rcu_read_unlock();
 
 	if (mask == 0)
 		goto out;

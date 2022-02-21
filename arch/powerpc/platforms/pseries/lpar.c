@@ -21,15 +21,12 @@
 
 /* Enables debugging of low-level hash table routines - careful! */
 #undef DEBUG
-#define pr_fmt(fmt) "lpar: " fmt
 
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <linux/console.h>
 #include <linux/export.h>
 #include <linux/jump_label.h>
-#include <linux/delay.h>
-#include <linux/stop_machine.h>
 #include <asm/processor.h>
 #include <asm/mmu.h>
 #include <asm/page.h>
@@ -37,6 +34,7 @@
 #include <asm/machdep.h>
 #include <asm/mmu_context.h>
 #include <asm/iommu.h>
+#include <asm/tlbflush.h>
 #include <asm/tlb.h>
 #include <asm/prom.h>
 #include <asm/cputable.h>
@@ -48,7 +46,6 @@
 #include <asm/kexec.h>
 #include <asm/fadump.h>
 #include <asm/asm-prototypes.h>
-#include <asm/debugfs.h>
 
 #include "pseries.h"
 
@@ -94,25 +91,25 @@ void vpa_init(int cpu)
 		return;
 	}
 
-#ifdef CONFIG_PPC_BOOK3S_64
+#ifdef CONFIG_PPC_STD_MMU_64
 	/*
 	 * PAPR says this feature is SLB-Buffer but firmware never
 	 * reports that.  All SPLPAR support SLB shadow buffer.
 	 */
 	if (!radix_enabled() && firmware_has_feature(FW_FEATURE_SPLPAR)) {
-		addr = __pa(paca_ptrs[cpu]->slb_shadow_ptr);
+		addr = __pa(paca[cpu].slb_shadow_ptr);
 		ret = register_slb_shadow(hwcpu, addr);
 		if (ret)
 			pr_err("WARNING: SLB shadow buffer registration for "
 			       "cpu %d (hw %d) of area %lx failed with %ld\n",
 			       cpu, hwcpu, addr, ret);
 	}
-#endif /* CONFIG_PPC_BOOK3S_64 */
+#endif /* CONFIG_PPC_STD_MMU_64 */
 
 	/*
 	 * Register dispatch trace log, if one has been allocated.
 	 */
-	pp = paca_ptrs[cpu];
+	pp = &paca[cpu];
 	dtl = pp->dispatch_log;
 	if (dtl) {
 		pp->dtl_ridx = 0;
@@ -130,7 +127,7 @@ void vpa_init(int cpu)
 	}
 }
 
-#ifdef CONFIG_PPC_BOOK3S_64
+#ifdef CONFIG_PPC_STD_MMU_64
 
 static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 				     unsigned long vpn, unsigned long pa,
@@ -166,7 +163,8 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 
 	lpar_rc = plpar_pte_enter(flags, hpte_group, hpte_v, hpte_r, &slot);
 	if (unlikely(lpar_rc == H_PTEG_FULL)) {
-		pr_devel("Hash table group is full\n");
+		if (!(vflags & HPTE_V_BOLTED))
+			pr_devel(" full\n");
 		return -1;
 	}
 
@@ -176,7 +174,8 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	 * or we will loop forever, so return -2 in this case.
 	 */
 	if (unlikely(lpar_rc != H_SUCCESS)) {
-		pr_err("Failed hash pte insert with error %ld\n", lpar_rc);
+		if (!(vflags & HPTE_V_BOLTED))
+			pr_devel(" lpar err %ld\n", lpar_rc);
 		return -2;
 	}
 	if (!(vflags & HPTE_V_BOLTED))
@@ -222,7 +221,7 @@ static long pSeries_lpar_hpte_remove(unsigned long hpte_group)
 	return -1;
 }
 
-static void manual_hpte_clear_all(void)
+static void pSeries_lpar_hptab_clear(void)
 {
 	unsigned long size_bytes = 1UL << ppc64_pft_size;
 	unsigned long hpte_count = size_bytes >> 4;
@@ -239,11 +238,8 @@ static void manual_hpte_clear_all(void)
          */
 	for (i = 0; i < hpte_count; i += 4) {
 		lpar_rc = plpar_pte_read_4_raw(0, i, (void *)ptes);
-		if (lpar_rc != H_SUCCESS) {
-			pr_info("Failed to read hash page table at %ld err %ld\n",
-				i, lpar_rc);
+		if (lpar_rc != H_SUCCESS)
 			continue;
-		}
 		for (j = 0; j < 4; j++){
 			if ((ptes[j].pteh & HPTE_V_VRMA_MASK) ==
 				HPTE_V_VRMA_MASK)
@@ -253,26 +249,6 @@ static void manual_hpte_clear_all(void)
 					&(ptes[j].pteh), &(ptes[j].ptel));
 		}
 	}
-}
-
-static int hcall_hpte_clear_all(void)
-{
-	int rc;
-
-	do {
-		rc = plpar_hcall_norets(H_CLEAR_HPT);
-	} while (rc == H_CONTINUE);
-
-	return rc;
-}
-
-static void pseries_hpte_clear_all(void)
-{
-	int rc;
-
-	rc = hcall_hpte_clear_all();
-	if (rc != H_SUCCESS)
-		manual_hpte_clear_all();
 
 #ifdef __LITTLE_ENDIAN__
 	/*
@@ -308,13 +284,13 @@ static long pSeries_lpar_hpte_updatepp(unsigned long slot,
 
 	want_v = hpte_encode_avpn(vpn, psize, ssize);
 
+	pr_devel("    update: avpnv=%016lx, hash=%016lx, f=%lx, psize: %d ...",
+		 want_v, slot, flags, psize);
+
 	flags = (newpp & 7) | H_AVPN;
 	if (mmu_has_feature(MMU_FTR_KERNEL_RO))
 		/* Move pp0 into bit 8 (IBM 55) */
 		flags |= (newpp & HPTE_R_PP0) >> 55;
-
-	pr_devel("    update: avpnv=%016lx, hash=%016lx, f=%lx, psize: %d ...",
-		 want_v, slot, flags, psize);
 
 	lpar_rc = plpar_pte_protect(flags, slot, want_v);
 
@@ -342,11 +318,8 @@ static long __pSeries_lpar_hpte_find(unsigned long want_v, unsigned long hpte_gr
 	for (i = 0; i < HPTES_PER_GROUP; i += 4, hpte_group += 4) {
 
 		lpar_rc = plpar_pte_read_4(0, hpte_group, (void *)ptes);
-		if (lpar_rc != H_SUCCESS) {
-			pr_info("Failed to read hash page table at %ld err %ld\n",
-				hpte_group, lpar_rc);
+		if (lpar_rc != H_SUCCESS)
 			continue;
-		}
 
 		for (j = 0; j < 4; j++) {
 			if (HPTE_V_COMPARE(ptes[j].pteh, want_v) &&
@@ -617,142 +590,13 @@ static int __init disable_bulk_remove(char *str)
 {
 	if (strcmp(str, "off") == 0 &&
 	    firmware_has_feature(FW_FEATURE_BULK_REMOVE)) {
-		pr_info("Disabling BULK_REMOVE firmware feature");
-		powerpc_firmware_features &= ~FW_FEATURE_BULK_REMOVE;
+			printk(KERN_INFO "Disabling BULK_REMOVE firmware feature");
+			powerpc_firmware_features &= ~FW_FEATURE_BULK_REMOVE;
 	}
 	return 1;
 }
 
 __setup("bulk_remove=", disable_bulk_remove);
-
-#define HPT_RESIZE_TIMEOUT	10000 /* ms */
-
-struct hpt_resize_state {
-	unsigned long shift;
-	int commit_rc;
-};
-
-static int pseries_lpar_resize_hpt_commit(void *data)
-{
-	struct hpt_resize_state *state = data;
-
-	state->commit_rc = plpar_resize_hpt_commit(0, state->shift);
-	if (state->commit_rc != H_SUCCESS)
-		return -EIO;
-
-	/* Hypervisor has transitioned the HTAB, update our globals */
-	ppc64_pft_size = state->shift;
-	htab_size_bytes = 1UL << ppc64_pft_size;
-	htab_hash_mask = (htab_size_bytes >> 7) - 1;
-
-	return 0;
-}
-
-/*
- * Must be called in process context. The caller must hold the
- * cpus_lock.
- */
-static int pseries_lpar_resize_hpt(unsigned long shift)
-{
-	struct hpt_resize_state state = {
-		.shift = shift,
-		.commit_rc = H_FUNCTION,
-	};
-	unsigned int delay, total_delay = 0;
-	int rc;
-	ktime_t t0, t1, t2;
-
-	might_sleep();
-
-	if (!firmware_has_feature(FW_FEATURE_HPT_RESIZE))
-		return -ENODEV;
-
-	pr_info("Attempting to resize HPT to shift %lu\n", shift);
-
-	t0 = ktime_get();
-
-	rc = plpar_resize_hpt_prepare(0, shift);
-	while (H_IS_LONG_BUSY(rc)) {
-		delay = get_longbusy_msecs(rc);
-		total_delay += delay;
-		if (total_delay > HPT_RESIZE_TIMEOUT) {
-			/* prepare with shift==0 cancels an in-progress resize */
-			rc = plpar_resize_hpt_prepare(0, 0);
-			if (rc != H_SUCCESS)
-				pr_warn("Unexpected error %d cancelling timed out HPT resize\n",
-				       rc);
-			return -ETIMEDOUT;
-		}
-		msleep(delay);
-		rc = plpar_resize_hpt_prepare(0, shift);
-	};
-
-	switch (rc) {
-	case H_SUCCESS:
-		/* Continue on */
-		break;
-
-	case H_PARAMETER:
-		return -EINVAL;
-	case H_RESOURCE:
-		return -EPERM;
-	default:
-		pr_warn("Unexpected error %d from H_RESIZE_HPT_PREPARE\n", rc);
-		return -EIO;
-	}
-
-	t1 = ktime_get();
-
-	rc = stop_machine_cpuslocked(pseries_lpar_resize_hpt_commit,
-				     &state, NULL);
-
-	t2 = ktime_get();
-
-	if (rc != 0) {
-		switch (state.commit_rc) {
-		case H_PTEG_FULL:
-			pr_warn("Hash collision while resizing HPT\n");
-			return -ENOSPC;
-
-		default:
-			pr_warn("Unexpected error %d from H_RESIZE_HPT_COMMIT\n",
-				state.commit_rc);
-			return -EIO;
-		};
-	}
-
-	pr_info("HPT resize to shift %lu complete (%lld ms / %lld ms)\n",
-		shift, (long long) ktime_ms_delta(t1, t0),
-		(long long) ktime_ms_delta(t2, t1));
-
-	return 0;
-}
-
-static int pseries_lpar_register_process_table(unsigned long base,
-			unsigned long page_size, unsigned long table_size)
-{
-	long rc;
-	unsigned long flags = 0;
-
-	if (table_size)
-		flags |= PROC_TABLE_NEW;
-	if (radix_enabled())
-		flags |= PROC_TABLE_RADIX | PROC_TABLE_GTSE;
-	else
-		flags |= PROC_TABLE_HPT_SLB;
-	for (;;) {
-		rc = plpar_hcall_norets(H_REGISTER_PROC_TBL, flags, base,
-					page_size, table_size);
-		if (!H_IS_LONG_BUSY(rc))
-			break;
-		mdelay(get_longbusy_msecs(rc));
-	}
-	if (rc != H_SUCCESS) {
-		pr_err("Failed to register process table (rc=%ld)\n", rc);
-		BUG();
-	}
-	return rc;
-}
 
 void __init hpte_init_pseries(void)
 {
@@ -763,18 +607,8 @@ void __init hpte_init_pseries(void)
 	mmu_hash_ops.hpte_remove	 = pSeries_lpar_hpte_remove;
 	mmu_hash_ops.hpte_removebolted   = pSeries_lpar_hpte_removebolted;
 	mmu_hash_ops.flush_hash_range	 = pSeries_lpar_flush_hash_range;
-	mmu_hash_ops.hpte_clear_all      = pseries_hpte_clear_all;
+	mmu_hash_ops.hpte_clear_all      = pSeries_lpar_hptab_clear;
 	mmu_hash_ops.hugepage_invalidate = pSeries_lpar_hugepage_invalidate;
-	register_process_table		 = pseries_lpar_register_process_table;
-
-	if (firmware_has_feature(FW_FEATURE_HPT_RESIZE))
-		mmu_hash_ops.resize_hpt = pseries_lpar_resize_hpt;
-}
-
-void radix_init_pseries(void)
-{
-	pr_info("Using radix MMU under hypervisor\n");
-	register_process_table = pseries_lpar_register_process_table;
 }
 
 #ifdef CONFIG_PPC_SMLPAR
@@ -787,13 +621,13 @@ static int __init cmo_free_hint(char *str)
 	parm = strstrip(str);
 
 	if (strcasecmp(parm, "no") == 0 || strcasecmp(parm, "off") == 0) {
-		pr_info("%s: CMO free page hinting is not active.\n", __func__);
+		printk(KERN_INFO "cmo_free_hint: CMO free page hinting is not active.\n");
 		cmo_free_hint_flag = 0;
 		return 1;
 	}
 
 	cmo_free_hint_flag = 1;
-	pr_info("%s: CMO free page hinting is active.\n", __func__);
+	printk(KERN_INFO "cmo_free_hint: CMO free page hinting is active.\n");
 
 	if (strcasecmp(parm, "yes") == 0 || strcasecmp(parm, "on") == 0)
 		return 1;
@@ -830,16 +664,15 @@ void arch_free_page(struct page *page, int order)
 EXPORT_SYMBOL(arch_free_page);
 
 #endif /* CONFIG_PPC_SMLPAR */
-#endif /* CONFIG_PPC_BOOK3S_64 */
+#endif /* CONFIG_PPC_STD_MMU_64 */
 
 #ifdef CONFIG_TRACEPOINTS
-#ifdef CONFIG_JUMP_LABEL
+#ifdef HAVE_JUMP_LABEL
 struct static_key hcall_tracepoint_key = STATIC_KEY_INIT;
 
-int hcall_tracepoint_regfunc(void)
+void hcall_tracepoint_regfunc(void)
 {
 	static_key_slow_inc(&hcall_tracepoint_key);
-	return 0;
 }
 
 void hcall_tracepoint_unregfunc(void)
@@ -856,10 +689,9 @@ void hcall_tracepoint_unregfunc(void)
 /* NB: reg/unreg are called while guarded with the tracepoints_mutex */
 extern long hcall_tracepoint_refcount;
 
-int hcall_tracepoint_regfunc(void)
+void hcall_tracepoint_regfunc(void)
 {
 	hcall_tracepoint_refcount++;
-	return 0;
 }
 
 void hcall_tracepoint_unregfunc(void)
@@ -904,7 +736,8 @@ out:
 	local_irq_restore(flags);
 }
 
-void __trace_hcall_exit(long opcode, long retval, unsigned long *retbuf)
+void __trace_hcall_exit(long opcode, unsigned long retval,
+			unsigned long *retbuf)
 {
 	unsigned long flags;
 	unsigned int *depth;
@@ -972,117 +805,3 @@ int h_get_mpp_x(struct hvcall_mpp_x_data *mpp_x_data)
 
 	return rc;
 }
-
-static unsigned long vsid_unscramble(unsigned long vsid, int ssize)
-{
-	unsigned long protovsid;
-	unsigned long va_bits = VA_BITS;
-	unsigned long modinv, vsid_modulus;
-	unsigned long max_mod_inv, tmp_modinv;
-
-	if (!mmu_has_feature(MMU_FTR_68_BIT_VA))
-		va_bits = 65;
-
-	if (ssize == MMU_SEGSIZE_256M) {
-		modinv = VSID_MULINV_256M;
-		vsid_modulus = ((1UL << (va_bits - SID_SHIFT)) - 1);
-	} else {
-		modinv = VSID_MULINV_1T;
-		vsid_modulus = ((1UL << (va_bits - SID_SHIFT_1T)) - 1);
-	}
-
-	/*
-	 * vsid outside our range.
-	 */
-	if (vsid >= vsid_modulus)
-		return 0;
-
-	/*
-	 * If modinv is the modular multiplicate inverse of (x % vsid_modulus)
-	 * and vsid = (protovsid * x) % vsid_modulus, then we say:
-	 *   protovsid = (vsid * modinv) % vsid_modulus
-	 */
-
-	/* Check if (vsid * modinv) overflow (63 bits) */
-	max_mod_inv = 0x7fffffffffffffffull / vsid;
-	if (modinv < max_mod_inv)
-		return (vsid * modinv) % vsid_modulus;
-
-	tmp_modinv = modinv/max_mod_inv;
-	modinv %= max_mod_inv;
-
-	protovsid = (((vsid * max_mod_inv) % vsid_modulus) * tmp_modinv) % vsid_modulus;
-	protovsid = (protovsid + vsid * modinv) % vsid_modulus;
-
-	return protovsid;
-}
-
-static int __init reserve_vrma_context_id(void)
-{
-	unsigned long protovsid;
-
-	/*
-	 * Reserve context ids which map to reserved virtual addresses. For now
-	 * we only reserve the context id which maps to the VRMA VSID. We ignore
-	 * the addresses in "ibm,adjunct-virtual-addresses" because we don't
-	 * enable adjunct support via the "ibm,client-architecture-support"
-	 * interface.
-	 */
-	protovsid = vsid_unscramble(VRMA_VSID, MMU_SEGSIZE_1T);
-	hash__reserve_context_id(protovsid >> ESID_BITS_1T);
-	return 0;
-}
-machine_device_initcall(pseries, reserve_vrma_context_id);
-
-#ifdef CONFIG_DEBUG_FS
-/* debugfs file interface for vpa data */
-static ssize_t vpa_file_read(struct file *filp, char __user *buf, size_t len,
-			      loff_t *pos)
-{
-	int cpu = (long)filp->private_data;
-	struct lppaca *lppaca = &lppaca_of(cpu);
-
-	return simple_read_from_buffer(buf, len, pos, lppaca,
-				sizeof(struct lppaca));
-}
-
-static const struct file_operations vpa_fops = {
-	.open		= simple_open,
-	.read		= vpa_file_read,
-	.llseek		= default_llseek,
-};
-
-static int __init vpa_debugfs_init(void)
-{
-	char name[16];
-	long i;
-	static struct dentry *vpa_dir;
-
-	if (!firmware_has_feature(FW_FEATURE_SPLPAR))
-		return 0;
-
-	vpa_dir = debugfs_create_dir("vpa", powerpc_debugfs_root);
-	if (!vpa_dir) {
-		pr_warn("%s: can't create vpa root dir\n", __func__);
-		return -ENOMEM;
-	}
-
-	/* set up the per-cpu vpa file*/
-	for_each_possible_cpu(i) {
-		struct dentry *d;
-
-		sprintf(name, "cpu-%ld", i);
-
-		d = debugfs_create_file(name, 0400, vpa_dir, (void *)i,
-					&vpa_fops);
-		if (!d) {
-			pr_warn("%s: can't create per-cpu vpa file\n",
-					__func__);
-			return -ENOMEM;
-		}
-	}
-
-	return 0;
-}
-machine_arch_initcall(pseries, vpa_debugfs_init);
-#endif /* CONFIG_DEBUG_FS */

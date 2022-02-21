@@ -29,7 +29,7 @@
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/firmware.h>
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "cx24120.h"
 
 #define CX24120_SEARCH_RANGE_KHZ 5000
@@ -267,7 +267,7 @@ out:
 	return ret;
 }
 
-static const struct dvb_frontend_ops cx24120_ops;
+static struct dvb_frontend_ops cx24120_ops;
 
 struct dvb_frontend *cx24120_attach(const struct cx24120_config *config,
 				    struct i2c_adapter *i2c)
@@ -1154,7 +1154,8 @@ static int cx24120_set_frontend(struct dvb_frontend *fe)
 		dev_dbg(&state->i2c->dev,
 			"delivery system(%d) not supported\n",
 			c->delivery_system);
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
 
 	state->dnxt.delsys = c->delivery_system;
@@ -1491,7 +1492,7 @@ static int cx24120_tune(struct dvb_frontend *fe, bool re_tune,
 	return cx24120_read_status(fe, status);
 }
 
-static enum dvbfe_algo cx24120_get_algo(struct dvb_frontend *fe)
+static int cx24120_get_algo(struct dvb_frontend *fe)
 {
 	return DVBFE_ALGO_HW;
 }
@@ -1551,14 +1552,14 @@ static int cx24120_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 	return 0;
 }
 
-static const struct dvb_frontend_ops cx24120_ops = {
+static struct dvb_frontend_ops cx24120_ops = {
 	.delsys = { SYS_DVBS, SYS_DVBS2 },
 	.info = {
 		.name = "Conexant CX24120/CX24118",
-		.frequency_min_hz =  950 * MHz,
-		.frequency_max_hz = 2150 * MHz,
-		.frequency_stepsize_hz = 1011 * kHz,
-		.frequency_tolerance_hz = 5 * MHz,
+		.frequency_min = 950000,
+		.frequency_max = 2150000,
+		.frequency_stepsize = 1011, /* kHz for QPSK frontends */
+		.frequency_tolerance = 5000,
 		.symbol_rate_min = 1000000,
 		.symbol_rate_max = 45000000,
 		.caps =	FE_CAN_INVERSION_AUTO |

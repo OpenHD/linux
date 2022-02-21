@@ -20,27 +20,24 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/err.h>
-#include <linux/random.h>
 #include <linux/scatterlist.h>
+
 #include <target/iscsi/iscsi_target_core.h>
 #include "iscsi_target_nego.h"
 #include "iscsi_target_auth.h"
 
-static int chap_gen_challenge(
+static void chap_gen_challenge(
 	struct iscsi_conn *conn,
 	int caller,
 	char *c_str,
 	unsigned int *c_len)
 {
-	int ret;
 	unsigned char challenge_asciihex[CHAP_CHALLENGE_LENGTH * 2 + 1];
 	struct iscsi_chap *chap = conn->auth_protocol;
 
 	memset(challenge_asciihex, 0, CHAP_CHALLENGE_LENGTH * 2 + 1);
 
-	ret = get_random_bytes_wait(chap->challenge, CHAP_CHALLENGE_LENGTH);
-	if (unlikely(ret))
-		return ret;
+	get_random_bytes(chap->challenge, CHAP_CHALLENGE_LENGTH);
 	bin2hex(challenge_asciihex, chap->challenge,
 				CHAP_CHALLENGE_LENGTH);
 	/*
@@ -51,7 +48,6 @@ static int chap_gen_challenge(
 
 	pr_debug("[%s] Sending CHAP_C=0x%s\n\n", (caller) ? "server" : "client",
 			challenge_asciihex);
-	return 0;
 }
 
 static int chap_check_algorithm(const char *a_str)
@@ -87,12 +83,6 @@ static int chap_check_algorithm(const char *a_str)
 out:
 	kfree(orig);
 	return CHAP_DIGEST_UNKNOWN;
-}
-
-static void chap_close(struct iscsi_conn *conn)
-{
-	kfree(conn->auth_protocol);
-	conn->auth_protocol = NULL;
 }
 
 static struct iscsi_chap *chap_server_open(
@@ -132,7 +122,6 @@ static struct iscsi_chap *chap_server_open(
 	case CHAP_DIGEST_UNKNOWN:
 	default:
 		pr_err("Unsupported CHAP_A value\n");
-		chap_close(conn);
 		return NULL;
 	}
 
@@ -146,12 +135,15 @@ static struct iscsi_chap *chap_server_open(
 	/*
 	 * Generate Challenge.
 	 */
-	if (chap_gen_challenge(conn, 1, aic_str, aic_len) < 0) {
-		chap_close(conn);
-		return NULL;
-	}
+	chap_gen_challenge(conn, 1, aic_str, aic_len);
 
 	return chap;
+}
+
+static void chap_close(struct iscsi_conn *conn)
+{
+	kfree(conn->auth_protocol);
+	conn->auth_protocol = NULL;
 }
 
 static int chap_server_compute_md5(

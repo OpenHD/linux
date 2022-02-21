@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * include/linux/writeback.h
  */
@@ -10,9 +9,6 @@
 #include <linux/fs.h>
 #include <linux/flex_proportions.h>
 #include <linux/backing-dev-defs.h>
-#include <linux/blk_types.h>
-
-struct bio;
 
 DECLARE_PER_CPU(int, dirty_throttle_leaks);
 
@@ -40,6 +36,28 @@ struct backing_dev_info;
 enum writeback_sync_modes {
 	WB_SYNC_NONE,	/* Don't wait on anything */
 	WB_SYNC_ALL,	/* Wait on every mapping */
+};
+
+/*
+ * why some writeback work was initiated
+ */
+enum wb_reason {
+	WB_REASON_BACKGROUND,
+	WB_REASON_TRY_TO_FREE_PAGES,
+	WB_REASON_SYNC,
+	WB_REASON_PERIODIC,
+	WB_REASON_LAPTOP_TIMER,
+	WB_REASON_FREE_MORE_MEM,
+	WB_REASON_FS_FREE_SPACE,
+	/*
+	 * There is no bdi forker thread any more and works are done
+	 * by emergency worker, however, this is TPs userland visible
+	 * and we'll be exposing exactly the same information,
+	 * so it has a mismatch name.
+	 */
+	WB_REASON_FORKER_THREAD,
+
+	WB_REASON_MAX,
 };
 
 /*
@@ -81,16 +99,6 @@ struct writeback_control {
 	size_t wb_tcand_bytes;		/* bytes written by this candidate */
 #endif
 };
-
-static inline int wbc_to_write_flags(struct writeback_control *wbc)
-{
-	if (wbc->sync_mode == WB_SYNC_ALL)
-		return REQ_SYNC;
-	else if (wbc->for_kupdate || wbc->for_background)
-		return REQ_BACKGROUND;
-
-	return 0;
-}
 
 /*
  * A wb_domain represents a domain that wb's (bdi_writeback's) belong to
@@ -164,11 +172,11 @@ struct bdi_writeback;
 void writeback_inodes_sb(struct super_block *, enum wb_reason reason);
 void writeback_inodes_sb_nr(struct super_block *, unsigned long nr,
 							enum wb_reason reason);
-void try_to_writeback_inodes_sb(struct super_block *sb, enum wb_reason reason);
+bool try_to_writeback_inodes_sb(struct super_block *, enum wb_reason reason);
+bool try_to_writeback_inodes_sb_nr(struct super_block *, unsigned long nr,
+				   enum wb_reason reason);
 void sync_inodes_sb(struct super_block *);
-void wakeup_flusher_threads(enum wb_reason reason);
-void wakeup_flusher_threads_bdi(struct backing_dev_info *bdi,
-				enum wb_reason reason);
+void wakeup_flusher_threads(long nr_pages, enum wb_reason reason);
 void inode_wait_for_writeback(struct inode *inode);
 
 /* writeback.h requires fs.h; it, too, is not included from here. */
@@ -308,7 +316,7 @@ static inline void cgroup_writeback_umount(void)
 void laptop_io_completion(struct backing_dev_info *info);
 void laptop_sync_completion(void);
 void laptop_mode_sync(struct work_struct *work);
-void laptop_mode_timer_fn(struct timer_list *t);
+void laptop_mode_timer_fn(unsigned long data);
 #else
 static inline void laptop_sync_completion(void) { }
 #endif
@@ -355,6 +363,7 @@ void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty);
 unsigned long wb_calc_thresh(struct bdi_writeback *wb, unsigned long thresh);
 
 void wb_update_bandwidth(struct bdi_writeback *wb, unsigned long start_time);
+void page_writeback_init(void);
 void balance_dirty_pages_ratelimited(struct address_space *mapping);
 bool wb_over_bg_thresh(struct bdi_writeback *wb);
 

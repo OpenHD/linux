@@ -32,7 +32,7 @@
 #include <linux/slab.h>
 #include <linux/phy.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 
@@ -59,8 +59,8 @@
 #define B44_TX_TIMEOUT			(5 * HZ)
 
 /* hardware minimum and maximum for a single frame's data payload */
-#define B44_MIN_MTU			ETH_ZLEN
-#define B44_MAX_MTU			ETH_DATA_LEN
+#define B44_MIN_MTU			60
+#define B44_MAX_MTU			1500
 
 #define B44_RX_RING_SIZE		512
 #define B44_DEF_RX_RING_PENDING		200
@@ -599,9 +599,9 @@ static void b44_check_phy(struct b44 *bp)
 	}
 }
 
-static void b44_timer(struct timer_list *t)
+static void b44_timer(unsigned long __opaque)
 {
-	struct b44 *bp = from_timer(bp, t, timer);
+	struct b44 *bp = (struct b44 *) __opaque;
 
 	spin_lock_irq(&bp->lock);
 
@@ -902,7 +902,7 @@ static int b44_poll(struct napi_struct *napi, int budget)
 	}
 
 	if (work_done < budget) {
-		napi_complete_done(napi, work_done);
+		napi_complete(napi);
 		b44_enable_ints(bp);
 	}
 
@@ -1063,6 +1063,9 @@ err_out:
 static int b44_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct b44 *bp = netdev_priv(dev);
+
+	if (new_mtu < B44_MIN_MTU || new_mtu > B44_MAX_MTU)
+		return -EINVAL;
 
 	if (!netif_running(dev)) {
 		/* We'll just catch it later when the
@@ -1474,8 +1477,10 @@ static int b44_open(struct net_device *dev)
 		goto out;
 	}
 
-	timer_setup(&bp->timer, b44_timer, 0);
+	init_timer(&bp->timer);
 	bp->timer.expires = jiffies + HZ;
+	bp->timer.data = (unsigned long) bp;
+	bp->timer.function = b44_timer;
 	add_timer(&bp->timer);
 
 	b44_enable_ints(bp);
@@ -1675,8 +1680,8 @@ static int b44_close(struct net_device *dev)
 	return 0;
 }
 
-static void b44_get_stats64(struct net_device *dev,
-			    struct rtnl_link_stats64 *nstat)
+static struct rtnl_link_stats64 *b44_get_stats64(struct net_device *dev,
+					struct rtnl_link_stats64 *nstat)
 {
 	struct b44 *bp = netdev_priv(dev);
 	struct b44_hw_stats *hwstat = &bp->hw_stats;
@@ -1719,6 +1724,7 @@ static void b44_get_stats64(struct net_device *dev,
 #endif
 	} while (u64_stats_fetch_retry_irq(&hwstat->syncp, start));
 
+	return nstat;
 }
 
 static int __b44_load_mcast(struct b44 *bp, struct net_device *dev)
@@ -1837,9 +1843,7 @@ static int b44_get_link_ksettings(struct net_device *dev,
 
 	if (bp->flags & B44_FLAG_EXTERNAL_PHY) {
 		BUG_ON(!dev->phydev);
-		phy_ethtool_ksettings_get(dev->phydev, cmd);
-
-		return 0;
+		return phy_ethtool_ksettings_get(dev->phydev, cmd);
 	}
 
 	supported = (SUPPORTED_Autoneg);
@@ -2369,7 +2373,6 @@ static int b44_init_one(struct ssb_device *sdev,
 	bp->msg_enable = netif_msg_init(b44_debug, B44_DEF_MSG_ENABLE);
 
 	spin_lock_init(&bp->lock);
-	u64_stats_init(&bp->hw_stats.syncp);
 
 	bp->rx_pending = B44_DEF_RX_RING_PENDING;
 	bp->tx_pending = B44_DEF_TX_RING_PENDING;
@@ -2377,8 +2380,6 @@ static int b44_init_one(struct ssb_device *sdev,
 	dev->netdev_ops = &b44_netdev_ops;
 	netif_napi_add(dev, &bp->napi, b44_poll, 64);
 	dev->watchdog_timeo = B44_TX_TIMEOUT;
-	dev->min_mtu = B44_MIN_MTU;
-	dev->max_mtu = B44_MAX_MTU;
 	dev->irq = sdev->irq;
 	dev->ethtool_ops = &b44_ethtool_ops;
 
@@ -2389,7 +2390,8 @@ static int b44_init_one(struct ssb_device *sdev,
 		goto err_out_free_dev;
 	}
 
-	if (dma_set_mask_and_coherent(sdev->dma_dev, DMA_BIT_MASK(30))) {
+	err = dma_set_mask_and_coherent(sdev->dma_dev, DMA_BIT_MASK(30));
+	if (err) {
 		dev_err(sdev->dev,
 			"Required 30BIT DMA mask unsupported by the system\n");
 		goto err_out_powerdown;

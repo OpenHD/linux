@@ -2,9 +2,9 @@
 
 .. _frontend_f_close:
 
-***************************
-Digital TV frontend close()
-***************************
+********************
+DVB frontend close()
+********************
 
 Name
 ====
@@ -41,10 +41,8 @@ down automatically.
 Return Value
 ============
 
-On success 0 is returned.
+The function returns 0 on success, -1 on failure and the ``errno`` is
+set appropriately. Possible error codes:
 
-On error -1 is returned, and the ``errno`` variable is set
-appropriately.
-
-Generic error codes are described at the
-:ref:`Generic Error Codes <gen-errors>` chapter.
+EBADF
+    ``fd`` is not a valid open file descriptor.

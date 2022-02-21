@@ -57,12 +57,10 @@ enum rxe_elem_type {
 	RXE_NUM_TYPES,		/* keep me last */
 };
 
-struct rxe_pool_entry;
-
 struct rxe_type_info {
-	const char		*name;
+	char			*name;
 	size_t			size;
-	void			(*cleanup)(struct rxe_pool_entry *obj);
+	void			(*cleanup)(void *obj);
 	enum rxe_pool_flags	flags;
 	u32			max_index;
 	u32			min_index;
@@ -93,7 +91,7 @@ struct rxe_pool {
 	spinlock_t              pool_lock; /* pool spinlock */
 	size_t			elem_size;
 	struct kref		ref_cnt;
-	void			(*cleanup)(struct rxe_pool_entry *obj);
+	void			(*cleanup)(void *obj);
 	enum rxe_pool_state	state;
 	enum rxe_pool_flags	flags;
 	enum rxe_elem_type	type;

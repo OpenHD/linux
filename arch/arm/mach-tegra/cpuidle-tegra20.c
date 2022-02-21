@@ -1,7 +1,7 @@
 /*
  * CPU idle driver for Tegra CPUs
  *
- * Copyright (c) 2010-2012, NVIDIA Corporation.
+ * Copyright (c) 2010-2016, NVIDIA CORPORATION. All rights reserved.
  * Copyright (c) 2011 Google, Inc.
  * Author: Colin Cross <ccross@android.com>
  *         Gary King <gking@nvidia.com>
@@ -179,7 +179,7 @@ static int tegra20_idle_lp2_coupled(struct cpuidle_device *dev,
 	bool entered_lp2 = false;
 
 	if (tegra_pending_sgi())
-		WRITE_ONCE(abort_flag, true);
+		ACCESS_ONCE(abort_flag) = true;
 
 	cpuidle_coupled_parallel_barrier(dev, &abort_barrier);
 

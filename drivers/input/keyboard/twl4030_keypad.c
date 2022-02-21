@@ -30,7 +30,7 @@
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/platform_device.h>
-#include <linux/mfd/twl.h>
+#include <linux/i2c/twl.h>
 #include <linux/slab.h>
 #include <linux/of.h>
 
@@ -63,7 +63,7 @@ struct twl4030_keypad {
 	bool		autorepeat;
 	unsigned int	n_rows;
 	unsigned int	n_cols;
-	unsigned int	irq;
+	int		irq;
 
 	struct device *dbg_dev;
 	struct input_dev *input;
@@ -374,8 +374,8 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 		kp->autorepeat = pdata->rep;
 		keymap_data = pdata->keymap_data;
 	} else {
-		error = matrix_keypad_parse_properties(&pdev->dev, &kp->n_rows,
-						       &kp->n_cols);
+		error = matrix_keypad_parse_of_params(&pdev->dev, &kp->n_rows,
+						      &kp->n_cols);
 		if (error)
 			return error;
 
@@ -389,10 +389,8 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 	}
 
 	kp->irq = platform_get_irq(pdev, 0);
-	if (!kp->irq) {
-		dev_err(&pdev->dev, "no keyboard irq assigned\n");
-		return -EINVAL;
-	}
+	if (kp->irq < 0)
+		return kp->irq;
 
 	error = matrix_keypad_build_keymap(keymap_data, NULL,
 					   TWL4030_MAX_ROWS,
@@ -441,6 +439,7 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 		return -EIO;
 	}
 
+	platform_set_drvdata(pdev, kp);
 	return 0;
 }
 

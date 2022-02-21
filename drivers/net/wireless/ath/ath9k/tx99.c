@@ -151,7 +151,7 @@ static int ath9k_tx99_init(struct ath_softc *sc)
 		sc->tx99_power,
 		sc->tx99_power / 2);
 
-	/* We leave the hardware awake as it will be chugging on */
+	/* We leave the harware awake as it will be chugging on */
 
 	return 0;
 }
@@ -276,10 +276,10 @@ void ath9k_tx99_init_debug(struct ath_softc *sc)
 	if (!AR_SREV_9280_20_OR_LATER(sc->sc_ah))
 		return;
 
-	debugfs_create_file("tx99", 0600,
+	debugfs_create_file("tx99", S_IRUSR | S_IWUSR,
 			    sc->debug.debugfs_phy, sc,
 			    &fops_tx99);
-	debugfs_create_file("tx99_power", 0600,
+	debugfs_create_file("tx99_power", S_IRUSR | S_IWUSR,
 			    sc->debug.debugfs_phy, sc,
 			    &fops_tx99_power);
 }

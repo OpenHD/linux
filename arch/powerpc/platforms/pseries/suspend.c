@@ -151,7 +151,7 @@ static ssize_t store_hibernate(struct device *dev,
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	if (!alloc_cpumask_var(&offline_mask, GFP_KERNEL))
+	if (!alloc_cpumask_var(&offline_mask, GFP_TEMPORARY))
 		return -ENOMEM;
 
 	stream_id = simple_strtoul(buf, NULL, 16);
@@ -214,7 +214,8 @@ static ssize_t show_hibernate(struct device *dev,
 	return sprintf(buf, "%d\n", KERN_DT_UPDATE);
 }
 
-static DEVICE_ATTR(hibernate, 0644, show_hibernate, store_hibernate);
+static DEVICE_ATTR(hibernate, S_IWUSR | S_IRUGO,
+		   show_hibernate, store_hibernate);
 
 static struct bus_type suspend_subsys = {
 	.name = "power",
@@ -223,7 +224,6 @@ static struct bus_type suspend_subsys = {
 
 static const struct platform_suspend_ops pseries_suspend_ops = {
 	.valid		= suspend_valid_only_mem,
-	.begin		= pseries_suspend_begin,
 	.prepare_late	= pseries_prepare_late,
 	.enter		= pseries_suspend_enter,
 };

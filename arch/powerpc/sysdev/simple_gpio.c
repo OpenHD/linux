@@ -142,6 +142,7 @@ void __init simple_gpiochip_init(const char *compatible)
 		}
 		continue;
 err:
-		pr_err("%pOF: registration failed, status %d\n", np, ret);
+		pr_err("%s: registration failed, status %d\n",
+		       np->full_name, ret);
 	}
 }

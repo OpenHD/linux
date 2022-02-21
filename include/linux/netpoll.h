@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Common code for low-level network console, dump, and debugger code
  *
@@ -12,7 +11,6 @@
 #include <linux/interrupt.h>
 #include <linux/rcupdate.h>
 #include <linux/list.h>
-#include <linux/refcount.h>
 
 union inet_addr {
 	__u32		all[4];
@@ -36,7 +34,7 @@ struct netpoll {
 };
 
 struct netpoll_info {
-	refcount_t refcnt;
+	atomic_t refcnt;
 
 	struct semaphore dev_lock;
 
@@ -49,9 +47,8 @@ struct netpoll_info {
 };
 
 #ifdef CONFIG_NETPOLL
-void netpoll_poll_dev(struct net_device *dev);
-void netpoll_poll_disable(struct net_device *dev);
-void netpoll_poll_enable(struct net_device *dev);
+extern void netpoll_poll_disable(struct net_device *dev);
+extern void netpoll_poll_enable(struct net_device *dev);
 #else
 static inline void netpoll_poll_disable(struct net_device *dev) { return; }
 static inline void netpoll_poll_enable(struct net_device *dev) { return; }
@@ -81,11 +78,8 @@ static inline void *netpoll_poll_lock(struct napi_struct *napi)
 	struct net_device *dev = napi->dev;
 
 	if (dev && dev->npinfo) {
-		int owner = smp_processor_id();
-
-		while (cmpxchg(&napi->poll_owner, -1, owner) != -1)
-			cpu_relax();
-
+		spin_lock(&napi->poll_lock);
+		napi->poll_owner = smp_processor_id();
 		return napi;
 	}
 	return NULL;
@@ -95,8 +89,10 @@ static inline void netpoll_poll_unlock(void *have)
 {
 	struct napi_struct *napi = have;
 
-	if (napi)
-		smp_store_release(&napi->poll_owner, -1);
+	if (napi) {
+		napi->poll_owner = -1;
+		spin_unlock(&napi->poll_lock);
+	}
 }
 
 static inline bool netpoll_tx_running(struct net_device *dev)

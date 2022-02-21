@@ -384,6 +384,7 @@ struct sxgbe_tx_queue {
 	dma_addr_t *tx_skbuff_dma;
 	struct sk_buff **tx_skbuff;
 	struct timer_list txtimer;
+	spinlock_t tx_lock;	/* lock for tx queues */
 	unsigned int cur_tx;
 	unsigned int dirty_tx;
 	u32 tx_count_frames;

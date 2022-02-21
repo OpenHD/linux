@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2018 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006 Oracle.  All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -52,7 +52,7 @@ static struct rds_ib_device *rds_ib_get_device(__be32 ipaddr)
 	list_for_each_entry_rcu(rds_ibdev, &rds_ib_devices, list) {
 		list_for_each_entry_rcu(i_ipaddr, &rds_ibdev->ipaddr_list, list) {
 			if (i_ipaddr->ipaddr == ipaddr) {
-				refcount_inc(&rds_ibdev->refcount);
+				atomic_inc(&rds_ibdev->refcount);
 				rcu_read_unlock();
 				return rds_ibdev;
 			}
@@ -100,19 +100,18 @@ static void rds_ib_remove_ipaddr(struct rds_ib_device *rds_ibdev, __be32 ipaddr)
 		kfree_rcu(to_free, rcu);
 }
 
-int rds_ib_update_ipaddr(struct rds_ib_device *rds_ibdev,
-			 struct in6_addr *ipaddr)
+int rds_ib_update_ipaddr(struct rds_ib_device *rds_ibdev, __be32 ipaddr)
 {
 	struct rds_ib_device *rds_ibdev_old;
 
-	rds_ibdev_old = rds_ib_get_device(ipaddr->s6_addr32[3]);
+	rds_ibdev_old = rds_ib_get_device(ipaddr);
 	if (!rds_ibdev_old)
-		return rds_ib_add_ipaddr(rds_ibdev, ipaddr->s6_addr32[3]);
+		return rds_ib_add_ipaddr(rds_ibdev, ipaddr);
 
 	if (rds_ibdev_old != rds_ibdev) {
-		rds_ib_remove_ipaddr(rds_ibdev_old, ipaddr->s6_addr32[3]);
+		rds_ib_remove_ipaddr(rds_ibdev_old, ipaddr);
 		rds_ib_dev_put(rds_ibdev_old);
-		return rds_ib_add_ipaddr(rds_ibdev, ipaddr->s6_addr32[3]);
+		return rds_ib_add_ipaddr(rds_ibdev, ipaddr);
 	}
 	rds_ib_dev_put(rds_ibdev_old);
 
@@ -135,7 +134,7 @@ void rds_ib_add_conn(struct rds_ib_device *rds_ibdev, struct rds_connection *con
 	spin_unlock_irq(&ib_nodev_conns_lock);
 
 	ic->rds_ibdev = rds_ibdev;
-	refcount_inc(&rds_ibdev->refcount);
+	atomic_inc(&rds_ibdev->refcount);
 }
 
 void rds_ib_remove_conn(struct rds_ib_device *rds_ibdev, struct rds_connection *conn)
@@ -179,17 +178,6 @@ void rds_ib_get_mr_info(struct rds_ib_device *rds_ibdev, struct rds_info_rdma_co
 	iinfo->rdma_mr_max = pool_1m->max_items;
 	iinfo->rdma_mr_size = pool_1m->fmr_attr.max_pages;
 }
-
-#if IS_ENABLED(CONFIG_IPV6)
-void rds6_ib_get_mr_info(struct rds_ib_device *rds_ibdev,
-			 struct rds6_info_rdma_connection *iinfo6)
-{
-	struct rds_ib_mr_pool *pool_1m = rds_ibdev->mr_1m_pool;
-
-	iinfo6->rdma_mr_max = pool_1m->max_items;
-	iinfo6->rdma_mr_size = pool_1m->fmr_attr.max_pages;
-}
-#endif
 
 struct rds_ib_mr *rds_ib_reuse_mr(struct rds_ib_mr_pool *pool)
 {
@@ -548,22 +536,18 @@ void rds_ib_flush_mrs(void)
 }
 
 void *rds_ib_get_mr(struct scatterlist *sg, unsigned long nents,
-		    struct rds_sock *rs, u32 *key_ret,
-		    struct rds_connection *conn)
+		    struct rds_sock *rs, u32 *key_ret)
 {
 	struct rds_ib_device *rds_ibdev;
 	struct rds_ib_mr *ibmr = NULL;
-	struct rds_ib_connection *ic = NULL;
+	struct rds_ib_connection *ic = rs->rs_conn->c_transport_data;
 	int ret;
 
-	rds_ibdev = rds_ib_get_device(rs->rs_bound_addr.s6_addr32[3]);
+	rds_ibdev = rds_ib_get_device(rs->rs_bound_addr);
 	if (!rds_ibdev) {
 		ret = -ENODEV;
 		goto out;
 	}
-
-	if (conn)
-		ic = conn->c_transport_data;
 
 	if (!rds_ibdev->mr_8k_pool || !rds_ibdev->mr_1m_pool) {
 		ret = -ENODEV;
@@ -574,18 +558,17 @@ void *rds_ib_get_mr(struct scatterlist *sg, unsigned long nents,
 		ibmr = rds_ib_reg_frmr(rds_ibdev, ic, sg, nents, key_ret);
 	else
 		ibmr = rds_ib_reg_fmr(rds_ibdev, sg, nents, key_ret);
-	if (IS_ERR(ibmr)) {
-		ret = PTR_ERR(ibmr);
-		pr_warn("RDS/IB: rds_ib_get_mr failed (errno=%d)\n", ret);
-	} else {
-		return ibmr;
-	}
+	if (ibmr)
+		rds_ibdev = NULL;
 
  out:
+	if (!ibmr)
+		pr_warn("RDS/IB: rds_ib_get_mr failed (errno=%d)\n", ret);
+
 	if (rds_ibdev)
 		rds_ib_dev_put(rds_ibdev);
 
-	return ERR_PTR(ret);
+	return ibmr;
 }
 
 void rds_ib_destroy_mr_pool(struct rds_ib_mr_pool *pool)
@@ -617,11 +600,11 @@ struct rds_ib_mr_pool *rds_ib_create_mr_pool(struct rds_ib_device *rds_ibdev,
 	if (pool_type == RDS_IB_MR_1M_POOL) {
 		/* +1 allows for unaligned MRs */
 		pool->fmr_attr.max_pages = RDS_MR_1M_MSG_SIZE + 1;
-		pool->max_items = rds_ibdev->max_1m_mrs;
+		pool->max_items = RDS_MR_1M_POOL_SIZE;
 	} else {
 		/* pool_type == RDS_IB_MR_8K_POOL */
 		pool->fmr_attr.max_pages = RDS_MR_8K_MSG_SIZE + 1;
-		pool->max_items = rds_ibdev->max_8k_mrs;
+		pool->max_items = RDS_MR_8K_POOL_SIZE;
 	}
 
 	pool->max_free_pinned = pool->max_items * pool->fmr_attr.max_pages / 4;

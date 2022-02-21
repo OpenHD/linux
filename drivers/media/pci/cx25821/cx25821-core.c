@@ -15,6 +15,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -428,7 +432,7 @@ static void cx25821_registers_init(struct cx25821_dev *dev)
 	tmp |= FLD_USE_ALT_PLL_REF;
 	cx_write(CLK_RST, tmp & ~(FLD_VID_I_CLK_NOE | FLD_VID_J_CLK_NOE));
 
-	msleep(100);
+	mdelay(100);
 }
 
 int cx25821_sram_channel_setup(struct cx25821_dev *dev,
@@ -803,7 +807,7 @@ static void cx25821_initialize(struct cx25821_dev *dev)
 	cx_write(CLK_DELAY, cx_read(CLK_DELAY) & 0x80000000);
 	cx_write(PAD_CTRL, 0x12);	/* for I2C */
 	cx25821_registers_init(dev);	/* init Pecos registers */
-	msleep(100);
+	mdelay(100);
 
 	for (i = 0; i < VID_CHANNEL_NUM; i++) {
 		cx25821_set_vip_mode(dev, dev->channels[i].sram_channels);
@@ -1391,7 +1395,10 @@ static struct pci_driver cx25821_pci_driver = {
 
 static int __init cx25821_init(void)
 {
-	pr_info("driver loaded\n");
+	pr_info("driver version %d.%d.%d loaded\n",
+		(CX25821_VERSION_CODE >> 16) & 0xff,
+		(CX25821_VERSION_CODE >> 8) & 0xff,
+		CX25821_VERSION_CODE & 0xff);
 	return pci_register_driver(&cx25821_pci_driver);
 }
 

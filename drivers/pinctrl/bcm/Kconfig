@@ -20,8 +20,6 @@ config PINCTRL_BCM2835
 	bool
 	select PINMUX
 	select PINCONF
-	select GENERIC_PINCONF
-	select GPIOLIB_IRQCHIP
 
 config PINCTRL_IPROC_GPIO
 	bool "Broadcom iProc GPIO (with PINCONF) driver"
@@ -71,7 +69,7 @@ config PINCTRL_CYGNUS_MUX
 
 	  The Broadcom Cygnus IOMUX driver supports group based IOMUX
 	  configuration, with the exception that certain individual pins
-	  can be overridden to GPIO function
+	  can be overrided to GPIO function
 
 config PINCTRL_NSP_GPIO
 	bool "Broadcom NSP GPIO (with PINCONF) driver"

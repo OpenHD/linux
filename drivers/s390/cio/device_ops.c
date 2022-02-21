@@ -1,11 +1,10 @@
-// SPDX-License-Identifier: GPL-1.0+
 /*
  * Copyright IBM Corp. 2002, 2009
  *
  * Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com)
  *	      Cornelia Huck (cornelia.huck@de.ibm.com)
  */
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -460,8 +459,8 @@ __u8 ccw_device_get_path_mask(struct ccw_device *cdev)
  * On success return a newly allocated copy of the channel-path description
  * data associated with the given channel path. Return %NULL on error.
  */
-struct channel_path_desc_fmt0 *ccw_device_get_chp_desc(struct ccw_device *cdev,
-						       int chp_idx)
+struct channel_path_desc *ccw_device_get_chp_desc(struct ccw_device *cdev,
+						  int chp_idx)
 {
 	struct subchannel *sch;
 	struct chp_id chpid;
@@ -470,36 +469,6 @@ struct channel_path_desc_fmt0 *ccw_device_get_chp_desc(struct ccw_device *cdev,
 	chp_id_init(&chpid);
 	chpid.id = sch->schib.pmcw.chpid[chp_idx];
 	return chp_get_chp_desc(chpid);
-}
-
-/**
- * ccw_device_get_util_str() - return newly allocated utility strings
- * @cdev: device to obtain the utility strings for
- * @chp_idx: index of the channel path
- *
- * On success return a newly allocated copy of the utility strings
- * associated with the given channel path. Return %NULL on error.
- */
-u8 *ccw_device_get_util_str(struct ccw_device *cdev, int chp_idx)
-{
-	struct subchannel *sch = to_subchannel(cdev->dev.parent);
-	struct channel_path *chp;
-	struct chp_id chpid;
-	u8 *util_str;
-
-	chp_id_init(&chpid);
-	chpid.id = sch->schib.pmcw.chpid[chp_idx];
-	chp = chpid_to_chp(chpid);
-
-	util_str = kmalloc(sizeof(chp->desc_fmt3.util_str), GFP_KERNEL);
-	if (!util_str)
-		return NULL;
-
-	mutex_lock(&chp->lock);
-	memcpy(util_str, chp->desc_fmt3.util_str, sizeof(chp->desc_fmt3.util_str));
-	mutex_unlock(&chp->lock);
-
-	return util_str;
 }
 
 /**
@@ -624,7 +593,7 @@ EXPORT_SYMBOL(ccw_device_tm_start_timeout);
  * @mask: mask of paths to use
  *
  * Return the number of 64K-bytes blocks all paths at least support
- * for a transport command. Return value 0 indicates failure.
+ * for a transport command. Return values <= 0 indicate failures.
  */
 int ccw_device_get_mdc(struct ccw_device *cdev, u8 mask)
 {
@@ -699,6 +668,7 @@ void ccw_device_get_schid(struct ccw_device *cdev, struct subchannel_id *schid)
 }
 EXPORT_SYMBOL_GPL(ccw_device_get_schid);
 
+MODULE_LICENSE("GPL");
 EXPORT_SYMBOL(ccw_device_set_options_mask);
 EXPORT_SYMBOL(ccw_device_set_options);
 EXPORT_SYMBOL(ccw_device_clear_options);
@@ -712,4 +682,3 @@ EXPORT_SYMBOL(ccw_device_start_key);
 EXPORT_SYMBOL(ccw_device_get_ciw);
 EXPORT_SYMBOL(ccw_device_get_path_mask);
 EXPORT_SYMBOL_GPL(ccw_device_get_chp_desc);
-EXPORT_SYMBOL_GPL(ccw_device_get_util_str);

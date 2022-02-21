@@ -60,7 +60,8 @@ int qib_make_uc_req(struct rvt_qp *qp, unsigned long *flags)
 		if (!(ib_rvt_state_ops[qp->state] & RVT_FLUSH_SEND))
 			goto bail;
 		/* We are in the error state, flush the work request. */
-		if (qp->s_last == READ_ONCE(qp->s_head))
+		smp_read_barrier_depends(); /* see post_one_send() */
+		if (qp->s_last == ACCESS_ONCE(qp->s_head))
 			goto bail;
 		/* If DMAs are in progress, we can't flush immediately. */
 		if (atomic_read(&priv->s_dma_busy)) {
@@ -73,7 +74,7 @@ int qib_make_uc_req(struct rvt_qp *qp, unsigned long *flags)
 	}
 
 	ohdr = &priv->s_hdr->u.oth;
-	if (rdma_ah_get_ah_flags(&qp->remote_ah_attr) & IB_AH_GRH)
+	if (qp->remote_ah_attr.ah_flags & IB_AH_GRH)
 		ohdr = &priv->s_hdr->u.l.oth;
 
 	/* header size in 32-bit words LRH+BTH = (8+12)/4. */
@@ -89,7 +90,8 @@ int qib_make_uc_req(struct rvt_qp *qp, unsigned long *flags)
 		    RVT_PROCESS_NEXT_SEND_OK))
 			goto bail;
 		/* Check if send work queue is empty. */
-		if (qp->s_cur == READ_ONCE(qp->s_head))
+		smp_read_barrier_depends(); /* see post_one_send() */
+		if (qp->s_cur == ACCESS_ONCE(qp->s_head))
 			goto bail;
 		/*
 		 * Start a new request.
@@ -323,8 +325,17 @@ inv:
 		goto inv;
 	}
 
-	if (qp->state == IB_QPS_RTR && !(qp->r_flags & RVT_R_COMM_EST))
-		rvt_comm_est(qp);
+	if (qp->state == IB_QPS_RTR && !(qp->r_flags & RVT_R_COMM_EST)) {
+		qp->r_flags |= RVT_R_COMM_EST;
+		if (qp->ibqp.event_handler) {
+			struct ib_event ev;
+
+			ev.device = qp->ibqp.device;
+			ev.element.qp = &qp->ibqp;
+			ev.event = IB_EVENT_COMM_EST;
+			qp->ibqp.event_handler(&ev, qp->ibqp.qp_context);
+		}
+	}
 
 	/* OK, process the packet. */
 	switch (opcode) {
@@ -335,7 +346,7 @@ send_first:
 		if (test_and_clear_bit(RVT_R_REWIND_SGE, &qp->r_aflags))
 			qp->r_sge = qp->s_rdma_read_sge;
 		else {
-			ret = rvt_get_rwqe(qp, false);
+			ret = qib_get_rwqe(qp, 0);
 			if (ret < 0)
 				goto op_err;
 			if (!ret)
@@ -392,8 +403,8 @@ last_imm:
 		wc.status = IB_WC_SUCCESS;
 		wc.qp = &qp->ibqp;
 		wc.src_qp = qp->remote_qpn;
-		wc.slid = rdma_ah_get_dlid(&qp->remote_ah_attr);
-		wc.sl = rdma_ah_get_sl(&qp->remote_ah_attr);
+		wc.slid = qp->remote_ah_attr.dlid;
+		wc.sl = qp->remote_ah_attr.sl;
 		/* zero fields that are N/A */
 		wc.vendor_err = 0;
 		wc.pkey_index = 0;
@@ -401,7 +412,8 @@ last_imm:
 		wc.port_num = 0;
 		/* Signal completion event if the solicited bit is set. */
 		rvt_cq_enter(ibcq_to_rvtcq(qp->ibqp.recv_cq), &wc,
-			     ib_bth_is_solicited(ohdr));
+			     (ohdr->bth[0] &
+				cpu_to_be32(IB_BTH_SOLICITED)) != 0);
 		break;
 
 	case OP(RDMA_WRITE_FIRST):
@@ -471,7 +483,7 @@ rdma_last_imm:
 		if (test_and_clear_bit(RVT_R_REWIND_SGE, &qp->r_aflags))
 			rvt_put_ss(&qp->s_rdma_read_sge);
 		else {
-			ret = rvt_get_rwqe(qp, true);
+			ret = qib_get_rwqe(qp, 1);
 			if (ret < 0)
 				goto op_err;
 			if (!ret)
@@ -515,7 +527,7 @@ drop:
 	return;
 
 op_err:
-	rvt_rc_error(qp, IB_WC_LOC_QP_OP_ERR);
+	qib_rc_error(qp, IB_WC_LOC_QP_OP_ERR);
 	return;
 
 }

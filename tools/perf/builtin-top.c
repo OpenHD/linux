@@ -27,20 +27,19 @@
 #include "util/drv_configs.h"
 #include "util/evlist.h"
 #include "util/evsel.h"
-#include "util/event.h"
 #include "util/machine.h"
 #include "util/session.h"
 #include "util/symbol.h"
 #include "util/thread.h"
 #include "util/thread_map.h"
 #include "util/top.h"
+#include "util/util.h"
 #include <linux/rbtree.h>
 #include <subcmd/parse-options.h>
 #include "util/parse-events.h"
 #include "util/cpumap.h"
 #include "util/xyarray.h"
 #include "util/sort.h"
-#include "util/term.h"
 #include "util/intlist.h"
 #include "util/parse-branch-options.h"
 #include "arch/common.h"
@@ -59,7 +58,6 @@
 #include <errno.h>
 #include <time.h>
 #include <sched.h>
-#include <signal.h>
 
 #include <sys/syscall.h>
 #include <sys/ioctl.h>
@@ -74,8 +72,6 @@
 #include <linux/time64.h>
 #include <linux/types.h>
 
-#include "sane_ctype.h"
-
 static volatile int done;
 static volatile int resize;
 
@@ -86,7 +82,8 @@ static void perf_top__update_print_entries(struct perf_top *top)
 	top->print_entries = top->winsize.ws_row - HEADER_LINE_NR;
 }
 
-static void winch_sig(int sig __maybe_unused)
+static void perf_top__sig_winch(int sig __maybe_unused,
+				siginfo_t *info __maybe_unused, void *arg __maybe_unused)
 {
 	resize = 1;
 }
@@ -99,7 +96,6 @@ static void perf_top__resize(struct perf_top *top)
 
 static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 {
-	struct perf_evsel *evsel;
 	struct symbol *sym;
 	struct annotation *notes;
 	struct map *map;
@@ -107,8 +103,6 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 
 	if (!he || !he->ms.sym)
 		return -1;
-
-	evsel = hists_to_evsel(he->hists);
 
 	sym = he->ms.sym;
 	map = he->ms.map;
@@ -125,9 +119,14 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 	}
 
 	notes = symbol__annotation(sym);
+	if (notes->src != NULL) {
+		pthread_mutex_lock(&notes->lock);
+		goto out_assign;
+	}
+
 	pthread_mutex_lock(&notes->lock);
 
-	if (!symbol__hists(sym, top->evlist->nr_entries)) {
+	if (symbol__alloc_hist(sym) < 0) {
 		pthread_mutex_unlock(&notes->lock);
 		pr_err("Not enough memory for annotating '%s' symbol!\n",
 		       sym->name);
@@ -135,8 +134,9 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 		return err;
 	}
 
-	err = symbol__annotate(sym, map, evsel, 0, &top->annotation_opts, NULL);
+	err = symbol__disassemble(sym, map, 0);
 	if (err == 0) {
+out_assign:
 		top->sym_filter_entry = he;
 	} else {
 		char msg[BUFSIZ];
@@ -183,8 +183,7 @@ static void ui__warn_map_erange(struct map *map, struct symbol *sym, u64 ip)
 
 static void perf_top__record_precise_ip(struct perf_top *top,
 					struct hist_entry *he,
-					struct perf_sample *sample,
-					struct perf_evsel *evsel, u64 ip)
+					int counter, u64 ip)
 {
 	struct annotation *notes;
 	struct symbol *sym = he->ms.sym;
@@ -200,7 +199,7 @@ static void perf_top__record_precise_ip(struct perf_top *top,
 	if (pthread_mutex_trylock(&notes->lock))
 		return;
 
-	err = hist_entry__inc_addr_samples(he, sample, evsel, ip);
+	err = hist_entry__inc_addr_samples(he, counter, ip);
 
 	pthread_mutex_unlock(&notes->lock);
 
@@ -226,7 +225,6 @@ static void perf_top__record_precise_ip(struct perf_top *top,
 static void perf_top__show_details(struct perf_top *top)
 {
 	struct hist_entry *he = top->sym_filter_entry;
-	struct perf_evsel *evsel;
 	struct annotation *notes;
 	struct symbol *symbol;
 	int more;
@@ -234,22 +232,19 @@ static void perf_top__show_details(struct perf_top *top)
 	if (!he)
 		return;
 
-	evsel = hists_to_evsel(he->hists);
-
 	symbol = he->ms.sym;
 	notes = symbol__annotation(symbol);
 
 	pthread_mutex_lock(&notes->lock);
 
-	symbol__calc_percent(symbol, evsel);
-
 	if (notes->src == NULL)
 		goto out_unlock;
 
 	printf("Showing %s for %s\n", perf_evsel__name(top->sym_evsel), symbol->name);
-	printf("  Events  Pcnt (>=%d%%)\n", top->annotation_opts.min_pcnt);
+	printf("  Events  Pcnt (>=%d%%)\n", top->sym_pcnt_filter);
 
-	more = symbol__annotate_printf(symbol, he->ms.map, top->sym_evsel, &top->annotation_opts);
+	more = symbol__annotate_printf(symbol, he->ms.map, top->sym_evsel,
+				       0, top->sym_pcnt_filter, top->print_entries, 4);
 
 	if (top->evlist->enabled) {
 		if (top->zero)
@@ -280,9 +275,8 @@ static void perf_top__print_sym_table(struct perf_top *top)
 
 	printf("%-*.*s\n", win_width, win_width, graph_dotted_line);
 
-	if (!top->record_opts.overwrite &&
-	    (hists->stats.nr_lost_warned !=
-	    hists->stats.nr_events[PERF_RECORD_LOST])) {
+	if (hists->stats.nr_lost_warned !=
+	    hists->stats.nr_events[PERF_RECORD_LOST]) {
 		hists->stats.nr_lost_warned =
 			      hists->stats.nr_events[PERF_RECORD_LOST];
 		color_fprintf(stdout, PERF_COLOR_RED,
@@ -311,7 +305,7 @@ static void perf_top__print_sym_table(struct perf_top *top)
 	hists__output_recalc_col_len(hists, top->print_entries - printed);
 	putchar('\n');
 	hists__fprintf(hists, false, top->print_entries - printed, win_width,
-		       top->min_percent, stdout, !symbol_conf.use_callchain);
+		       top->min_percent, stdout, symbol_conf.use_callchain);
 }
 
 static void prompt_integer(int *target, const char *msg)
@@ -409,12 +403,12 @@ static void perf_top__print_mapped_keys(struct perf_top *top)
 
 	fprintf(stdout, "\t[f]     profile display filter (count).    \t(%d)\n", top->count_filter);
 
-	fprintf(stdout, "\t[F]     annotate display filter (percent). \t(%d%%)\n", top->annotation_opts.min_pcnt);
+	fprintf(stdout, "\t[F]     annotate display filter (percent). \t(%d%%)\n", top->sym_pcnt_filter);
 	fprintf(stdout, "\t[s]     annotate symbol.                   \t(%s)\n", name?: "NULL");
 	fprintf(stdout, "\t[S]     stop annotation.\n");
 
 	fprintf(stdout,
-		"\t[K]     hide kernel symbols.             \t(%s)\n",
+		"\t[K]     hide kernel_symbols symbols.     \t(%s)\n",
 		top->hide_kernel_symbols ? "yes" : "no");
 	fprintf(stdout,
 		"\t[U]     hide user symbols.               \t(%s)\n",
@@ -478,8 +472,12 @@ static bool perf_top__handle_keypress(struct perf_top *top, int c)
 		case 'e':
 			prompt_integer(&top->print_entries, "Enter display entries (lines)");
 			if (top->print_entries == 0) {
+				struct sigaction act = {
+					.sa_sigaction = perf_top__sig_winch,
+					.sa_flags     = SA_SIGINFO,
+				};
 				perf_top__resize(top);
-				signal(SIGWINCH, winch_sig);
+				sigaction(SIGWINCH, &act, NULL);
 			} else {
 				signal(SIGWINCH, SIG_DFL);
 			}
@@ -512,7 +510,7 @@ static bool perf_top__handle_keypress(struct perf_top *top, int c)
 			prompt_integer(&top->count_filter, "Enter display event count filter");
 			break;
 		case 'F':
-			prompt_percent(&top->annotation_opts.min_pcnt,
+			prompt_percent(&top->sym_pcnt_filter,
 				       "Enter details display event filter (percent)");
 			break;
 		case 'K':
@@ -588,13 +586,6 @@ static void *display_thread_tui(void *arg)
 		.refresh	= top->delay_secs,
 	};
 
-	/* In order to read symbols from other namespaces perf to  needs to call
-	 * setns(2).  This isn't permitted if the struct_fs has multiple users.
-	 * unshare(2) the fs so that we may continue to setns into namespaces
-	 * that we're observing.
-	 */
-	unshare(CLONE_FS);
-
 	perf_top__sort_new_samples(top);
 
 	/*
@@ -609,9 +600,7 @@ static void *display_thread_tui(void *arg)
 
 	perf_evlist__tui_browse_hists(top->evlist, help, &hbt,
 				      top->min_percent,
-				      &top->session->header.env,
-				      !top->record_opts.overwrite,
-				      &top->annotation_opts);
+				      &top->session->header.env);
 
 	done = 1;
 	return NULL;
@@ -638,20 +627,15 @@ static void *display_thread(void *arg)
 	struct perf_top *top = arg;
 	int delay_msecs, c;
 
-	/* In order to read symbols from other namespaces perf to  needs to call
-	 * setns(2).  This isn't permitted if the struct_fs has multiple users.
-	 * unshare(2) the fs so that we may continue to setns into namespaces
-	 * that we're observing.
-	 */
-	unshare(CLONE_FS);
-
 	display_setup_sig();
 	pthread__unblock_sigwinch();
 repeat:
 	delay_msecs = top->delay_secs * MSEC_PER_SEC;
 	set_term_quiet_input(&save);
 	/* trash return*/
-	getc(stdin);
+	clearerr(stdin);
+	if (poll(&stdin_poll, 1, 0) > 0)
+		getc(stdin);
 
 	while (!done) {
 		perf_top__print_sym_table(top);
@@ -689,7 +673,7 @@ static int hist_iter__top_callback(struct hist_entry_iter *iter,
 	struct perf_evsel *evsel = iter->evsel;
 
 	if (perf_hpp_list.sym && single)
-		perf_top__record_precise_ip(top, he, iter->sample, evsel, al->addr);
+		perf_top__record_precise_ip(top, he, evsel->idx, al->addr);
 
 	hist__account_cycles(iter->sample->branch_stack, al, iter->sample,
 		     !(top->record_opts.branch_stack & PERF_SAMPLE_BRANCH_ANY));
@@ -735,20 +719,18 @@ static void perf_event__process_sample(struct perf_tool *tool,
 	if (!machine->kptr_restrict_warned &&
 	    symbol_conf.kptr_restrict &&
 	    al.cpumode == PERF_RECORD_MISC_KERNEL) {
-		if (!perf_evlist__exclude_kernel(top->session->evlist)) {
-			ui__warning(
+		ui__warning(
 "Kernel address maps (/proc/{kallsyms,modules}) are restricted.\n\n"
 "Check /proc/sys/kernel/kptr_restrict.\n\n"
 "Kernel%s samples will not be resolved.\n",
-			  al.map && map__has_symbols(al.map) ?
+			  al.map && !RB_EMPTY_ROOT(&al.map->dso->symbols[MAP__FUNCTION]) ?
 			  " modules" : "");
-			if (use_browser <= 0)
-				sleep(5);
-		}
+		if (use_browser <= 0)
+			sleep(5);
 		machine->kptr_restrict_warned = true;
 	}
 
-	if (al.sym == NULL && al.map != NULL) {
+	if (al.sym == NULL) {
 		const char *msg = "Kernel samples will not be resolved.\n";
 		/*
 		 * As we do lazy loading of symtabs we only will know if the
@@ -762,7 +744,8 @@ static void perf_event__process_sample(struct perf_tool *tool,
 		 * invalid --vmlinux ;-)
 		 */
 		if (!machine->kptr_restrict_warned && !top->vmlinux_warned &&
-		    __map__is_kernel(al.map) && map__has_symbols(al.map)) {
+		    al.map == machine->vmlinux_maps[MAP__FUNCTION] &&
+		    RB_EMPTY_ROOT(&al.map->dso->symbols[MAP__FUNCTION])) {
 			if (symbol_conf.vmlinux_name) {
 				char serr[256];
 				dso__strerror_load(al.map->dso, serr, sizeof(serr));
@@ -806,22 +789,15 @@ static void perf_event__process_sample(struct perf_tool *tool,
 
 static void perf_top__mmap_read_idx(struct perf_top *top, int idx)
 {
-	struct record_opts *opts = &top->record_opts;
-	struct perf_evlist *evlist = top->evlist;
 	struct perf_sample sample;
 	struct perf_evsel *evsel;
-	struct perf_mmap *md;
 	struct perf_session *session = top->session;
 	union perf_event *event;
 	struct machine *machine;
 	int ret;
 
-	md = opts->overwrite ? &evlist->overwrite_mmap[idx] : &evlist->mmap[idx];
-	if (perf_mmap__read_init(md) < 0)
-		return;
-
-	while ((event = perf_mmap__read_event(md)) != NULL) {
-		ret = perf_evlist__parse_sample(evlist, event, &sample);
+	while ((event = perf_evlist__mmap_read(top->evlist, idx)) != NULL) {
+		ret = perf_evlist__parse_sample(top->evlist, event, &sample);
 		if (ret) {
 			pr_err("Can't parse sample, err = %d\n", ret);
 			goto next_event;
@@ -875,134 +851,24 @@ static void perf_top__mmap_read_idx(struct perf_top *top, int idx)
 		} else
 			++session->evlist->stats.nr_unknown_events;
 next_event:
-		perf_mmap__consume(md);
+		perf_evlist__mmap_consume(top->evlist, idx);
 	}
-
-	perf_mmap__read_done(md);
 }
 
 static void perf_top__mmap_read(struct perf_top *top)
 {
-	bool overwrite = top->record_opts.overwrite;
-	struct perf_evlist *evlist = top->evlist;
-	unsigned long long start, end;
 	int i;
-
-	start = rdclock();
-	if (overwrite)
-		perf_evlist__toggle_bkw_mmap(evlist, BKW_MMAP_DATA_PENDING);
 
 	for (i = 0; i < top->evlist->nr_mmaps; i++)
 		perf_top__mmap_read_idx(top, i);
-
-	if (overwrite) {
-		perf_evlist__toggle_bkw_mmap(evlist, BKW_MMAP_EMPTY);
-		perf_evlist__toggle_bkw_mmap(evlist, BKW_MMAP_RUNNING);
-	}
-	end = rdclock();
-
-	if ((end - start) > (unsigned long long)top->delay_secs * NSEC_PER_SEC)
-		ui__warning("Too slow to read ring buffer.\n"
-			    "Please try increasing the period (-c) or\n"
-			    "decreasing the freq (-F) or\n"
-			    "limiting the number of CPUs (-C)\n");
-}
-
-/*
- * Check per-event overwrite term.
- * perf top should support consistent term for all events.
- * - All events don't have per-event term
- *   E.g. "cpu/cpu-cycles/,cpu/instructions/"
- *   Nothing change, return 0.
- * - All events have same per-event term
- *   E.g. "cpu/cpu-cycles,no-overwrite/,cpu/instructions,no-overwrite/
- *   Using the per-event setting to replace the opts->overwrite if
- *   they are different, then return 0.
- * - Events have different per-event term
- *   E.g. "cpu/cpu-cycles,overwrite/,cpu/instructions,no-overwrite/"
- *   Return -1
- * - Some of the event set per-event term, but some not.
- *   E.g. "cpu/cpu-cycles/,cpu/instructions,no-overwrite/"
- *   Return -1
- */
-static int perf_top__overwrite_check(struct perf_top *top)
-{
-	struct record_opts *opts = &top->record_opts;
-	struct perf_evlist *evlist = top->evlist;
-	struct perf_evsel_config_term *term;
-	struct list_head *config_terms;
-	struct perf_evsel *evsel;
-	int set, overwrite = -1;
-
-	evlist__for_each_entry(evlist, evsel) {
-		set = -1;
-		config_terms = &evsel->config_terms;
-		list_for_each_entry(term, config_terms, list) {
-			if (term->type == PERF_EVSEL__CONFIG_TERM_OVERWRITE)
-				set = term->val.overwrite ? 1 : 0;
-		}
-
-		/* no term for current and previous event (likely) */
-		if ((overwrite < 0) && (set < 0))
-			continue;
-
-		/* has term for both current and previous event, compare */
-		if ((overwrite >= 0) && (set >= 0) && (overwrite != set))
-			return -1;
-
-		/* no term for current event but has term for previous one */
-		if ((overwrite >= 0) && (set < 0))
-			return -1;
-
-		/* has term for current event */
-		if ((overwrite < 0) && (set >= 0)) {
-			/* if it's first event, set overwrite */
-			if (evsel == perf_evlist__first(evlist))
-				overwrite = set;
-			else
-				return -1;
-		}
-	}
-
-	if ((overwrite >= 0) && (opts->overwrite != overwrite))
-		opts->overwrite = overwrite;
-
-	return 0;
-}
-
-static int perf_top_overwrite_fallback(struct perf_top *top,
-				       struct perf_evsel *evsel)
-{
-	struct record_opts *opts = &top->record_opts;
-	struct perf_evlist *evlist = top->evlist;
-	struct perf_evsel *counter;
-
-	if (!opts->overwrite)
-		return 0;
-
-	/* only fall back when first event fails */
-	if (evsel != perf_evlist__first(evlist))
-		return 0;
-
-	evlist__for_each_entry(evlist, counter)
-		counter->attr.write_backward = false;
-	opts->overwrite = false;
-	pr_debug2("fall back to non-overwrite mode\n");
-	return 1;
 }
 
 static int perf_top__start_counters(struct perf_top *top)
 {
-	char msg[BUFSIZ];
+	char msg[512];
 	struct perf_evsel *counter;
 	struct perf_evlist *evlist = top->evlist;
 	struct record_opts *opts = &top->record_opts;
-
-	if (perf_top__overwrite_check(top)) {
-		ui__error("perf top only support consistent per-event "
-			  "overwrite setting for all events\n");
-		goto out_err;
-	}
 
 	perf_evlist__config(evlist, opts, &callchain_param);
 
@@ -1010,23 +876,8 @@ static int perf_top__start_counters(struct perf_top *top)
 try_again:
 		if (perf_evsel__open(counter, top->evlist->cpus,
 				     top->evlist->threads) < 0) {
-
-			/*
-			 * Specially handle overwrite fall back.
-			 * Because perf top is the only tool which has
-			 * overwrite mode by default, support
-			 * both overwrite and non-overwrite mode, and
-			 * require consistent mode for all events.
-			 *
-			 * May move it to generic code with more tools
-			 * have similar attribute.
-			 */
-			if (perf_missing_features.write_backward &&
-			    perf_top_overwrite_fallback(top, counter))
-				goto try_again;
-
 			if (perf_evsel__fallback(counter, errno, msg, sizeof(msg))) {
-				if (verbose > 0)
+				if (verbose)
 					ui__warning("%s\n", msg);
 				goto try_again;
 			}
@@ -1038,7 +889,7 @@ try_again:
 		}
 	}
 
-	if (perf_evlist__mmap(evlist, opts->mmap_pages) < 0) {
+	if (perf_evlist__mmap(evlist, opts->mmap_pages, false) < 0) {
 		ui__error("Failed to mmap with %d (%s)\n",
 			    errno, str_error_r(errno, msg, sizeof(msg)));
 		goto out_err;
@@ -1081,9 +932,8 @@ static int __cmd_top(struct perf_top *top)
 	if (top->session == NULL)
 		return -1;
 
-	if (!top->annotation_opts.objdump_path) {
-		ret = perf_env__lookup_objdump(&top->session->header.env,
-					       &top->annotation_opts.objdump_path);
+	if (!objdump_path) {
+		ret = perf_env__lookup_objdump(&top->session->header.env);
 		if (ret)
 			goto out_delete;
 	}
@@ -1095,16 +945,8 @@ static int __cmd_top(struct perf_top *top)
 	if (perf_session__register_idle_thread(top->session) < 0)
 		goto out_delete;
 
-	if (top->nr_threads_synthesize > 1)
-		perf_set_multithreaded();
-
 	machine__synthesize_threads(&top->session->machines.host, &opts->target,
-				    top->evlist->threads, false,
-				    opts->proc_map_timeout,
-				    top->nr_threads_synthesize);
-
-	if (top->nr_threads_synthesize > 1)
-		perf_set_singlethreaded();
+				    top->evlist->threads, false, opts->proc_map_timeout);
 
 	if (perf_hpp_list.socket) {
 		ret = perf_env__read_cpu_topology_map(&perf_env);
@@ -1118,7 +960,7 @@ static int __cmd_top(struct perf_top *top)
 
 	ret = perf_evlist__apply_drv_configs(evlist, &pos, &err_term);
 	if (ret) {
-		pr_err("failed to set config \"%s\" on event %s with %d (%s)\n",
+		error("failed to set config \"%s\" on event %s with %d (%s)\n",
 			err_term->val.drv_cfg, perf_evsel__name(pos), errno,
 			str_error_r(errno, msg, sizeof(msg)));
 		goto out_delete;
@@ -1165,7 +1007,7 @@ static int __cmd_top(struct perf_top *top)
 
 		perf_top__mmap_read(top);
 
-		if (opts->overwrite || (hits == top->samples))
+		if (hits == top->samples)
 			ret = perf_evlist__poll(top->evlist, 100);
 
 		if (resize) {
@@ -1246,7 +1088,7 @@ parse_percent_limit(const struct option *opt, const char *arg,
 const char top_callchain_help[] = CALLCHAIN_RECORD_HELP CALLCHAIN_REPORT_HELP
 	"\n\t\t\t\tDefault: fp,graph,0.5,caller,function";
 
-int cmd_top(int argc, const char **argv)
+int cmd_top(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	char errbuf[BUFSIZ];
 	struct perf_top top = {
@@ -1261,11 +1103,9 @@ int cmd_top(int argc, const char **argv)
 				.uses_mmap   = true,
 			},
 			.proc_map_timeout    = 500,
-			.overwrite	= 1,
 		},
-		.max_stack	     = sysctl__max_stack(),
-		.annotation_opts     = annotation__default_options,
-		.nr_threads_synthesize = UINT_MAX,
+		.max_stack	     = sysctl_perf_event_max_stack,
+		.sym_pcnt_filter     = 5,
 	};
 	struct record_opts *opts = &top.record_opts;
 	struct target *target = &opts->target;
@@ -1306,9 +1146,7 @@ int cmd_top(int argc, const char **argv)
 	OPT_STRING(0, "sym-annotate", &top.sym_filter, "symbol name",
 		    "symbol to annotate"),
 	OPT_BOOLEAN('z', "zero", &top.zero, "zero history across updates"),
-	OPT_CALLBACK('F', "freq", &top.record_opts, "freq or 'max'",
-		     "profile at this frequency",
-		      record__parse_freq),
+	OPT_UINTEGER('F', "freq", &opts->user_freq, "profile at this frequency"),
 	OPT_INTEGER('E', "entries", &top.print_entries,
 		    "display this many functions"),
 	OPT_BOOLEAN('U', "hide_user_symbols", &top.hide_user_symbols,
@@ -1346,15 +1184,15 @@ int cmd_top(int argc, const char **argv)
 		   "only consider symbols in these comms"),
 	OPT_STRING(0, "symbols", &symbol_conf.sym_list_str, "symbol[,symbol...]",
 		   "only consider these symbols"),
-	OPT_BOOLEAN(0, "source", &top.annotation_opts.annotate_src,
+	OPT_BOOLEAN(0, "source", &symbol_conf.annotate_src,
 		    "Interleave source code with assembly code (default)"),
-	OPT_BOOLEAN(0, "asm-raw", &top.annotation_opts.show_asm_raw,
+	OPT_BOOLEAN(0, "asm-raw", &symbol_conf.annotate_asm_raw,
 		    "Display raw encoding of assembly instructions (default)"),
 	OPT_BOOLEAN(0, "demangle-kernel", &symbol_conf.demangle_kernel,
 		    "Enable kernel symbol demangling"),
-	OPT_STRING(0, "objdump", &top.annotation_opts.objdump_path, "path",
+	OPT_STRING(0, "objdump", &objdump_path, "path",
 		    "objdump binary to use for disassembly and annotations"),
-	OPT_STRING('M', "disassembler-style", &top.annotation_opts.disassembler_style, "disassembler style",
+	OPT_STRING('M', "disassembler-style", &disassembler_style, "disassembler style",
 		   "Specify disassembler style (e.g. -M intel for intel syntax)"),
 	OPT_STRING('u', "uid", &target->uid_str, "user", "user to profile"),
 	OPT_CALLBACK(0, "percent-limit", &top, "percent",
@@ -1376,9 +1214,6 @@ int cmd_top(int argc, const char **argv)
 		    "Show raw trace event output (do not use print fmt or plugins)"),
 	OPT_BOOLEAN(0, "hierarchy", &symbol_conf.report_hierarchy,
 		    "Show entries in a hierarchy"),
-	OPT_BOOLEAN(0, "force", &symbol_conf.force, "don't complain, do it"),
-	OPT_UINTEGER(0, "num-thread-synthesize", &top.nr_threads_synthesize,
-			"number of thread to run event synthesize"),
 	OPT_END()
 	};
 	const char * const top_usage[] = {
@@ -1390,16 +1225,11 @@ int cmd_top(int argc, const char **argv)
 	if (status < 0)
 		return status;
 
-	top.annotation_opts.min_pcnt = 5;
-	top.annotation_opts.context  = 4;
-
 	top.evlist = perf_evlist__new();
 	if (top.evlist == NULL)
 		return -ENOMEM;
 
-	status = perf_config(perf_top_config, &top);
-	if (status)
-		return status;
+	perf_config(perf_top_config, &top);
 
 	argc = parse_options(argc, argv, options, top_usage, 0);
 	if (argc)
@@ -1470,6 +1300,8 @@ int cmd_top(int argc, const char **argv)
 		goto out_delete_evlist;
 	}
 
+	symbol_conf.nr_events = top.evlist->nr_entries;
+
 	if (top.delay_secs < 1)
 		top.delay_secs = 1;
 
@@ -1492,8 +1324,6 @@ int cmd_top(int argc, const char **argv)
 	if (status < 0)
 		goto out_delete_evlist;
 
-	annotation_config__init();
-
 	symbol_conf.try_vmlinux_path = (symbol_conf.vmlinux_name == NULL);
 	status = symbol__init(NULL);
 	if (status < 0)
@@ -1503,8 +1333,12 @@ int cmd_top(int argc, const char **argv)
 
 	get_term_dimensions(&top.winsize);
 	if (top.print_entries == 0) {
+		struct sigaction act = {
+			.sa_sigaction = perf_top__sig_winch,
+			.sa_flags     = SA_SIGINFO,
+		};
 		perf_top__update_print_entries(&top);
-		signal(SIGWINCH, winch_sig);
+		sigaction(SIGWINCH, &act, NULL);
 	}
 
 	status = __cmd_top(&top);

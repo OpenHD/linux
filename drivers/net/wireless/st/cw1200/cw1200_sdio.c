@@ -10,7 +10,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/interrupt.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/mmc/host.h>
@@ -266,7 +265,7 @@ static int cw1200_sdio_pm(struct hwbus_priv *self, bool suspend)
 	return ret;
 }
 
-static const struct hwbus_ops cw1200_sdio_hwbus_ops = {
+static struct hwbus_ops cw1200_sdio_hwbus_ops = {
 	.hwbus_memcpy_fromio	= cw1200_sdio_memcpy_fromio,
 	.hwbus_memcpy_toio	= cw1200_sdio_memcpy_toio,
 	.lock			= cw1200_sdio_lock,

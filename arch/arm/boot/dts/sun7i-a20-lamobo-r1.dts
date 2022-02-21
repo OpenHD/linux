@@ -46,6 +46,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/sun4i-a10.h>
 
 / {
 	model = "Lamobo R1";
@@ -59,17 +60,6 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-	};
-
-	hdmi-connector {
-		compatible = "hdmi-connector";
-		type = "a";
-
-		port {
-			hdmi_con_in: endpoint {
-				remote-endpoint = <&hdmi_out_con>;
-			};
-		};
 	};
 
 	leds {
@@ -96,6 +86,10 @@
 	};
 };
 
+&ahci_pwr_pin_a {
+	allwinner,pins = "PB3";
+};
+
 &ahci {
 	target-supply = <&reg_ahci_5v>;
 	status = "okay";
@@ -107,10 +101,6 @@
 
 &cpu0 {
 	cpu-supply = <&reg_dcdc2>;
-};
-
-&de {
-	status = "okay";
 };
 
 &ehci0 {
@@ -188,16 +178,6 @@
 	};
 };
 
-&hdmi {
-	status = "okay";
-};
-
-&hdmi_out {
-	hdmi_out_con: endpoint {
-		remote-endpoint = <&hdmi_con_in>;
-	};
-};
-
 &i2c0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c0_pins_a>;
@@ -227,7 +207,8 @@
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin_lamobo_r1>;
 	vmmc-supply = <&reg_vcc3v3>;
 	bus-width = <4>;
-	cd-gpios = <&pio 7 10 GPIO_ACTIVE_LOW>; /* PH10 */
+	cd-gpios = <&pio 7 10 GPIO_ACTIVE_HIGH>; /* PH10 */
+	cd-inverted;
 	status = "okay";
 };
 
@@ -241,37 +222,35 @@
 
 &pio {
 	usb0_id_detect_pin: usb0_id_detect_pin@0 {
-		pins = "PH4";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PH4";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	mmc0_cd_pin_lamobo_r1: mmc0_cd_pin@0 {
-		pins = "PH10";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PH10";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	gmac_power_pin_lamobo_r1: gmac_power_pin@0 {
-		pins = "PH23";
-		function = "gpio_out";
+		allwinner,pins = "PH23";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 
 	led_pins_lamobo_r1: led_pins@0 {
-		pins = "PH24";
-		function = "gpio_out";
+		allwinner,pins = "PH24";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 };
 
 #include "axp209.dtsi"
-
-&ac_power_supply {
-	status = "okay";
-};
-
-&battery_power_supply {
-	status = "okay";
-};
 
 &reg_ahci_5v {
 	gpio = <&pio 1 3 GPIO_ACTIVE_HIGH>; /* PB3 */
@@ -345,6 +324,10 @@
 
 &usb_power_supply {
 	status = "okay";
+};
+
+&usb2_vbus_pin_a {
+	allwinner,pins = "PH12";
 };
 
 &usbphy {

@@ -68,9 +68,6 @@
 #define BRK64_ESR_MASK		0xFFFF
 #define BRK64_ESR_KPROBES	0x0004
 #define BRK64_OPCODE_KPROBES	(AARCH64_BREAK_MON | (BRK64_ESR_KPROBES << 5))
-/* uprobes BRK opcodes with ESR encoding  */
-#define BRK64_ESR_UPROBES	0x0005
-#define BRK64_OPCODE_UPROBES	(AARCH64_BREAK_MON | (BRK64_ESR_UPROBES << 5))
 
 /* AArch32 */
 #define DBG_ESR_EVT_BKPT	0x4
@@ -119,6 +116,8 @@ void disable_debug_monitors(enum dbg_active_el el);
 
 void user_rewind_single_step(struct task_struct *task);
 void user_fastforward_single_step(struct task_struct *task);
+void user_regs_reset_single_step(struct user_pt_regs *regs,
+				 struct task_struct *task);
 
 void kernel_enable_single_step(struct pt_regs *regs);
 void kernel_disable_single_step(void);

@@ -43,7 +43,6 @@
 #include "usnic_ib_qp_grp.h"
 #include "usnic_vnic.h"
 #include "usnic_ib_verbs.h"
-#include "usnic_ib_sysfs.h"
 #include "usnic_log.h"
 
 static ssize_t usnic_ib_show_board(struct device *device,
@@ -81,7 +80,7 @@ usnic_ib_show_config(struct device *device, struct device_attribute *attr,
 	left = PAGE_SIZE;
 
 	mutex_lock(&us_ibdev->usdev_lock);
-	if (kref_read(&us_ibdev->vf_cnt) > 0) {
+	if (atomic_read(&us_ibdev->vf_cnt.refcount) > 0) {
 		char *busname;
 
 		/*
@@ -100,7 +99,7 @@ usnic_ib_show_config(struct device *device, struct device_attribute *attr,
 			PCI_FUNC(us_ibdev->pdev->devfn),
 			netdev_name(us_ibdev->netdev),
 			us_ibdev->ufdev->mac,
-			kref_read(&us_ibdev->vf_cnt));
+			atomic_read(&us_ibdev->vf_cnt.refcount));
 		UPDATE_PTR_LEFT(n, ptr, left);
 
 		for (res_type = USNIC_VNIC_RES_TYPE_EOL;
@@ -148,7 +147,7 @@ usnic_ib_show_max_vf(struct device *device, struct device_attribute *attr,
 	us_ibdev = container_of(device, struct usnic_ib_dev, ib_dev.dev);
 
 	return scnprintf(buf, PAGE_SIZE, "%u\n",
-			kref_read(&us_ibdev->vf_cnt));
+			atomic_read(&us_ibdev->vf_cnt.refcount));
 }
 
 static ssize_t

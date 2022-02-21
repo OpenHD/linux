@@ -12,6 +12,10 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "mxl111sf-tuner.h"
@@ -451,12 +455,13 @@ static int mxl111sf_tuner_get_if_frequency(struct dvb_frontend *fe,
 	return 0;
 }
 
-static void mxl111sf_tuner_release(struct dvb_frontend *fe)
+static int mxl111sf_tuner_release(struct dvb_frontend *fe)
 {
 	struct mxl111sf_tuner_state *state = fe->tuner_priv;
 	mxl_dbg("()");
 	kfree(state);
 	fe->tuner_priv = NULL;
+	return 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -465,9 +470,9 @@ static const struct dvb_tuner_ops mxl111sf_tuner_tuner_ops = {
 	.info = {
 		.name = "MaxLinear MxL111SF",
 #if 0
-		.frequency_min_hz  = ,
-		.frequency_max_hz  = ,
-		.frequency_step_hz = ,
+		.frequency_min  = ,
+		.frequency_max  = ,
+		.frequency_step = ,
 #endif
 	},
 #if 0

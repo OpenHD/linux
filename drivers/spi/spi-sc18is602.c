@@ -21,7 +21,6 @@
 #include <linux/i2c.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
-#include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/platform_data/sc18is602.h>
 #include <linux/gpio/consumer.h>
@@ -248,13 +247,12 @@ static int sc18is602_probe(struct i2c_client *client,
 	struct sc18is602_platform_data *pdata = dev_get_platdata(dev);
 	struct sc18is602 *hw;
 	struct spi_master *master;
-	int error;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C |
 				     I2C_FUNC_SMBUS_WRITE_BYTE_DATA))
 		return -EINVAL;
 
-	master = spi_alloc_master(dev, sizeof(struct sc18is602));
+	master = devm_spi_alloc_master(dev, sizeof(struct sc18is602));
 	if (!master)
 		return -ENOMEM;
 
@@ -272,10 +270,7 @@ static int sc18is602_probe(struct i2c_client *client,
 	hw->dev = dev;
 	hw->ctrl = 0xff;
 
-	if (client->dev.of_node)
-		hw->id = (enum chips)of_device_get_match_data(&client->dev);
-	else
-		hw->id = id->driver_data;
+	hw->id = id->driver_data;
 
 	switch (hw->id) {
 	case sc18is602:
@@ -308,15 +303,7 @@ static int sc18is602_probe(struct i2c_client *client,
 	master->min_speed_hz = hw->freq / 128;
 	master->max_speed_hz = hw->freq / 4;
 
-	error = devm_spi_register_master(dev, master);
-	if (error)
-		goto error_reg;
-
-	return 0;
-
-error_reg:
-	spi_master_put(master);
-	return error;
+	return devm_spi_register_master(dev, master);
 }
 
 static const struct i2c_device_id sc18is602_id[] = {
@@ -327,27 +314,9 @@ static const struct i2c_device_id sc18is602_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, sc18is602_id);
 
-static const struct of_device_id sc18is602_of_match[] = {
-	{
-		.compatible = "nxp,sc18is602",
-		.data = (void *)sc18is602
-	},
-	{
-		.compatible = "nxp,sc18is602b",
-		.data = (void *)sc18is602b
-	},
-	{
-		.compatible = "nxp,sc18is603",
-		.data = (void *)sc18is603
-	},
-	{ },
-};
-MODULE_DEVICE_TABLE(of, sc18is602_of_match);
-
 static struct i2c_driver sc18is602_driver = {
 	.driver = {
 		.name = "sc18is602",
-		.of_match_table = of_match_ptr(sc18is602_of_match),
 	},
 	.probe = sc18is602_probe,
 	.id_table = sc18is602_id,

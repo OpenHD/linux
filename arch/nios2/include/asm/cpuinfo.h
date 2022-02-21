@@ -29,8 +29,6 @@ struct cpuinfo {
 	bool has_div;
 	bool has_mul;
 	bool has_mulx;
-	bool has_bmx;
-	bool has_cdx;
 
 	/* CPU caches */
 	u32 icache_line_size;

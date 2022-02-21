@@ -23,7 +23,6 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sched.h>
 #include <linux/sizes.h>
-#include <linux/dma-mapping.h>
 
 #include "mtk_vpu.h"
 
@@ -135,8 +134,6 @@ struct vpu_wdt {
  *
  * @signaled:		the signal of vpu initialization completed
  * @fw_ver:		VPU firmware version
- * @dec_capability:	decoder capability which is not used for now and
- *			the value is reserved for future use
  * @enc_capability:	encoder capability which is not used for now and
  *			the value is reserved for future use
  * @wq:			wait queue for VPU initialization status
@@ -144,7 +141,6 @@ struct vpu_wdt {
 struct vpu_run {
 	u32 signaled;
 	char fw_ver[VPU_FW_VER_LEN];
-	unsigned int	dec_capability;
 	unsigned int	enc_capability;
 	wait_queue_head_t wq;
 };
@@ -181,7 +177,6 @@ struct share_obj {
  * @extmem:		VPU extended memory information
  * @reg:		VPU TCM and configuration registers
  * @run:		VPU initialization status
- * @wdt:		VPU watchdog workqueue
  * @ipi_desc:		VPU IPI descriptor
  * @recv_buf:		VPU DTCM share buffer for receiving. The
  *			receive buffer is only accessed in interrupt context.
@@ -195,7 +190,7 @@ struct share_obj {
  *			suppose a client is using VPU to decode VP8.
  *			If the other client wants to encode VP8,
  *			it has to wait until VP8 decode completes.
- * @wdt_refcnt:		WDT reference count to make sure the watchdog can be
+ * @wdt_refcnt		WDT reference count to make sure the watchdog can be
  *			disabled if no other client is using VPU service
  * @ack_wq:		The wait queue for each codec and mdp. When sleeping
  *			processes wake up, they will check the condition
@@ -420,14 +415,6 @@ int vpu_wdt_reg_handler(struct platform_device *pdev,
 }
 EXPORT_SYMBOL_GPL(vpu_wdt_reg_handler);
 
-unsigned int vpu_get_vdec_hw_capa(struct platform_device *pdev)
-{
-	struct mtk_vpu *vpu = platform_get_drvdata(pdev);
-
-	return vpu->run.dec_capability;
-}
-EXPORT_SYMBOL_GPL(vpu_get_vdec_hw_capa);
-
 unsigned int vpu_get_venc_hw_capa(struct platform_device *pdev)
 {
 	struct mtk_vpu *vpu = platform_get_drvdata(pdev);
@@ -536,9 +523,9 @@ static int load_requested_vpu(struct mtk_vpu *vpu,
 
 int vpu_load_firmware(struct platform_device *pdev)
 {
-	struct mtk_vpu *vpu;
+	struct mtk_vpu *vpu = platform_get_drvdata(pdev);
 	struct device *dev = &pdev->dev;
-	struct vpu_run *run;
+	struct vpu_run *run = &vpu->run;
 	const struct firmware *vpu_fw = NULL;
 	int ret;
 
@@ -546,9 +533,6 @@ int vpu_load_firmware(struct platform_device *pdev)
 		dev_err(dev, "VPU platform device is invalid\n");
 		return -EINVAL;
 	}
-
-	vpu = platform_get_drvdata(pdev);
-	run = &vpu->run;
 
 	mutex_lock(&vpu->vpu_mutex);
 	if (vpu->fw_loaded) {
@@ -591,7 +575,7 @@ int vpu_load_firmware(struct platform_device *pdev)
 					       );
 	if (ret == 0) {
 		ret = -ETIME;
-		dev_err(dev, "wait vpu initialization timeout!\n");
+		dev_err(dev, "wait vpu initialization timout!\n");
 		goto OUT_LOAD_FW;
 	} else if (-ERESTARTSYS == ret) {
 		dev_err(dev, "wait vpu interrupted by a signal!\n");
@@ -616,7 +600,6 @@ static void vpu_init_ipi_handler(void *data, unsigned int len, void *priv)
 
 	vpu->run.signaled = run->signaled;
 	strncpy(vpu->run.fw_ver, run->fw_ver, VPU_FW_VER_LEN);
-	vpu->run.dec_capability = run->dec_capability;
 	vpu->run.enc_capability = run->enc_capability;
 	wake_up_interruptible(&vpu->run.wq);
 }
@@ -691,7 +674,7 @@ static int vpu_alloc_ext_mem(struct mtk_vpu *vpu, u32 fw_type)
 					       GFP_KERNEL);
 	if (!vpu->extmem[fw_type].va) {
 		dev_err(dev, "Failed to allocate the extended program memory\n");
-		return -ENOMEM;
+		return PTR_ERR(vpu->extmem[fw_type].va);
 	}
 
 	/* Disable extend0. Enable extend1 */
@@ -960,4 +943,4 @@ static struct platform_driver mtk_vpu_driver = {
 module_platform_driver(mtk_vpu_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Mediatek Video Processor Unit driver");
+MODULE_DESCRIPTION("Mediatek Video Prosessor Unit driver");

@@ -54,7 +54,7 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_NONE,
 		.type		= MFC_FMT_RAW,
 		.num_planes	= 2,
-		.versions	= MFC_V6PLUS_BITS,
+		.versions	= MFC_V6_BIT | MFC_V7_BIT | MFC_V8_BIT,
 	},
 	{
 		.name		= "4:2:0 2 Planes Y/CrCb",
@@ -62,7 +62,7 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_NONE,
 		.type		= MFC_FMT_RAW,
 		.num_planes	= 2,
-		.versions	= MFC_V6PLUS_BITS,
+		.versions	= MFC_V6_BIT | MFC_V7_BIT | MFC_V8_BIT,
 	},
 	{
 		.name		= "H264 Encoded Stream",
@@ -70,7 +70,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_H264_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "H264/MVC Encoded Stream",
@@ -78,7 +79,7 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_H264_MVC_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V6PLUS_BITS,
+		.versions	= MFC_V6_BIT | MFC_V7_BIT | MFC_V8_BIT,
 	},
 	{
 		.name		= "H263 Encoded Stream",
@@ -86,7 +87,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_H263_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "MPEG1 Encoded Stream",
@@ -94,7 +96,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_MPEG2_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "MPEG2 Encoded Stream",
@@ -102,7 +105,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_MPEG2_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "MPEG4 Encoded Stream",
@@ -110,7 +114,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_MPEG4_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "XviD Encoded Stream",
@@ -118,7 +123,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_MPEG4_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "VC1 Encoded Stream",
@@ -126,7 +132,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_VC1_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "VC1 RCV Encoded Stream",
@@ -134,7 +141,8 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_VC1RCV_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V5PLUS_BITS,
+		.versions	= MFC_V5_BIT | MFC_V6_BIT | MFC_V7_BIT |
+								MFC_V8_BIT,
 	},
 	{
 		.name		= "VP8 Encoded Stream",
@@ -142,21 +150,7 @@ static struct s5p_mfc_fmt formats[] = {
 		.codec_mode	= S5P_MFC_CODEC_VP8_DEC,
 		.type		= MFC_FMT_DEC,
 		.num_planes	= 1,
-		.versions	= MFC_V6PLUS_BITS,
-	},
-	{
-		.fourcc		= V4L2_PIX_FMT_HEVC,
-		.codec_mode	= S5P_FIMV_CODEC_HEVC_DEC,
-		.type		= MFC_FMT_DEC,
-		.num_planes	= 1,
-		.versions	= MFC_V10_BIT,
-	},
-	{
-		.fourcc		= V4L2_PIX_FMT_VP9,
-		.codec_mode	= S5P_FIMV_CODEC_VP9_DEC,
-		.type		= MFC_FMT_DEC,
-		.num_planes	= 1,
-		.versions	= MFC_V10_BIT,
+		.versions	= MFC_V6_BIT | MFC_V7_BIT | MFC_V8_BIT,
 	},
 };
 
@@ -271,8 +265,8 @@ static int vidioc_querycap(struct file *file, void *priv,
 {
 	struct s5p_mfc_dev *dev = video_drvdata(file);
 
-	strlcpy(cap->driver, S5P_MFC_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, dev->vfd_dec->name, sizeof(cap->card));
+	strncpy(cap->driver, S5P_MFC_NAME, sizeof(cap->driver) - 1);
+	strncpy(cap->card, dev->vfd_dec->name, sizeof(cap->card) - 1);
 	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
 		 dev_name(&dev->plat_dev->dev));
 	/*
@@ -648,7 +642,7 @@ static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 	int ret;
 
 	if (ctx->state == MFCINST_ERROR) {
-		mfc_err_limited("Call on DQBUF after unrecoverable error\n");
+		mfc_err("Call on DQBUF after unrecoverable error\n");
 		return -EIO;
 	}
 
@@ -799,17 +793,18 @@ static int vidioc_g_crop(struct file *file, void *priv,
 		cr->c.top = top;
 		cr->c.width = ctx->img_width - left - right;
 		cr->c.height = ctx->img_height - top - bottom;
-		mfc_debug(2, "Cropping info [h264]: l=%d t=%d w=%d h=%d (r=%d b=%d fw=%d fh=%d\n",
-			  left, top, cr->c.width, cr->c.height, right, bottom,
-			  ctx->buf_width, ctx->buf_height);
+		mfc_debug(2, "Cropping info [h264]: l=%d t=%d "
+			"w=%d h=%d (r=%d b=%d fw=%d fh=%d\n", left, top,
+			cr->c.width, cr->c.height, right, bottom,
+			ctx->buf_width, ctx->buf_height);
 	} else {
 		cr->c.left = 0;
 		cr->c.top = 0;
 		cr->c.width = ctx->img_width;
 		cr->c.height = ctx->img_height;
-		mfc_debug(2, "Cropping info: w=%d h=%d fw=%d fh=%d\n",
-			  cr->c.width,	cr->c.height, ctx->buf_width,
-			  ctx->buf_height);
+		mfc_debug(2, "Cropping info: w=%d h=%d fw=%d "
+			"fh=%d\n", cr->c.width,	cr->c.height, ctx->buf_width,
+							ctx->buf_height);
 	}
 	return 0;
 }
@@ -937,14 +932,14 @@ static int s5p_mfc_queue_setup(struct vb2_queue *vq,
 		psize[1] = ctx->chroma_size;
 
 		if (IS_MFCV6_PLUS(dev))
-			alloc_devs[0] = ctx->dev->mem_dev[BANK_L_CTX];
+			alloc_devs[0] = ctx->dev->mem_dev_l;
 		else
-			alloc_devs[0] = ctx->dev->mem_dev[BANK_R_CTX];
-		alloc_devs[1] = ctx->dev->mem_dev[BANK_L_CTX];
+			alloc_devs[0] = ctx->dev->mem_dev_r;
+		alloc_devs[1] = ctx->dev->mem_dev_l;
 	} else if (vq->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
 		   ctx->state == MFCINST_INIT) {
 		psize[0] = ctx->dec_src_buf_size;
-		alloc_devs[0] = ctx->dev->mem_dev[BANK_L_CTX];
+		alloc_devs[0] = ctx->dev->mem_dev_l;
 	} else {
 		mfc_err("This video node is dedicated to decoding. Decoding not initialized\n");
 		return -EINVAL;
@@ -1183,7 +1178,7 @@ void s5p_mfc_dec_init(struct s5p_mfc_ctx *ctx)
 	struct v4l2_format f;
 	f.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_H264;
 	ctx->src_fmt = find_format(&f, MFC_FMT_DEC);
-	if (IS_MFCV8_PLUS(ctx->dev))
+	if (IS_MFCV8(ctx->dev))
 		f.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12M;
 	else if (IS_MFCV6_PLUS(ctx->dev))
 		f.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12MT_16X16;

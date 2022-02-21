@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # This is a simple wrapper Makefile that calls the main Makefile.perf
 # with a -j option to do parallel builds
@@ -35,7 +34,7 @@ endif
 # Only pass canonical directory names as the output directory:
 #
 ifneq ($(O),)
-  FULL_O := $(shell readlink -f $(O) || echo $(O))
+  FULL_O := $(shell cd $(PWD); readlink -f $(O) || echo $(O))
 endif
 
 #

@@ -57,10 +57,8 @@ static void netdev_port_receive(struct sk_buff *skb)
 	if (unlikely(!skb))
 		return;
 
-	if (skb->dev->type == ARPHRD_ETHER) {
-		skb_push(skb, ETH_HLEN);
-		skb_postpush_rcsum(skb, skb->data, ETH_HLEN);
-	}
+	skb_push(skb, ETH_HLEN);
+	skb_postpush_rcsum(skb, skb->data, ETH_HLEN);
 	ovs_vport_receive(vport, skb, skb_tunnel_info(skb));
 	return;
 error:
@@ -99,8 +97,7 @@ struct vport *ovs_netdev_link(struct vport *vport, const char *name)
 	}
 
 	if (vport->dev->flags & IFF_LOOPBACK ||
-	    (vport->dev->type != ARPHRD_ETHER &&
-	     vport->dev->type != ARPHRD_NONE) ||
+	    vport->dev->type != ARPHRD_ETHER ||
 	    ovs_is_internal_dev(vport->dev)) {
 		err = -EINVAL;
 		goto error_put;
@@ -108,8 +105,7 @@ struct vport *ovs_netdev_link(struct vport *vport, const char *name)
 
 	rtnl_lock();
 	err = netdev_master_upper_dev_link(vport->dev,
-					   get_dpdev(vport->dp),
-					   NULL, NULL, NULL);
+					   get_dpdev(vport->dp), NULL, NULL);
 	if (err)
 		goto error_unlock;
 
@@ -166,6 +162,7 @@ void ovs_netdev_detach_dev(struct vport *vport)
 				netdev_master_upper_dev_get(vport->dev));
 	dev_set_promiscuity(vport->dev, -1);
 }
+EXPORT_SYMBOL_GPL(ovs_netdev_detach_dev);
 
 static void netdev_destroy(struct vport *vport)
 {

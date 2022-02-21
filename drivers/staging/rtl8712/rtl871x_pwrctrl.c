@@ -164,10 +164,9 @@ static void rpwm_workitem_callback(struct work_struct *work)
 	}
 }
 
-static void rpwm_check_handler (struct timer_list *t)
+static void rpwm_check_handler (unsigned long data)
 {
-	struct _adapter *adapter =
-		from_timer(adapter, t, pwrctrlpriv.rpwm_check_timer);
+	struct _adapter *adapter = (struct _adapter *)data;
 
 	_rpwm_check_handler(adapter);
 }
@@ -186,19 +185,24 @@ void r8712_init_pwrctrl_priv(struct _adapter *padapter)
 	r8712_write8(padapter, 0x1025FE58, 0);
 	INIT_WORK(&pwrctrlpriv->SetPSModeWorkItem, SetPSModeWorkItemCallback);
 	INIT_WORK(&pwrctrlpriv->rpwm_workitem, rpwm_workitem_callback);
-	timer_setup(&pwrctrlpriv->rpwm_check_timer, rpwm_check_handler, 0);
+	setup_timer(&pwrctrlpriv->rpwm_check_timer, rpwm_check_handler,
+		    (unsigned long)padapter);
 }
 
 /*
- * Caller: r8712_cmd_thread
- * Check if the fw_pwrstate is okay for issuing cmd.
- * If not (cpwm should be is less than P2 state), then the sub-routine
- * will raise the cpwm to be greater than or equal to P2.
- * Calling Context: Passive
- * Return Value:
- * _SUCCESS: r8712_cmd_thread can issue cmds to firmware afterwards.
- * _FAIL: r8712_cmd_thread can not do anything.
- */
+Caller: r8712_cmd_thread
+
+Check if the fw_pwrstate is okay for issuing cmd.
+If not (cpwm should be is less than P2 state), then the sub-routine
+will raise the cpwm to be greater than or equal to P2.
+
+Calling Context: Passive
+
+Return Value:
+
+_SUCCESS: r8712_cmd_thread can issue cmds to firmware afterwards.
+_FAIL: r8712_cmd_thread can not do anything.
+*/
 sint r8712_register_cmd_alive(struct _adapter *padapter)
 {
 	uint res = _SUCCESS;
@@ -215,11 +219,13 @@ sint r8712_register_cmd_alive(struct _adapter *padapter)
 }
 
 /*
- * Caller: ISR
- * If ISR's txdone,
- * No more pkts for TX,
- * Then driver shall call this fun. to power down firmware again.
- */
+Caller: ISR
+
+If ISR's txdone,
+No more pkts for TX,
+Then driver shall call this fun. to power down firmware again.
+*/
+
 void r8712_unregister_cmd_alive(struct _adapter *padapter)
 {
 	struct pwrctrl_priv *pwrctrl = &padapter->pwrctrlpriv;

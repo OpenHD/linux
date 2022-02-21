@@ -188,8 +188,7 @@ static int tbf_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	int ret;
 
 	if (qdisc_pkt_len(skb) > q->max_size) {
-		if (skb_is_gso(skb) &&
-		    skb_gso_validate_mac_len(skb, q->max_size))
+		if (skb_is_gso(skb) && skb_gso_mac_seglen(skb) <= q->max_size)
 			return tbf_segment(skb, sch, to_free);
 		return qdisc_drop(skb, sch, to_free);
 	}
@@ -293,8 +292,7 @@ static const struct nla_policy tbf_policy[TCA_TBF_MAX + 1] = {
 	[TCA_TBF_PBURST] = { .type = NLA_U32 },
 };
 
-static int tbf_change(struct Qdisc *sch, struct nlattr *opt,
-		      struct netlink_ext_ack *extack)
+static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	int err;
 	struct tbf_sched_data *q = qdisc_priv(sch);
@@ -307,7 +305,7 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt,
 	s64 buffer, mtu;
 	u64 rate64 = 0, prate64 = 0;
 
-	err = nla_parse_nested(tb, TCA_TBF_MAX, opt, tbf_policy, NULL);
+	err = nla_parse_nested(tb, TCA_TBF_MAX, opt, tbf_policy);
 	if (err < 0)
 		return err;
 
@@ -318,13 +316,11 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt,
 	qopt = nla_data(tb[TCA_TBF_PARMS]);
 	if (qopt->rate.linklayer == TC_LINKLAYER_UNAWARE)
 		qdisc_put_rtab(qdisc_get_rtab(&qopt->rate,
-					      tb[TCA_TBF_RTAB],
-					      NULL));
+					      tb[TCA_TBF_RTAB]));
 
 	if (qopt->peakrate.linklayer == TC_LINKLAYER_UNAWARE)
 			qdisc_put_rtab(qdisc_get_rtab(&qopt->peakrate,
-						      tb[TCA_TBF_PTAB],
-						      NULL));
+						      tb[TCA_TBF_PTAB]));
 
 	buffer = min_t(u64, PSCHED_TICKS2NS(qopt->buffer), ~0U);
 	mtu = min_t(u64, PSCHED_TICKS2NS(qopt->mtu), ~0U);
@@ -377,15 +373,11 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt,
 		if (err)
 			goto done;
 	} else if (qopt->limit > 0) {
-		child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit,
-					 extack);
+		child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit);
 		if (IS_ERR(child)) {
 			err = PTR_ERR(child);
 			goto done;
 		}
-
-		/* child is fifo, no need to check for noop_qdisc */
-		qdisc_hash_add(child, true);
 	}
 
 	sch_tree_lock(sch);
@@ -417,20 +409,19 @@ done:
 	return err;
 }
 
-static int tbf_init(struct Qdisc *sch, struct nlattr *opt,
-		    struct netlink_ext_ack *extack)
+static int tbf_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
 	qdisc_watchdog_init(&q->watchdog, sch);
 	q->qdisc = &noop_qdisc;
 
-	if (!opt)
+	if (opt == NULL)
 		return -EINVAL;
 
 	q->t_c = ktime_get_ns();
 
-	return tbf_change(sch, opt, extack);
+	return tbf_change(sch, opt);
 }
 
 static void tbf_destroy(struct Qdisc *sch)
@@ -491,7 +482,7 @@ static int tbf_dump_class(struct Qdisc *sch, unsigned long cl,
 }
 
 static int tbf_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
-		     struct Qdisc **old, struct netlink_ext_ack *extack)
+		     struct Qdisc **old)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
@@ -508,9 +499,13 @@ static struct Qdisc *tbf_leaf(struct Qdisc *sch, unsigned long arg)
 	return q->qdisc;
 }
 
-static unsigned long tbf_find(struct Qdisc *sch, u32 classid)
+static unsigned long tbf_get(struct Qdisc *sch, u32 classid)
 {
 	return 1;
+}
+
+static void tbf_put(struct Qdisc *sch, unsigned long arg)
+{
 }
 
 static void tbf_walk(struct Qdisc *sch, struct qdisc_walker *walker)
@@ -528,7 +523,8 @@ static void tbf_walk(struct Qdisc *sch, struct qdisc_walker *walker)
 static const struct Qdisc_class_ops tbf_class_ops = {
 	.graft		=	tbf_graft,
 	.leaf		=	tbf_leaf,
-	.find		=	tbf_find,
+	.get		=	tbf_get,
+	.put		=	tbf_put,
 	.walk		=	tbf_walk,
 	.dump		=	tbf_dump_class,
 };

@@ -80,7 +80,7 @@ static int s3c_camif_hw_init(struct camif_dev *camif, struct camif_vp *vp)
 	camif_hw_set_test_pattern(camif, camif->test_pattern);
 	if (variant->has_img_effect)
 		camif_hw_set_effect(camif, camif->colorfx,
-				camif->colorfx_cr, camif->colorfx_cb);
+				camif->colorfx_cb, camif->colorfx_cr);
 	if (variant->ip_revision == S3C6410_CAMIF_IP_REV)
 		camif_hw_set_input_path(vp);
 	camif_cfg_video_path(vp);
@@ -366,7 +366,7 @@ irqreturn_t s3c_camif_irq_handler(int irq, void *priv)
 		camif_hw_set_test_pattern(camif, camif->test_pattern);
 		if (camif->variant->has_img_effect)
 			camif_hw_set_effect(camif, camif->colorfx,
-				    camif->colorfx_cr, camif->colorfx_cb);
+				    camif->colorfx_cb, camif->colorfx_cr);
 		vp->state &= ~ST_VP_CONFIG;
 	}
 unlock:
@@ -592,16 +592,16 @@ static int s3c_camif_close(struct file *file)
 	return ret;
 }
 
-static __poll_t s3c_camif_poll(struct file *file,
+static unsigned int s3c_camif_poll(struct file *file,
 				   struct poll_table_struct *wait)
 {
 	struct camif_vp *vp = video_drvdata(file);
 	struct camif_dev *camif = vp->camif;
-	__poll_t ret;
+	int ret;
 
 	mutex_lock(&camif->lock);
 	if (vp->owner && vp->owner != file->private_data)
-		ret = EPOLLERR;
+		ret = -EBUSY;
 	else
 		ret = vb2_poll(&vp->vb_queue, file, wait);
 
@@ -858,13 +858,13 @@ static int s3c_camif_streamon(struct file *file, void *priv,
 	if (s3c_vp_active(vp))
 		return 0;
 
-	ret = media_pipeline_start(sensor, camif->m_pipeline);
+	ret = media_entity_pipeline_start(sensor, camif->m_pipeline);
 	if (ret < 0)
 		return ret;
 
 	ret = camif_pipeline_validate(camif);
 	if (ret < 0) {
-		media_pipeline_stop(sensor);
+		media_entity_pipeline_stop(sensor);
 		return ret;
 	}
 
@@ -888,7 +888,7 @@ static int s3c_camif_streamoff(struct file *file, void *priv,
 
 	ret = vb2_streamoff(&vp->vb_queue, type);
 	if (ret == 0)
-		media_pipeline_stop(&camif->sensor.sd->entity);
+		media_entity_pipeline_stop(&camif->sensor.sd->entity);
 	return ret;
 }
 
@@ -1491,7 +1491,7 @@ static const struct v4l2_subdev_pad_ops s3c_camif_subdev_pad_ops = {
 	.set_fmt = s3c_camif_subdev_set_fmt,
 };
 
-static const struct v4l2_subdev_ops s3c_camif_subdev_ops = {
+static struct v4l2_subdev_ops s3c_camif_subdev_ops = {
 	.pad = &s3c_camif_subdev_pad_ops,
 };
 

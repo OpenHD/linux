@@ -14,7 +14,7 @@
 #include <linux/init.h>
 #include <linux/debugfs.h>
 #include <asm/mce.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "mce-internal.h"
 
@@ -59,7 +59,6 @@ static struct severity {
 #define  MCGMASK(x, y)	.mcgmask = x, .mcgres = y
 #define  MASK(x, y)	.mask = x, .result = y
 #define MCI_UC_S (MCI_STATUS_UC|MCI_STATUS_S)
-#define MCI_UC_AR (MCI_STATUS_UC|MCI_STATUS_AR)
 #define MCI_UC_SAR (MCI_STATUS_UC|MCI_STATUS_S|MCI_STATUS_AR)
 #define	MCI_ADDR (MCI_STATUS_ADDRV|MCI_STATUS_MISCV)
 
@@ -100,22 +99,6 @@ static struct severity {
 	MCESEV(
 		KEEP, "Corrected error",
 		NOSER, BITCLR(MCI_STATUS_UC)
-		),
-
-	/*
-	 * known AO MCACODs reported via MCE or CMC:
-	 *
-	 * SRAO could be signaled either via a machine check exception or
-	 * CMCI with the corresponding bit S 1 or 0. So we don't need to
-	 * check bit S for SRAO.
-	 */
-	MCESEV(
-		AO, "Action optional: memory scrubbing error",
-		SER, MASK(MCI_STATUS_OVER|MCI_UC_AR|MCACOD_SCRUBMSK, MCI_STATUS_UC|MCACOD_SCRUB)
-		),
-	MCESEV(
-		AO, "Action optional: last level cache writeback error",
-		SER, MASK(MCI_STATUS_OVER|MCI_UC_AR|MCACOD, MCI_STATUS_UC|MCACOD_L3WB)
 		),
 
 	/* ignore OVER for UCNA */
@@ -176,6 +159,15 @@ static struct severity {
 		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR, MCI_UC_SAR)
 		),
 
+	/* known AO MCACODs: */
+	MCESEV(
+		AO, "Action optional: memory scrubbing error",
+		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR|MCACOD_SCRUBMSK, MCI_UC_S|MCACOD_SCRUB)
+		),
+	MCESEV(
+		AO, "Action optional: last level cache writeback error",
+		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR|MCACOD, MCI_UC_S|MCACOD_L3WB)
+		),
 	MCESEV(
 		SOME, "Action optional: unknown MCACOD",
 		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR, MCI_UC_S)
@@ -222,7 +214,7 @@ static int error_context(struct mce *m)
 	return IN_KERNEL;
 }
 
-static int mce_severity_amd_smca(struct mce *m, enum context err_ctx)
+static int mce_severity_amd_smca(struct mce *m, int err_ctx)
 {
 	u32 addr = MSR_AMD64_SMCA_MCx_CONFIG(m->bank);
 	u32 low, high;
@@ -328,7 +320,7 @@ static int mce_severity_intel(struct mce *m, int tolerant, char **msg, bool is_e
 			*msg = s->msg;
 		s->covered = 1;
 		if (s->sev >= MCE_UC_SEVERITY && ctx == IN_KERNEL) {
-			if (tolerant < 1)
+			if (panic_on_oops || tolerant < 1)
 				return MCE_PANIC_SEVERITY;
 		}
 		return s->sev;

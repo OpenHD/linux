@@ -50,15 +50,8 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 		led_dat->platform_gpio_blink_set(led_dat->gpiod, level,
 						 NULL, NULL);
 		led_dat->blinking = 0;
-	} else if (led_dat->cdev.flags & SET_GPIO_INPUT) {
-		gpiod_direction_input(led_dat->gpiod);
-		led_dat->cdev.flags &= ~SET_GPIO_INPUT;
-	} else if (led_dat->cdev.flags & SET_GPIO_OUTPUT) {
-		gpiod_direction_output(led_dat->gpiod, level);
-		led_dat->cdev.flags &= ~SET_GPIO_OUTPUT;
 	} else {
-		if (led_dat->can_sleep ||
-			(led_dat->cdev.flags & (SET_GPIO_INPUT | SET_GPIO_OUTPUT) ))
+		if (led_dat->can_sleep)
 			gpiod_set_value_cansleep(led_dat->gpiod, level);
 		else
 			gpiod_set_value(led_dat->gpiod, level);
@@ -70,13 +63,6 @@ static int gpio_led_set_blocking(struct led_classdev *led_cdev,
 {
 	gpio_led_set(led_cdev, value);
 	return 0;
-}
-
-static enum led_brightness gpio_led_get(struct led_classdev *led_cdev)
-{
-	struct gpio_led_data *led_dat =
-		container_of(led_cdev, struct gpio_led_data, cdev);
-	return gpiod_get_value_cansleep(led_dat->gpiod) ? LED_FULL : LED_OFF;
 }
 
 static int gpio_blink_set(struct led_classdev *led_cdev,
@@ -91,7 +77,7 @@ static int gpio_blink_set(struct led_classdev *led_cdev,
 
 static int create_gpio_led(const struct gpio_led *template,
 	struct gpio_led_data *led_dat, struct device *parent,
-	struct device_node *np, gpio_blink_set_t blink_set)
+	gpio_blink_set_t blink_set)
 {
 	int ret, state;
 
@@ -136,7 +122,6 @@ static int create_gpio_led(const struct gpio_led *template,
 		led_dat->platform_gpio_blink_set = blink_set;
 		led_dat->cdev.blink_set = gpio_blink_set;
 	}
-	led_dat->cdev.brightness_get = gpio_led_get;
 	if (template->default_state == LEDS_GPIO_DEFSTATE_KEEP) {
 		state = gpiod_get_value_cansleep(led_dat->gpiod);
 		if (state < 0)
@@ -149,14 +134,12 @@ static int create_gpio_led(const struct gpio_led *template,
 		led_dat->cdev.flags |= LED_CORE_SUSPENDRESUME;
 	if (template->panic_indicator)
 		led_dat->cdev.flags |= LED_PANIC_INDICATOR;
-	if (template->retain_state_shutdown)
-		led_dat->cdev.flags |= LED_RETAIN_AT_SHUTDOWN;
 
 	ret = gpiod_direction_output(led_dat->gpiod, state);
 	if (ret < 0)
 		return ret;
 
-	return devm_of_led_classdev_register(parent, np, &led_dat->cdev);
+	return devm_led_classdev_register(parent, &led_dat->cdev);
 }
 
 struct gpio_leds_priv {
@@ -191,20 +174,18 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 		const char *state = NULL;
 		struct device_node *np = to_of_node(child);
 
+		led.gpiod = devm_get_gpiod_from_child(dev, NULL, child);
+		if (IS_ERR(led.gpiod)) {
+			fwnode_handle_put(child);
+			return ERR_CAST(led.gpiod);
+		}
+
 		ret = fwnode_property_read_string(child, "label", &led.name);
 		if (ret && IS_ENABLED(CONFIG_OF) && np)
 			led.name = np->name;
 		if (!led.name) {
 			fwnode_handle_put(child);
 			return ERR_PTR(-EINVAL);
-		}
-
-		led.gpiod = devm_fwnode_get_gpiod_from_child(dev, NULL, child,
-							     GPIOD_ASIS,
-							     led.name);
-		if (IS_ERR(led.gpiod)) {
-			fwnode_handle_put(child);
-			return ERR_CAST(led.gpiod);
 		}
 
 		fwnode_property_read_string(child, "linux,default-trigger",
@@ -222,12 +203,10 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 
 		if (fwnode_property_present(child, "retain-state-suspended"))
 			led.retain_state_suspended = 1;
-		if (fwnode_property_present(child, "retain-state-shutdown"))
-			led.retain_state_shutdown = 1;
 		if (fwnode_property_present(child, "panic-indicator"))
 			led.panic_indicator = 1;
 
-		ret = create_gpio_led(&led, led_dat, dev, np, NULL);
+		ret = create_gpio_led(&led, led_dat, dev, NULL);
 		if (ret < 0) {
 			fwnode_handle_put(child);
 			return ERR_PTR(ret);
@@ -261,9 +240,9 @@ static int gpio_led_probe(struct platform_device *pdev)
 
 		priv->num_leds = pdata->num_leds;
 		for (i = 0; i < priv->num_leds; i++) {
-			ret = create_gpio_led(&pdata->leds[i], &priv->leds[i],
-					      &pdev->dev, NULL,
-					      pdata->gpio_blink_set);
+			ret = create_gpio_led(&pdata->leds[i],
+					      &priv->leds[i],
+					      &pdev->dev, pdata->gpio_blink_set);
 			if (ret < 0)
 				return ret;
 		}
@@ -286,8 +265,7 @@ static void gpio_led_shutdown(struct platform_device *pdev)
 	for (i = 0; i < priv->num_leds; i++) {
 		struct gpio_led_data *led = &priv->leds[i];
 
-		if (!(led->cdev.flags & LED_RETAIN_AT_SHUTDOWN))
-			gpio_led_set(&led->cdev, LED_OFF);
+		gpio_led_set(&led->cdev, LED_OFF);
 	}
 }
 

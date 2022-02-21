@@ -33,6 +33,8 @@
  */
 #define	ATH_KEYMAX	        128     /* max key cache size we handle */
 
+static const u8 ath_bcast_mac[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
 struct ath_ani {
 	bool caldone;
 	unsigned int longcal_timer;
@@ -149,6 +151,7 @@ struct ath_common {
 	int debug_mask;
 	enum ath_device_state state;
 	unsigned long op_flags;
+	u32 chan_bw;
 
 	struct ath_ani ani;
 
@@ -324,11 +327,5 @@ static inline const char *ath_opmode_to_string(enum nl80211_iftype opmode)
 	return "UNKNOWN";
 }
 #endif
-
-extern const char *ath_bus_type_strings[];
-static inline const char *ath_bus_type_to_string(enum ath_bus_type bustype)
-{
-	return ath_bus_type_strings[bustype];
-}
 
 #endif /* ATH_H */

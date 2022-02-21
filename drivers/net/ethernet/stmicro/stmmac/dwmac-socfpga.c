@@ -270,10 +270,7 @@ static int socfpga_dwmac_set_phy_mode(struct socfpga_dwmac *dwmac)
 	ctrl &= ~(SYSMGR_EMACGRP_CTRL_PHYSEL_MASK << reg_shift);
 	ctrl |= val << reg_shift;
 
-	if (dwmac->f2h_ptp_ref_clk ||
-	    phymode == PHY_INTERFACE_MODE_MII ||
-	    phymode == PHY_INTERFACE_MODE_GMII ||
-	    phymode == PHY_INTERFACE_MODE_SGMII) {
+	if (dwmac->f2h_ptp_ref_clk) {
 		ctrl |= SYSMGR_EMACGRP_CTRL_PTP_REF_CLK_MASK << (reg_shift / 2);
 		regmap_read(sys_mgr_base_addr, SYSMGR_FPGAGRP_MODULE_REG,
 			    &module);
@@ -354,7 +351,7 @@ static int socfpga_dwmac_probe(struct platform_device *pdev)
 	 * mode. Create a copy of the core reset handle so it can be used by
 	 * the driver later.
 	 */
-	dwmac->stmmac_rst = stpriv->plat->stmmac_rst;
+	dwmac->stmmac_rst = stpriv->stmmac_rst;
 
 	ret = socfpga_dwmac_set_phy_mode(dwmac);
 	if (ret)
@@ -393,8 +390,8 @@ static int socfpga_dwmac_resume(struct device *dev)
 	 * control register 0, and can be modified by the phy driver
 	 * framework.
 	 */
-	if (ndev->phydev)
-		phy_resume(ndev->phydev);
+	if (priv->phydev)
+		phy_resume(priv->phydev);
 
 	return stmmac_resume(dev);
 }

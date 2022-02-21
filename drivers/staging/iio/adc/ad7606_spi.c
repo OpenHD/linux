@@ -42,16 +42,25 @@ static const struct ad7606_bus_ops ad7606_spi_bops = {
 
 static int ad7606_spi_probe(struct spi_device *spi)
 {
-	const struct spi_device_id *id = spi_get_device_id(spi);
+	struct iio_dev *indio_dev;
 
-	return ad7606_probe(&spi->dev, spi->irq, NULL,
-			    id->name, id->driver_data,
-			    &ad7606_spi_bops);
+	indio_dev = ad7606_probe(&spi->dev, spi->irq, NULL,
+				 spi_get_device_id(spi)->driver_data,
+				 &ad7606_spi_bops);
+
+	if (IS_ERR(indio_dev))
+		return PTR_ERR(indio_dev);
+
+	spi_set_drvdata(spi, indio_dev);
+
+	return 0;
 }
 
 static int ad7606_spi_remove(struct spi_device *spi)
 {
-	return ad7606_remove(&spi->dev, spi->irq);
+	struct iio_dev *indio_dev = dev_get_drvdata(&spi->dev);
+
+	return ad7606_remove(indio_dev, spi->irq);
 }
 
 static const struct spi_device_id ad7606_id[] = {

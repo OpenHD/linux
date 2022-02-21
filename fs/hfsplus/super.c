@@ -221,7 +221,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 	error2 = hfsplus_submit_bio(sb,
 				   sbi->part_start + HFSPLUS_VOLHEAD_SECTOR,
 				   sbi->s_vhdr_buf, NULL, REQ_OP_WRITE,
-				   REQ_SYNC);
+				   WRITE_SYNC);
 	if (!error)
 		error = error2;
 	if (!write_backup)
@@ -230,7 +230,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 	error2 = hfsplus_submit_bio(sb,
 				  sbi->part_start + sbi->sect_count - 2,
 				  sbi->s_backup_vhdr_buf, NULL, REQ_OP_WRITE,
-				  REQ_SYNC);
+				  WRITE_SYNC);
 	if (!error)
 		error2 = error;
 out:
@@ -264,7 +264,7 @@ void hfsplus_mark_mdb_dirty(struct super_block *sb)
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(sb);
 	unsigned long delay;
 
-	if (sb_rdonly(sb))
+	if (sb->s_flags & MS_RDONLY)
 		return;
 
 	spin_lock(&sbi->work_lock);
@@ -284,7 +284,7 @@ static void hfsplus_put_super(struct super_block *sb)
 
 	cancel_delayed_work_sync(&sbi->sync_work);
 
-	if (!sb_rdonly(sb) && sbi->s_vhdr) {
+	if (!(sb->s_flags & MS_RDONLY) && sbi->s_vhdr) {
 		struct hfsplus_vh *vhdr = sbi->s_vhdr;
 
 		vhdr->modify_date = hfsp_now2mt();
@@ -329,9 +329,9 @@ static int hfsplus_statfs(struct dentry *dentry, struct kstatfs *buf)
 static int hfsplus_remount(struct super_block *sb, int *flags, char *data)
 {
 	sync_filesystem(sb);
-	if ((bool)(*flags & SB_RDONLY) == sb_rdonly(sb))
+	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;
-	if (!(*flags & SB_RDONLY)) {
+	if (!(*flags & MS_RDONLY)) {
 		struct hfsplus_vh *vhdr = HFSPLUS_SB(sb)->s_vhdr;
 		int force = 0;
 
@@ -340,20 +340,20 @@ static int hfsplus_remount(struct super_block *sb, int *flags, char *data)
 
 		if (!(vhdr->attributes & cpu_to_be32(HFSPLUS_VOL_UNMNT))) {
 			pr_warn("filesystem was not cleanly unmounted, running fsck.hfsplus is recommended.  leaving read-only.\n");
-			sb->s_flags |= SB_RDONLY;
-			*flags |= SB_RDONLY;
+			sb->s_flags |= MS_RDONLY;
+			*flags |= MS_RDONLY;
 		} else if (force) {
 			/* nothing */
 		} else if (vhdr->attributes &
 				cpu_to_be32(HFSPLUS_VOL_SOFTLOCK)) {
 			pr_warn("filesystem is marked locked, leaving read-only.\n");
-			sb->s_flags |= SB_RDONLY;
-			*flags |= SB_RDONLY;
+			sb->s_flags |= MS_RDONLY;
+			*flags |= MS_RDONLY;
 		} else if (vhdr->attributes &
 				cpu_to_be32(HFSPLUS_VOL_JOURNALED)) {
 			pr_warn("filesystem is marked journaled, leaving read-only.\n");
-			sb->s_flags |= SB_RDONLY;
-			*flags |= SB_RDONLY;
+			sb->s_flags |= MS_RDONLY;
+			*flags |= MS_RDONLY;
 		}
 	}
 	return 0;
@@ -455,16 +455,16 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 
 	if (!(vhdr->attributes & cpu_to_be32(HFSPLUS_VOL_UNMNT))) {
 		pr_warn("Filesystem was not cleanly unmounted, running fsck.hfsplus is recommended.  mounting read-only.\n");
-		sb->s_flags |= SB_RDONLY;
+		sb->s_flags |= MS_RDONLY;
 	} else if (test_and_clear_bit(HFSPLUS_SB_FORCE, &sbi->flags)) {
 		/* nothing */
 	} else if (vhdr->attributes & cpu_to_be32(HFSPLUS_VOL_SOFTLOCK)) {
 		pr_warn("Filesystem is marked locked, mounting read-only.\n");
-		sb->s_flags |= SB_RDONLY;
+		sb->s_flags |= MS_RDONLY;
 	} else if ((vhdr->attributes & cpu_to_be32(HFSPLUS_VOL_JOURNALED)) &&
-			!sb_rdonly(sb)) {
+			!(sb->s_flags & MS_RDONLY)) {
 		pr_warn("write access to a journaled filesystem is not supported, use the force option at your own risk, mounting read-only.\n");
-		sb->s_flags |= SB_RDONLY;
+		sb->s_flags |= MS_RDONLY;
 	}
 
 	err = -EINVAL;
@@ -537,7 +537,7 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 	} else
 		hfs_find_exit(&fd);
 
-	if (!sb_rdonly(sb)) {
+	if (!(sb->s_flags & MS_RDONLY)) {
 		/*
 		 * H+LX == hfsplusutils, H+Lx == this driver, H+lx is unused
 		 * all three are registered with Apple for our use
@@ -551,7 +551,7 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 
 		if (!sbi->hidden_dir) {
 			mutex_lock(&sbi->vh_mutex);
-			sbi->hidden_dir = hfsplus_new_inode(sb, root, S_IFDIR);
+			sbi->hidden_dir = hfsplus_new_inode(sb, S_IFDIR);
 			if (!sbi->hidden_dir) {
 				mutex_unlock(&sbi->vh_mutex);
 				err = -ENOMEM;
@@ -564,8 +564,8 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 				goto out_put_hidden_dir;
 			}
 
-			err = hfsplus_init_security(sbi->hidden_dir,
-							root, &str);
+			err = hfsplus_init_inode_security(sbi->hidden_dir,
+								root, &str);
 			if (err == -EOPNOTSUPP)
 				err = 0; /* Operation is not supported. */
 			else if (err) {

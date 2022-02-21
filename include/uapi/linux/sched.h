@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _UAPI_LINUX_SCHED_H
 #define _UAPI_LINUX_SCHED_H
 
@@ -48,11 +47,5 @@
  * For the sched_{set,get}attr() calls
  */
 #define SCHED_FLAG_RESET_ON_FORK	0x01
-#define SCHED_FLAG_RECLAIM		0x02
-#define SCHED_FLAG_DL_OVERRUN		0x04
-
-#define SCHED_FLAG_ALL	(SCHED_FLAG_RESET_ON_FORK	| \
-			 SCHED_FLAG_RECLAIM		| \
-			 SCHED_FLAG_DL_OVERRUN)
 
 #endif /* _UAPI_LINUX_SCHED_H */

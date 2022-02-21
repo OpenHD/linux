@@ -122,6 +122,7 @@ struct input_dev {
 	const char *name;
 	const char *phys;
 	const char *uniq;
+	bool enabled;
 	struct input_id id;
 
 	unsigned long propbit[BITS_TO_LONGS(INPUT_PROP_CNT)];
@@ -168,6 +169,8 @@ struct input_dev {
 	void (*close)(struct input_dev *dev);
 	int (*flush)(struct input_dev *dev, struct file *file);
 	int (*event)(struct input_dev *dev, unsigned int type, unsigned int code, int value);
+	int (*enable)(struct input_dev *dev);
+	int (*disable)(struct input_dev *dev);
 
 	struct input_handle __rcu *grab;
 
@@ -232,10 +235,6 @@ struct input_dev {
 
 #if SW_MAX != INPUT_DEVICE_ID_SW_MAX
 #error "SW_MAX and INPUT_DEVICE_ID_SW_MAX do not match"
-#endif
-
-#if INPUT_PROP_MAX != INPUT_DEVICE_ID_PROP_MAX
-#error "INPUT_PROP_MAX and INPUT_DEVICE_ID_PROP_MAX do not match"
 #endif
 
 #define INPUT_DEVICE_ID_MATCH_DEVICE \
@@ -472,9 +471,6 @@ int input_scancode_to_scalar(const struct input_keymap_entry *ke,
 int input_get_keycode(struct input_dev *dev, struct input_keymap_entry *ke);
 int input_set_keycode(struct input_dev *dev,
 		      const struct input_keymap_entry *ke);
-
-bool input_match_device_id(const struct input_dev *dev,
-			   const struct input_device_id *id);
 
 void input_enable_softrepeat(struct input_dev *dev, int delay, int period);
 

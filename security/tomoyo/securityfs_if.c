@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * security/tomoyo/securityfs_if.c
  *
@@ -154,10 +153,10 @@ static int tomoyo_release(struct inode *inode, struct file *file)
  * @file: Pointer to "struct file".
  * @wait: Pointer to "poll_table". Maybe NULL.
  *
- * Returns EPOLLIN | EPOLLRDNORM | EPOLLOUT | EPOLLWRNORM if ready to read/write,
- * EPOLLOUT | EPOLLWRNORM otherwise.
+ * Returns POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM if ready to read/write,
+ * POLLOUT | POLLWRNORM otherwise.
  */
-static __poll_t tomoyo_poll(struct file *file, poll_table *wait)
+static unsigned int tomoyo_poll(struct file *file, poll_table *wait)
 {
 	return tomoyo_poll_control(file, wait);
 }

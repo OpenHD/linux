@@ -19,7 +19,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/uaccess.h>
 
-#include "edac_mc.h"
+#include "edac_core.h"
 #include "edac_module.h"
 
 /* MC EDAC Controls, setable by module parameter, and sysfs */
@@ -91,6 +91,28 @@ static struct device *mci_pdev;
 /*
  * various constants for Memory Controllers
  */
+static const char * const mem_types[] = {
+	[MEM_EMPTY] = "Empty",
+	[MEM_RESERVED] = "Reserved",
+	[MEM_UNKNOWN] = "Unknown",
+	[MEM_FPM] = "FPM",
+	[MEM_EDO] = "EDO",
+	[MEM_BEDO] = "BEDO",
+	[MEM_SDR] = "Unbuffered-SDR",
+	[MEM_RDR] = "Registered-SDR",
+	[MEM_DDR] = "Unbuffered-DDR",
+	[MEM_RDDR] = "Registered-DDR",
+	[MEM_RMBS] = "RMBS",
+	[MEM_DDR2] = "Unbuffered-DDR2",
+	[MEM_FB_DDR2] = "FullyBuffered-DDR2",
+	[MEM_RDDR2] = "Registered-DDR2",
+	[MEM_XDR] = "XDR",
+	[MEM_DDR3] = "Unbuffered-DDR3",
+	[MEM_RDDR3] = "Registered-DDR3",
+	[MEM_DDR4] = "Unbuffered-DDR4",
+	[MEM_RDDR4] = "Registered-DDR4"
+};
+
 static const char * const dev_types[] = {
 	[DEV_UNKNOWN] = "Unknown",
 	[DEV_X1] = "x1",
@@ -174,7 +196,7 @@ static ssize_t csrow_mem_type_show(struct device *dev,
 {
 	struct csrow_info *csrow = to_csrow(dev);
 
-	return sprintf(data, "%s\n", edac_mem_types[csrow->channels[0]->dimm->mtype]);
+	return sprintf(data, "%s\n", mem_types[csrow->channels[0]->dimm->mtype]);
 }
 
 static ssize_t csrow_dev_type_show(struct device *dev,
@@ -265,7 +287,7 @@ static struct attribute *csrow_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group csrow_attr_grp = {
+static struct attribute_group csrow_attr_grp = {
 	.attrs	= csrow_attrs,
 };
 
@@ -282,7 +304,7 @@ static void csrow_attr_release(struct device *dev)
 	kfree(csrow);
 }
 
-static const struct device_type csrow_attr_type = {
+static struct device_type csrow_attr_type = {
 	.groups		= csrow_attr_groups,
 	.release	= csrow_attr_release,
 };
@@ -533,7 +555,7 @@ static ssize_t dimmdev_mem_type_show(struct device *dev,
 {
 	struct dimm_info *dimm = to_dimm(dev);
 
-	return sprintf(data, "%s\n", edac_mem_types[dimm->mtype]);
+	return sprintf(data, "%s\n", mem_types[dimm->mtype]);
 }
 
 static ssize_t dimmdev_dev_type_show(struct device *dev,
@@ -553,40 +575,6 @@ static ssize_t dimmdev_edac_mode_show(struct device *dev,
 	return sprintf(data, "%s\n", edac_caps[dimm->edac_mode]);
 }
 
-static ssize_t dimmdev_ce_count_show(struct device *dev,
-				      struct device_attribute *mattr,
-				      char *data)
-{
-	struct dimm_info *dimm = to_dimm(dev);
-	u32 count;
-	int off;
-
-	off = EDAC_DIMM_OFF(dimm->mci->layers,
-			    dimm->mci->n_layers,
-			    dimm->location[0],
-			    dimm->location[1],
-			    dimm->location[2]);
-	count = dimm->mci->ce_per_layer[dimm->mci->n_layers-1][off];
-	return sprintf(data, "%u\n", count);
-}
-
-static ssize_t dimmdev_ue_count_show(struct device *dev,
-				      struct device_attribute *mattr,
-				      char *data)
-{
-	struct dimm_info *dimm = to_dimm(dev);
-	u32 count;
-	int off;
-
-	off = EDAC_DIMM_OFF(dimm->mci->layers,
-			    dimm->mci->n_layers,
-			    dimm->location[0],
-			    dimm->location[1],
-			    dimm->location[2]);
-	count = dimm->mci->ue_per_layer[dimm->mci->n_layers-1][off];
-	return sprintf(data, "%u\n", count);
-}
-
 /* dimm/rank attribute files */
 static DEVICE_ATTR(dimm_label, S_IRUGO | S_IWUSR,
 		   dimmdev_label_show, dimmdev_label_store);
@@ -595,8 +583,6 @@ static DEVICE_ATTR(size, S_IRUGO, dimmdev_size_show, NULL);
 static DEVICE_ATTR(dimm_mem_type, S_IRUGO, dimmdev_mem_type_show, NULL);
 static DEVICE_ATTR(dimm_dev_type, S_IRUGO, dimmdev_dev_type_show, NULL);
 static DEVICE_ATTR(dimm_edac_mode, S_IRUGO, dimmdev_edac_mode_show, NULL);
-static DEVICE_ATTR(dimm_ce_count, S_IRUGO, dimmdev_ce_count_show, NULL);
-static DEVICE_ATTR(dimm_ue_count, S_IRUGO, dimmdev_ue_count_show, NULL);
 
 /* attributes of the dimm<id>/rank<id> object */
 static struct attribute *dimm_attrs[] = {
@@ -606,12 +592,10 @@ static struct attribute *dimm_attrs[] = {
 	&dev_attr_dimm_mem_type.attr,
 	&dev_attr_dimm_dev_type.attr,
 	&dev_attr_dimm_edac_mode.attr,
-	&dev_attr_dimm_ce_count.attr,
-	&dev_attr_dimm_ue_count.attr,
 	NULL,
 };
 
-static const struct attribute_group dimm_attr_grp = {
+static struct attribute_group dimm_attr_grp = {
 	.attrs	= dimm_attrs,
 };
 
@@ -628,7 +612,7 @@ static void dimm_attr_release(struct device *dev)
 	kfree(dimm);
 }
 
-static const struct device_type dimm_attr_type = {
+static struct device_type dimm_attr_type = {
 	.groups		= dimm_attr_groups,
 	.release	= dimm_attr_release,
 };
@@ -853,7 +837,7 @@ static DEVICE_ATTR(ce_count, S_IRUGO, mci_ce_count_show, NULL);
 static DEVICE_ATTR(max_location, S_IRUGO, mci_max_location_show, NULL);
 
 /* memory scrubber attribute file */
-static DEVICE_ATTR(sdram_scrub_rate, 0, mci_sdram_scrub_rate_show,
+DEVICE_ATTR(sdram_scrub_rate, 0, mci_sdram_scrub_rate_show,
 	    mci_sdram_scrub_rate_store); /* umode set later in is_visible */
 
 static struct attribute *mci_attrs[] = {
@@ -886,7 +870,7 @@ static umode_t mci_attr_is_visible(struct kobject *kobj,
 	return mode;
 }
 
-static const struct attribute_group mci_attr_grp = {
+static struct attribute_group mci_attr_grp = {
 	.attrs	= mci_attrs,
 	.is_visible = mci_attr_is_visible,
 };
@@ -904,7 +888,7 @@ static void mci_attr_release(struct device *dev)
 	kfree(mci);
 }
 
-static const struct device_type mci_attr_type = {
+static struct device_type mci_attr_type = {
 	.groups		= mci_attr_groups,
 	.release	= mci_attr_release,
 };
@@ -1058,7 +1042,7 @@ static void mc_attr_release(struct device *dev)
 	kfree(dev);
 }
 
-static const struct device_type mc_attr_type = {
+static struct device_type mc_attr_type = {
 	.release	= mc_attr_release,
 };
 /*

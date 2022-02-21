@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * fscrypt_notsupp.h
  *
@@ -64,6 +63,16 @@ static inline struct page *fscrypt_control_page(struct page *page)
 }
 
 static inline void fscrypt_restore_control_page(struct page *page)
+{
+	return;
+}
+
+static inline void fscrypt_set_d_op(struct dentry *dentry)
+{
+	return;
+}
+
+static inline void fscrypt_set_encrypted_dentry(struct dentry *dentry)
 {
 	return;
 }

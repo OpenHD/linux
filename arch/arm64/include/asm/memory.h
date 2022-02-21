@@ -25,8 +25,13 @@
 #include <linux/const.h>
 #include <linux/types.h>
 #include <asm/bug.h>
-#include <asm/page-def.h>
 #include <asm/sizes.h>
+
+/*
+ * Allow for constants defined here to be used from assembly code
+ * by prepending the UL suffix only with actual C code compilation.
+ */
+#define UL(x) _AC(x, UL)
 
 /*
  * Size of the PCI I/O space. This must remain a power of two so that
@@ -70,79 +75,40 @@
 #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
 #define FIXADDR_TOP		(PCI_IO_START - SZ_2M)
 
+/* The physical address of the end of vmemmap */
+#define VMEMMAP_END_PHYS	((VMEMMAP_SIZE >> STRUCT_PAGE_MAX_SHIFT) << PAGE_SHIFT)
+
 #define KERNEL_START      _text
 #define KERNEL_END        _end
 
 /*
- * KASAN requires 1/8th of the kernel virtual address space for the shadow
- * region. KASAN can bloat the stack significantly, so double the (minimum)
- * stack size when KASAN is in use, and then double it again if KASAN_EXTRA is
- * on.
+ * The size of the KASAN shadow region. This should be 1/8th of the
+ * size of the entire kernel virtual address space.
  */
 #ifdef CONFIG_KASAN
-#define KASAN_SHADOW_SCALE_SHIFT 3
-#define KASAN_SHADOW_SIZE	(UL(1) << (VA_BITS - KASAN_SHADOW_SCALE_SHIFT))
-#ifdef CONFIG_KASAN_EXTRA
-#define KASAN_THREAD_SHIFT	2
-#else
-#define KASAN_THREAD_SHIFT	1
-#endif /* CONFIG_KASAN_EXTRA */
+#define KASAN_SHADOW_SIZE	(UL(1) << (VA_BITS - 3))
 #else
 #define KASAN_SHADOW_SIZE	(0)
-#define KASAN_THREAD_SHIFT	0
 #endif
 
-#define MIN_THREAD_SHIFT	(14 + KASAN_THREAD_SHIFT)
+/*
+ * Physical vs virtual RAM address space conversion.  These are
+ * private definitions which should NOT be used outside memory.h
+ * files.  Use virt_to_phys/phys_to_virt/__pa/__va instead.
+ */
+#define __virt_to_phys(x) ({						\
+	phys_addr_t __x = (phys_addr_t)(x);				\
+	__x & BIT(VA_BITS - 1) ? (__x & ~PAGE_OFFSET) + PHYS_OFFSET :	\
+				 (__x - kimage_voffset); })
+
+#define __phys_to_virt(x)	((unsigned long)((x) - PHYS_OFFSET) | PAGE_OFFSET)
+#define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
 
 /*
- * VMAP'd stacks are allocated at page granularity, so we must ensure that such
- * stacks are a multiple of page size.
+ * Convert a page to/from a physical address
  */
-#if defined(CONFIG_VMAP_STACK) && (MIN_THREAD_SHIFT < PAGE_SHIFT)
-#define THREAD_SHIFT		PAGE_SHIFT
-#else
-#define THREAD_SHIFT		MIN_THREAD_SHIFT
-#endif
-
-#if THREAD_SHIFT >= PAGE_SHIFT
-#define THREAD_SIZE_ORDER	(THREAD_SHIFT - PAGE_SHIFT)
-#endif
-
-#define THREAD_SIZE		(UL(1) << THREAD_SHIFT)
-
-/*
- * By aligning VMAP'd stacks to 2 * THREAD_SIZE, we can detect overflow by
- * checking sp & (1 << THREAD_SHIFT), which we can do cheaply in the entry
- * assembly.
- */
-#ifdef CONFIG_VMAP_STACK
-#define THREAD_ALIGN		(2 * THREAD_SIZE)
-#else
-#define THREAD_ALIGN		THREAD_SIZE
-#endif
-
-#define IRQ_STACK_SIZE		THREAD_SIZE
-
-#define OVERFLOW_STACK_SIZE	SZ_4K
-
-/*
- * Alignment of kernel segments (e.g. .text, .data).
- */
-#if defined(CONFIG_DEBUG_ALIGN_RODATA)
-/*
- *  4 KB granule:   1 level 2 entry
- * 16 KB granule: 128 level 3 entries, with contiguous bit
- * 64 KB granule:  32 level 3 entries, with contiguous bit
- */
-#define SEGMENT_ALIGN			SZ_2M
-#else
-/*
- *  4 KB granule:  16 level 3 entries, with contiguous bit
- * 16 KB granule:   4 level 3 entries, without contiguous bit
- * 64 KB granule:   1 level 3 entry
- */
-#define SEGMENT_ALIGN			SZ_64K
-#endif
+#define page_to_phys(page)	(__pfn_to_phys(page_to_pfn(page)))
+#define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
 
 /*
  * Memory types available.
@@ -159,13 +125,6 @@
  */
 #define MT_S2_NORMAL		0xf
 #define MT_S2_DEVICE_nGnRE	0x1
-
-/*
- * Memory types for Stage-2 translation when ID_AA64MMFR2_EL1.FWB is 0001
- * Stage-2 enforces Normal-WB and Device-nGnRE
- */
-#define MT_S2_FWB_NORMAL	6
-#define MT_S2_FWB_DEVICE_nGnRE	1
 
 #ifdef CONFIG_ARM64_4K_PAGES
 #define IOREMAP_MAX_ORDER	(PUD_SHIFT)
@@ -218,48 +177,6 @@ static inline unsigned long kaslr_offset(void)
 #define PHYS_PFN_OFFSET	(PHYS_OFFSET >> PAGE_SHIFT)
 
 /*
- * Physical vs virtual RAM address space conversion.  These are
- * private definitions which should NOT be used outside memory.h
- * files.  Use virt_to_phys/phys_to_virt/__pa/__va instead.
- */
-
-
-/*
- * The linear kernel range starts in the middle of the virtual adddress
- * space. Testing the top bit for the start of the region is a
- * sufficient check.
- */
-#define __is_lm_address(addr)	(!!((addr) & BIT(VA_BITS - 1)))
-
-#define __lm_to_phys(addr)	(((addr) & ~PAGE_OFFSET) + PHYS_OFFSET)
-#define __kimg_to_phys(addr)	((addr) - kimage_voffset)
-
-#define __virt_to_phys_nodebug(x) ({					\
-	phys_addr_t __x = (phys_addr_t)(x);				\
-	__is_lm_address(__x) ? __lm_to_phys(__x) :			\
-			       __kimg_to_phys(__x);			\
-})
-
-#define __pa_symbol_nodebug(x)	__kimg_to_phys((phys_addr_t)(x))
-
-#ifdef CONFIG_DEBUG_VIRTUAL
-extern phys_addr_t __virt_to_phys(unsigned long x);
-extern phys_addr_t __phys_addr_symbol(unsigned long x);
-#else
-#define __virt_to_phys(x)	__virt_to_phys_nodebug(x)
-#define __phys_addr_symbol(x)	__pa_symbol_nodebug(x)
-#endif
-
-#define __phys_to_virt(x)	((unsigned long)((x) - PHYS_OFFSET) | PAGE_OFFSET)
-#define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
-
-/*
- * Convert a page to/from a physical address
- */
-#define page_to_phys(page)	(__pfn_to_phys(page_to_pfn(page)))
-#define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
-
-/*
  * Note: Drivers should NOT use these.  They are the wrong
  * translation for translating DMA addresses.  Use the driver
  * DMA support - see dma-mapping.h.
@@ -280,11 +197,9 @@ static inline void *phys_to_virt(phys_addr_t x)
  * Drivers should NOT use these either.
  */
 #define __pa(x)			__virt_to_phys((unsigned long)(x))
-#define __pa_symbol(x)		__phys_addr_symbol(RELOC_HIDE((unsigned long)(x), 0))
-#define __pa_nodebug(x)		__virt_to_phys_nodebug((unsigned long)(x))
 #define __va(x)			((void *)__phys_to_virt((phys_addr_t)(x)))
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
-#define virt_to_pfn(x)      __phys_to_pfn(__virt_to_phys((unsigned long)(x)))
+#define virt_to_pfn(x)      __phys_to_pfn(__virt_to_phys(x))
 #define sym_to_pfn(x)	    __phys_to_pfn(__pa_symbol(x))
 
 /*

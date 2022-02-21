@@ -12,7 +12,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <linux/ioport.h>
 #include <linux/pci.h>
@@ -110,7 +110,7 @@ typedef struct _diva_os_thread_dpc {
 /*
   This table should be sorted by PCI device ID
 */
-static const struct pci_device_id divas_pci_tbl[] = {
+static struct pci_device_id divas_pci_tbl[] = {
 	/* Diva Server BRI-2M PCI 0xE010 */
 	{ PCI_VDEVICE(EICON, PCI_DEVICE_ID_EICON_MAESTRA),
 	  CARDTYPE_MAESTRA_PCI },
@@ -654,12 +654,12 @@ static ssize_t divas_read(struct file *file, char __user *buf,
 	return (ret);
 }
 
-static __poll_t divas_poll(struct file *file, poll_table *wait)
+static unsigned int divas_poll(struct file *file, poll_table *wait)
 {
 	if (!file->private_data) {
-		return (EPOLLERR);
+		return (POLLERR);
 	}
-	return (EPOLLIN | EPOLLRDNORM);
+	return (POLLIN | POLLRDNORM);
 }
 
 static const struct file_operations divas_fops = {

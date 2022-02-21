@@ -21,6 +21,8 @@
 #include <asm/octeon/cvmx-pci-defs.h>
 #include <asm/octeon/pci-octeon.h>
 
+#include <dma-coherence.h>
+
 #define USE_OCTEON_INTERNAL_ARBITER
 
 /*
@@ -57,7 +59,8 @@ union octeon_pci_address {
 	} s;
 };
 
-int (*octeon_pcibios_map_irq)(const struct pci_dev *dev, u8 slot, u8 pin);
+int __initconst (*octeon_pcibios_map_irq)(const struct pci_dev *dev,
+					 u8 slot, u8 pin);
 enum octeon_dma_bar_type octeon_dma_bar_type = OCTEON_DMA_BAR_TYPE_INVALID;
 
 /**
@@ -71,7 +74,7 @@ enum octeon_dma_bar_type octeon_dma_bar_type = OCTEON_DMA_BAR_TYPE_INVALID;
  *		 as it goes through each bridge.
  * Returns Interrupt number for the device
  */
-int pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
+int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	if (octeon_pcibios_map_irq)
 		return octeon_pcibios_map_irq(dev, slot, pin);
@@ -163,6 +166,8 @@ int pcibios_plat_dev_init(struct pci_dev *dev)
 		pci_read_config_dword(dev, pos + PCI_ERR_ROOT_STATUS, &dconfig);
 		pci_write_config_dword(dev, pos + PCI_ERR_ROOT_STATUS, dconfig);
 	}
+
+	dev->dev.archdata.dma_ops = octeon_pci_dma_map_ops;
 
 	return 0;
 }

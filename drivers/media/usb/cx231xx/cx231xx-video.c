@@ -39,7 +39,7 @@
 #include <media/drv-intf/msp3400.h>
 #include <media/tuner.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 
 #include "cx231xx-vbi.h"
 
@@ -199,10 +199,10 @@ static inline void print_err_status(struct cx231xx *dev, int packet, int status)
 
 	switch (status) {
 	case -ENOENT:
-		errmsg = "unlinked synchronously";
+		errmsg = "unlinked synchronuously";
 		break;
 	case -ECONNRESET:
-		errmsg = "unlinked asynchronously";
+		errmsg = "unlinked asynchronuously";
 		break;
 	case -ENOSR:
 		errmsg = "Buffer error (overrun)";
@@ -859,7 +859,7 @@ static void buffer_release(struct videobuf_queue *vq,
 	free_buffer(vq, buf);
 }
 
-static const struct videobuf_queue_ops cx231xx_video_qops = {
+static struct videobuf_queue_ops cx231xx_video_qops = {
 	.buf_setup = buffer_setup,
 	.buf_prepare = buffer_prepare,
 	.buf_queue = buffer_queue,
@@ -870,6 +870,8 @@ static const struct videobuf_queue_ops cx231xx_video_qops = {
 
 void video_mux(struct cx231xx *dev, int index)
 {
+	if (is_model_avermedia_h837_series(dev->model))
+		return;
 	dev->video_input = index;
 	dev->ctl_ainput = INPUT(index)->amux;
 
@@ -1134,7 +1136,7 @@ void cx231xx_v4l2_create_entities(struct cx231xx *dev)
 			/* The DVB core will handle it */
 			if (dev->tuner_type == TUNER_ABSENT)
 				continue;
-			/* fall through */
+			/* fall though */
 		default: /* just to shut up a gcc warning */
 			ent->function = MEDIA_ENT_F_CONN_RF;
 			break;
@@ -1740,7 +1742,7 @@ static int radio_s_tuner(struct file *file, void *priv, const struct v4l2_tuner 
  */
 static int cx231xx_v4l2_open(struct file *filp)
 {
-	int radio = 0;
+	int radio = 0, errCode = 0;
 	struct video_device *vdev = video_devdata(filp);
 	struct cx231xx *dev = video_drvdata(filp);
 	struct cx231xx_fh *fh;
@@ -1756,22 +1758,18 @@ static int cx231xx_v4l2_open(struct file *filp)
 	case VFL_TYPE_RADIO:
 		radio = 1;
 		break;
-	default:
-		return -EINVAL;
 	}
 
 	cx231xx_videodbg("open dev=%s type=%s users=%d\n",
 			 video_device_node_name(vdev), v4l2_type_names[fh_type],
 			 dev->users);
 
-#if 0
 	errCode = cx231xx_set_mode(dev, CX231XX_ANALOG_MODE);
 	if (errCode < 0) {
 		dev_err(dev->dev,
 			"Device locked on digital mode. Can't open analog\n");
 		return -EBUSY;
 	}
-#endif
 
 	fh = kzalloc(sizeof(struct cx231xx_fh), GFP_KERNEL);
 	if (!fh)
@@ -1941,7 +1939,7 @@ static int cx231xx_close(struct file *filp)
 		}
 
 		/* Save some power by putting tuner to sleep */
-		call_all(dev, tuner, standby);
+		call_all(dev, core, s_power, 0);
 
 		/* do this before setting alternate! */
 		if (dev->USE_ISO)
@@ -2008,29 +2006,29 @@ cx231xx_v4l2_read(struct file *filp, char __user *buf, size_t count,
  * cx231xx_v4l2_poll()
  * will allocate buffers when called for the first time
  */
-static __poll_t cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
+static unsigned int cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
 {
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned long req_events = poll_requested_events(wait);
 	struct cx231xx_fh *fh = filp->private_data;
 	struct cx231xx *dev = fh->dev;
-	__poll_t res = 0;
+	unsigned res = 0;
 	int rc;
 
 	rc = check_dev(dev);
 	if (rc < 0)
-		return EPOLLERR;
+		return POLLERR;
 
 	rc = res_get(fh);
 
 	if (unlikely(rc < 0))
-		return EPOLLERR;
+		return POLLERR;
 
 	if (v4l2_event_pending(&fh->fh))
-		res |= EPOLLPRI;
+		res |= POLLPRI;
 	else
 		poll_wait(filp, &fh->fh.wait, wait);
 
-	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
+	if (!(req_events & (POLLIN | POLLRDNORM)))
 		return res;
 
 	if ((V4L2_BUF_TYPE_VIDEO_CAPTURE == fh->type) ||
@@ -2040,7 +2038,7 @@ static __poll_t cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
 		mutex_unlock(&dev->lock);
 		return res;
 	}
-	return res | EPOLLERR;
+	return res | POLLERR;
 }
 
 /*

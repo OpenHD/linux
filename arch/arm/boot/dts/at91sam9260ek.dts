@@ -69,18 +69,6 @@
 
 	ahb {
 		apb {
-			tcb0: timer@fffa0000 {
-				timer@0 {
-					compatible = "atmel,tcb-timer";
-					reg = <0>, <1>;
-				};
-
-				timer@2 {
-					compatible = "atmel,tcb-timer";
-					reg = <2>;
-				};
-			};
-
 			usb1: gadget@fffa4000 {
 				atmel,vbus-gpio = <&pioC 5 GPIO_ACTIVE_HIGH>;
 				status = "okay";
@@ -127,7 +115,7 @@
 
 			spi0: spi@fffc8000 {
 				cs-gpios = <0>, <&pioC 11 0>, <0>, <0>;
-				mtd_dataflash@1 {
+				mtd_dataflash@0 {
 					compatible = "atmel,at45", "atmel,dataflash";
 					spi-max-frequency = <50000000>;
 					reg = <1>;
@@ -186,14 +174,14 @@
 			label = "Button 3";
 			gpios = <&pioA 30 GPIO_ACTIVE_LOW>;
 			linux,code = <0x103>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		btn4 {
 			label = "Button 4";
 			gpios = <&pioA 31 GPIO_ACTIVE_LOW>;
 			linux,code = <0x104>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 
@@ -201,7 +189,7 @@
 		status = "okay";
 
 		24c512@50 {
-			compatible = "atmel,24c512";
+			compatible = "24c512";
 			reg = <0x50>;
 		};
 	};

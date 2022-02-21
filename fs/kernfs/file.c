@@ -13,7 +13,7 @@
 #include <linux/slab.h>
 #include <linux/poll.h>
 #include <linux/pagemap.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/fsnotify.h>
 
 #include "kernfs-internal.h"
@@ -348,11 +348,11 @@ static void kernfs_vma_open(struct vm_area_struct *vma)
 	kernfs_put_active(of->kn);
 }
 
-static vm_fault_t kernfs_vma_fault(struct vm_fault *vmf)
+static int kernfs_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct file *file = vmf->vma->vm_file;
+	struct file *file = vma->vm_file;
 	struct kernfs_open_file *of = kernfs_of(file);
-	vm_fault_t ret;
+	int ret;
 
 	if (!of->vm_ops)
 		return VM_FAULT_SIGBUS;
@@ -362,17 +362,18 @@ static vm_fault_t kernfs_vma_fault(struct vm_fault *vmf)
 
 	ret = VM_FAULT_SIGBUS;
 	if (of->vm_ops->fault)
-		ret = of->vm_ops->fault(vmf);
+		ret = of->vm_ops->fault(vma, vmf);
 
 	kernfs_put_active(of->kn);
 	return ret;
 }
 
-static vm_fault_t kernfs_vma_page_mkwrite(struct vm_fault *vmf)
+static int kernfs_vma_page_mkwrite(struct vm_area_struct *vma,
+				   struct vm_fault *vmf)
 {
-	struct file *file = vmf->vma->vm_file;
+	struct file *file = vma->vm_file;
 	struct kernfs_open_file *of = kernfs_of(file);
-	vm_fault_t ret;
+	int ret;
 
 	if (!of->vm_ops)
 		return VM_FAULT_SIGBUS;
@@ -382,7 +383,7 @@ static vm_fault_t kernfs_vma_page_mkwrite(struct vm_fault *vmf)
 
 	ret = 0;
 	if (of->vm_ops->page_mkwrite)
-		ret = of->vm_ops->page_mkwrite(vmf);
+		ret = of->vm_ops->page_mkwrite(vma, vmf);
 	else
 		file_update_time(file);
 
@@ -515,7 +516,7 @@ static int kernfs_fop_mmap(struct file *file, struct vm_area_struct *vma)
 		goto out_put;
 
 	rc = 0;
-	of->mmapped = true;
+	of->mmapped = 1;
 	of->vm_ops = vma->vm_ops;
 	vma->vm_ops = &kernfs_vm_ops;
 out_put:
@@ -616,7 +617,7 @@ static void kernfs_put_open_node(struct kernfs_node *kn,
 
 static int kernfs_fop_open(struct inode *inode, struct file *file)
 {
-	struct kernfs_node *kn = inode->i_private;
+	struct kernfs_node *kn = file->f_path.dentry->d_fsdata;
 	struct kernfs_root *root = kernfs_root(kn);
 	const struct kernfs_ops *ops;
 	struct kernfs_open_file *of;
@@ -707,8 +708,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 	if (error)
 		goto err_free;
 
-	of->seq_file = file->private_data;
-	of->seq_file->private = of;
+	((struct seq_file *)file->private_data)->private = of;
 
 	/* seq_file clears PWRITE unconditionally, restore it if WRITE */
 	if (file->f_mode & FMODE_WRITE)
@@ -717,22 +717,13 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 	/* make sure we have open node struct */
 	error = kernfs_get_open_node(kn, of);
 	if (error)
-		goto err_seq_release;
-
-	if (ops->open) {
-		/* nobody has access to @of yet, skip @of->mutex */
-		error = ops->open(of);
-		if (error)
-			goto err_put_node;
-	}
+		goto err_close;
 
 	/* open succeeded, put active references */
 	kernfs_put_active(kn);
 	return 0;
 
-err_put_node:
-	kernfs_put_open_node(kn, of);
-err_seq_release:
+err_close:
 	seq_release(inode, file);
 err_free:
 	kfree(of->prealloc_buf);
@@ -742,40 +733,10 @@ err_out:
 	return error;
 }
 
-/* used from release/drain to ensure that ->release() is called exactly once */
-static void kernfs_release_file(struct kernfs_node *kn,
-				struct kernfs_open_file *of)
-{
-	/*
-	 * @of is guaranteed to have no other file operations in flight and
-	 * we just want to synchronize release and drain paths.
-	 * @kernfs_open_file_mutex is enough.  @of->mutex can't be used
-	 * here because drain path may be called from places which can
-	 * cause circular dependency.
-	 */
-	lockdep_assert_held(&kernfs_open_file_mutex);
-
-	if (!of->released) {
-		/*
-		 * A file is never detached without being released and we
-		 * need to be able to release files which are deactivated
-		 * and being drained.  Don't use kernfs_ops().
-		 */
-		kn->attr.ops->release(of);
-		of->released = true;
-	}
-}
-
 static int kernfs_fop_release(struct inode *inode, struct file *filp)
 {
-	struct kernfs_node *kn = inode->i_private;
+	struct kernfs_node *kn = filp->f_path.dentry->d_fsdata;
 	struct kernfs_open_file *of = kernfs_of(filp);
-
-	if (kn->flags & KERNFS_HAS_RELEASE) {
-		mutex_lock(&kernfs_open_file_mutex);
-		kernfs_release_file(kn, of);
-		mutex_unlock(&kernfs_open_file_mutex);
-	}
 
 	kernfs_put_open_node(kn, of);
 	seq_release(inode, filp);
@@ -785,12 +746,12 @@ static int kernfs_fop_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-void kernfs_drain_open_files(struct kernfs_node *kn)
+void kernfs_unmap_bin_file(struct kernfs_node *kn)
 {
 	struct kernfs_open_node *on;
 	struct kernfs_open_file *of;
 
-	if (!(kn->flags & (KERNFS_HAS_MMAP | KERNFS_HAS_RELEASE)))
+	if (!(kn->flags & KERNFS_HAS_MMAP))
 		return;
 
 	spin_lock_irq(&kernfs_open_node_lock);
@@ -802,17 +763,10 @@ void kernfs_drain_open_files(struct kernfs_node *kn)
 		return;
 
 	mutex_lock(&kernfs_open_file_mutex);
-
 	list_for_each_entry(of, &on->files, list) {
 		struct inode *inode = file_inode(of->file);
-
-		if (kn->flags & KERNFS_HAS_MMAP)
-			unmap_mapping_range(inode->i_mapping, 0, 0, 1);
-
-		if (kn->flags & KERNFS_HAS_RELEASE)
-			kernfs_release_file(kn, of);
+		unmap_mapping_range(inode->i_mapping, 0, 0, 1);
 	}
-
 	mutex_unlock(&kernfs_open_file_mutex);
 
 	kernfs_put_open_node(kn, NULL);
@@ -823,7 +777,7 @@ void kernfs_drain_open_files(struct kernfs_node *kn)
  * the content and then you use 'poll' or 'select' to wait for
  * the content to change.  When the content changes (assuming the
  * manager for the kobject supports notification), poll will
- * return EPOLLERR|EPOLLPRI, and select will return the fd whether
+ * return POLLERR|POLLPRI, and select will return the fd whether
  * it is waiting for read, write, or exceptions.
  * Once poll/select indicates that the value has changed, you
  * need to close and re-open the file, or seek to 0 and read again.
@@ -832,10 +786,10 @@ void kernfs_drain_open_files(struct kernfs_node *kn)
  * to see if it supports poll (Neither 'poll' nor 'select' return
  * an appropriate error code).  When in doubt, set a suitable timeout value.
  */
-static __poll_t kernfs_fop_poll(struct file *filp, poll_table *wait)
+static unsigned int kernfs_fop_poll(struct file *filp, poll_table *wait)
 {
 	struct kernfs_open_file *of = kernfs_of(filp);
-	struct kernfs_node *kn = kernfs_dentry_node(filp->f_path.dentry);
+	struct kernfs_node *kn = filp->f_path.dentry->d_fsdata;
 	struct kernfs_open_node *on = kn->attr.open;
 
 	if (!kernfs_get_active(kn))
@@ -851,7 +805,7 @@ static __poll_t kernfs_fop_poll(struct file *filp, poll_table *wait)
 	return DEFAULT_POLLMASK;
 
  trigger:
-	return DEFAULT_POLLMASK|EPOLLERR|EPOLLPRI;
+	return DEFAULT_POLLMASK|POLLERR|POLLPRI;
 }
 
 static void kernfs_notify_workfn(struct work_struct *work)
@@ -895,7 +849,7 @@ repeat:
 		 * have the matching @file available.  Look up the inodes
 		 * and generate the events manually.
 		 */
-		inode = ilookup(info->sb, kn->id.ino);
+		inode = ilookup(info->sb, kn->ino);
 		if (!inode)
 			continue;
 
@@ -903,7 +857,7 @@ repeat:
 		if (parent) {
 			struct inode *p_inode;
 
-			p_inode = ilookup(info->sb, parent->id.ino);
+			p_inode = ilookup(info->sb, parent->ino);
 			if (p_inode) {
 				fsnotify(p_inode, FS_MODIFY | FS_EVENT_ON_CHILD,
 					 inode, FSNOTIFY_EVENT_INODE, kn->name, 0);
@@ -965,8 +919,6 @@ const struct file_operations kernfs_file_fops = {
  * @parent: directory to create the file in
  * @name: name of the file
  * @mode: mode of the file
- * @uid: uid of the file
- * @gid: gid of the file
  * @size: size of the file
  * @ops: kernfs operations for the file
  * @priv: private data for the file
@@ -977,8 +929,7 @@ const struct file_operations kernfs_file_fops = {
  */
 struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 					 const char *name,
-					 umode_t mode, kuid_t uid, kgid_t gid,
-					 loff_t size,
+					 umode_t mode, loff_t size,
 					 const struct kernfs_ops *ops,
 					 void *priv, const void *ns,
 					 struct lock_class_key *key)
@@ -989,8 +940,7 @@ struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 
 	flags = KERNFS_FILE;
 
-	kn = kernfs_new_node(parent, name, (mode & S_IALLUGO) | S_IFREG,
-			     uid, gid, flags);
+	kn = kernfs_new_node(parent, name, (mode & S_IALLUGO) | S_IFREG, flags);
 	if (!kn)
 		return ERR_PTR(-ENOMEM);
 
@@ -1001,7 +951,7 @@ struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	if (key) {
-		lockdep_init_map(&kn->dep_map, "kn->count", key, 0);
+		lockdep_init_map(&kn->dep_map, "s_active", key, 0);
 		kn->flags |= KERNFS_LOCKDEP;
 	}
 #endif
@@ -1015,8 +965,6 @@ struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 		kn->flags |= KERNFS_HAS_SEQ_SHOW;
 	if (ops->mmap)
 		kn->flags |= KERNFS_HAS_MMAP;
-	if (ops->release)
-		kn->flags |= KERNFS_HAS_RELEASE;
 
 	rc = kernfs_add_one(kn);
 	if (rc) {

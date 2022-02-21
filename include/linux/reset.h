@@ -1,11 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_RESET_H_
 #define _LINUX_RESET_H_
 
-#include <linux/types.h>
+#include <linux/device.h>
 
-struct device;
-struct device_node;
 struct reset_control;
 
 #ifdef CONFIG_RESET_CONTROLLER
@@ -26,11 +23,6 @@ int __device_reset(struct device *dev, bool optional);
 struct reset_control *__devm_reset_control_get(struct device *dev,
 				     const char *id, int index, bool shared,
 				     bool optional);
-
-struct reset_control *devm_reset_control_array_get(struct device *dev,
-						   bool shared, bool optional);
-struct reset_control *of_reset_control_array_get(struct device_node *np,
-						 bool shared, bool optional);
 
 #else
 
@@ -81,18 +73,6 @@ static inline struct reset_control *__reset_control_get(
 static inline struct reset_control *__devm_reset_control_get(
 					struct device *dev, const char *id,
 					int index, bool shared, bool optional)
-{
-	return optional ? NULL : ERR_PTR(-ENOTSUPP);
-}
-
-static inline struct reset_control *
-devm_reset_control_array_get(struct device *dev, bool shared, bool optional)
-{
-	return optional ? NULL : ERR_PTR(-ENOTSUPP);
-}
-
-static inline struct reset_control *
-of_reset_control_array_get(struct device_node *np, bool shared, bool optional)
 {
 	return optional ? NULL : ERR_PTR(-ENOTSUPP);
 }
@@ -344,6 +324,18 @@ devm_reset_control_get_shared_by_index(struct device *dev, int index)
  * These inline function calls will be removed once all consumers
  * have been moved over to the new explicit API.
  */
+static inline struct reset_control *reset_control_get(
+				struct device *dev, const char *id)
+{
+	return reset_control_get_exclusive(dev, id);
+}
+
+static inline struct reset_control *reset_control_get_optional(
+					struct device *dev, const char *id)
+{
+	return reset_control_get_optional_exclusive(dev, id);
+}
+
 static inline struct reset_control *of_reset_control_get(
 				struct device_node *node, const char *id)
 {
@@ -373,56 +365,5 @@ static inline struct reset_control *devm_reset_control_get_by_index(
 				struct device *dev, int index)
 {
 	return devm_reset_control_get_exclusive_by_index(dev, index);
-}
-
-/*
- * APIs to manage a list of reset controllers
- */
-static inline struct reset_control *
-devm_reset_control_array_get_exclusive(struct device *dev)
-{
-	return devm_reset_control_array_get(dev, false, false);
-}
-
-static inline struct reset_control *
-devm_reset_control_array_get_shared(struct device *dev)
-{
-	return devm_reset_control_array_get(dev, true, false);
-}
-
-static inline struct reset_control *
-devm_reset_control_array_get_optional_exclusive(struct device *dev)
-{
-	return devm_reset_control_array_get(dev, false, true);
-}
-
-static inline struct reset_control *
-devm_reset_control_array_get_optional_shared(struct device *dev)
-{
-	return devm_reset_control_array_get(dev, true, true);
-}
-
-static inline struct reset_control *
-of_reset_control_array_get_exclusive(struct device_node *node)
-{
-	return of_reset_control_array_get(node, false, false);
-}
-
-static inline struct reset_control *
-of_reset_control_array_get_shared(struct device_node *node)
-{
-	return of_reset_control_array_get(node, true, false);
-}
-
-static inline struct reset_control *
-of_reset_control_array_get_optional_exclusive(struct device_node *node)
-{
-	return of_reset_control_array_get(node, false, true);
-}
-
-static inline struct reset_control *
-of_reset_control_array_get_optional_shared(struct device_node *node)
-{
-	return of_reset_control_array_get(node, true, true);
 }
 #endif

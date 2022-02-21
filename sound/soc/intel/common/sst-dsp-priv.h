@@ -77,10 +77,6 @@ struct sst_addr {
 	u32 dram_offset;
 	u32 dsp_iram_offset;
 	u32 dsp_dram_offset;
-	u32 sram0_base;
-	u32 sram1_base;
-	u32 w0_stat_sz;
-	u32 w0_up_sz;
 	void __iomem *lpe;
 	void __iomem *shim;
 	void __iomem *pci_cfg;
@@ -153,7 +149,7 @@ struct sst_block_allocator {
 };
 
 /*
- * Runtime Module Instance - A module object can be instantiated multiple
+ * Runtime Module Instance - A module object can be instanciated multiple
  * times within the DSP FW.
  */
 struct sst_module_runtime {
@@ -193,7 +189,7 @@ enum sst_module_state {
  *
  * Each Firmware file can consist of 1..N modules. A module can span multiple
  * ADSP memory blocks. The simplest FW will be a file with 1 module. A module
- * can be instantiated multiple times in the DSP.
+ * can be instanciated multiple times in the DSP.
  */
 struct sst_module {
 	struct sst_dsp *dsp;

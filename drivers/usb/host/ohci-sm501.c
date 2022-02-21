@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-1.0+
 /*
  * OHCI HCD (Host Controller Driver) for USB.
  *
@@ -124,12 +123,13 @@ static int ohci_hcd_sm501_drv_probe(struct platform_device *pdev)
 	 * regular memory. The HCD_LOCAL_MEM flag does just that.
 	 */
 
-	retval = dma_declare_coherent_memory(dev, mem->start,
+	if (!dma_declare_coherent_memory(dev, mem->start,
 					 mem->start - mem->parent->start,
 					 resource_size(mem),
-					 DMA_MEMORY_EXCLUSIVE);
-	if (retval) {
+					 DMA_MEMORY_MAP |
+					 DMA_MEMORY_EXCLUSIVE)) {
 		dev_err(dev, "cannot declare coherent memory\n");
+		retval = -ENXIO;
 		goto err1;
 	}
 
@@ -196,6 +196,7 @@ static int ohci_hcd_sm501_drv_remove(struct platform_device *pdev)
 	struct resource	*mem;
 
 	usb_remove_hcd(hcd);
+	iounmap(hcd->regs);
 	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 	usb_put_hcd(hcd);
 	dma_release_declared_memory(&pdev->dev);

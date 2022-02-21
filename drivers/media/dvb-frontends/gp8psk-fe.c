@@ -16,7 +16,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include "gp8psk-fe.h"
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 
 static int debug;
 module_param(debug, int, 0644);
@@ -323,7 +323,7 @@ static void gp8psk_fe_release(struct dvb_frontend* fe)
 	kfree(st);
 }
 
-static const struct dvb_frontend_ops gp8psk_fe_ops;
+static struct dvb_frontend_ops gp8psk_fe_ops;
 
 struct dvb_frontend *gp8psk_fe_attach(const struct gp8psk_fe_ops *ops,
 				      void *priv, bool is_rev1)
@@ -351,13 +351,13 @@ struct dvb_frontend *gp8psk_fe_attach(const struct gp8psk_fe_ops *ops,
 }
 EXPORT_SYMBOL_GPL(gp8psk_fe_attach);
 
-static const struct dvb_frontend_ops gp8psk_fe_ops = {
+static struct dvb_frontend_ops gp8psk_fe_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name			= "Genpix DVB-S",
-		.frequency_min_hz	=  800 * MHz,
-		.frequency_max_hz	= 2250 * MHz,
-		.frequency_stepsize_hz	=  100 * kHz,
+		.frequency_min		= 800000,
+		.frequency_max		= 2250000,
+		.frequency_stepsize	= 100,
 		.symbol_rate_min        = 1000000,
 		.symbol_rate_max        = 45000000,
 		.symbol_rate_tolerance  = 500,  /* ppm */

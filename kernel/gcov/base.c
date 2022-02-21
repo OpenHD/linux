@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  This code maintains a list of active profiling data structures.
  *

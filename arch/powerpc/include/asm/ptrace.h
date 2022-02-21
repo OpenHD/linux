@@ -24,7 +24,6 @@
 #define _ASM_POWERPC_PTRACE_H
 
 #include <uapi/asm/ptrace.h>
-#include <asm/asm-const.h>
 
 
 #ifdef __powerpc64__

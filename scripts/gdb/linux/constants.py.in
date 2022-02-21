@@ -14,7 +14,6 @@
 
 #include <linux/fs.h>
 #include <linux/mount.h>
-#include <linux/of_fdt.h>
 
 /* We need to stringify expanded macros so that they can be parsed */
 
@@ -51,9 +50,3 @@ LX_VALUE(MNT_NOEXEC)
 LX_VALUE(MNT_NOATIME)
 LX_VALUE(MNT_NODIRATIME)
 LX_VALUE(MNT_RELATIME)
-
-/* linux/of_fdt.h> */
-LX_VALUE(OF_DT_HEADER)
-
-/* Kernel Configs */
-LX_CONFIG(CONFIG_OF)

@@ -1,9 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// max14577.c - Regulator driver for the Maxim 14577/77836
-//
-// Copyright (C) 2013,2014 Samsung Electronics
-// Krzysztof Kozlowski <krzk@kernel.org>
+/*
+ * max14577.c - Regulator driver for the Maxim 14577/77836
+ *
+ * Copyright (C) 2013,2014 Samsung Electronics
+ * Krzysztof Kozlowski <krzk@kernel.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -75,14 +85,14 @@ static int max14577_reg_set_current_limit(struct regulator_dev *rdev,
 			reg_data);
 }
 
-static const struct regulator_ops max14577_safeout_ops = {
+static struct regulator_ops max14577_safeout_ops = {
 	.is_enabled		= regulator_is_enabled_regmap,
 	.enable			= regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,
 	.list_voltage		= regulator_list_voltage_linear,
 };
 
-static const struct regulator_ops max14577_charger_ops = {
+static struct regulator_ops max14577_charger_ops = {
 	.is_enabled		= max14577_reg_is_enabled,
 	.enable			= regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,
@@ -120,7 +130,7 @@ static const struct regulator_desc max14577_supported_regulators[] = {
 	[MAX14577_CHARGER] = MAX14577_CHARGER_REG,
 };
 
-static const struct regulator_ops max77836_ldo_ops = {
+static struct regulator_ops max77836_ldo_ops = {
 	.is_enabled		= regulator_is_enabled_regmap,
 	.enable			= regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,

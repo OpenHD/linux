@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "block-range.h"
 #include "annotate.h"
 

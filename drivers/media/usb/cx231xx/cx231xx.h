@@ -38,6 +38,7 @@
 #include <media/v4l2-fh.h>
 #include <media/rc-core.h>
 #include <media/i2c/ir-kbd-i2c.h>
+#include <media/videobuf-dvb.h>
 
 #include "cx231xx-reg.h"
 #include "cx231xx-pcb-cfg.h"
@@ -77,11 +78,9 @@
 #define CX231XX_BOARD_HAUPPAUGE_930C_HD_1114xx 20
 #define CX231XX_BOARD_HAUPPAUGE_955Q 21
 #define CX231XX_BOARD_TERRATEC_GRABBY 22
-#define CX231XX_BOARD_EVROMEDIA_FULL_HYBRID_FULLHD 23
-#define CX231XX_BOARD_ASTROMETA_T2HYBRID 24
-#define CX231XX_BOARD_THE_IMAGING_SOURCE_DFG_USB2_PRO 25
-#define CX231XX_BOARD_HAUPPAUGE_935C 26
-#define CX231XX_BOARD_HAUPPAUGE_975 27
+#define CX231XX_BOARD_AVERMEDIA_H837A 23
+#define CX231XX_BOARD_AVERMEDIA_H837B 24
+#define CX231XX_BOARD_AVERMEDIA_H837M 25
 
 /* Limits minimum and default number of buffers */
 #define CX231XX_MIN_BUF                 4
@@ -131,6 +130,7 @@
 #define SLEEP_S5H1432    30
 #define CX23417_OSC_EN   8
 #define CX23417_RESET    9
+#define AVERMEDIA_H837_LED_PIN 27
 
 struct cx23417_fmt {
 	char  *name;
@@ -344,7 +344,6 @@ struct cx231xx_board {
 
 	/* demod related */
 	int demod_addr;
-	int demod_addr2;
 	u8 demod_xfer_mode;	/* 0 - Serial; 1 - parallel */
 
 	/* GPIO Pins */
@@ -479,7 +478,7 @@ struct cx231xx_i2c {
 
 	/* i2c i/o */
 	struct i2c_adapter i2c_adap;
-	int i2c_rc;
+	u32 i2c_rc;
 
 	/* different settings for each bus */
 	u8 i2c_period;
@@ -544,6 +543,8 @@ struct cx231xx_tsport {
 
 	int                        nr;
 	int                        sram_chno;
+
+	struct videobuf_dvb_frontends frontends;
 
 	/* dma queues */
 
@@ -763,7 +764,7 @@ int cx231xx_reset_analog_tuner(struct cx231xx *dev);
 /* Provided by cx231xx-i2c.c */
 void cx231xx_do_i2c_scan(struct cx231xx *dev, int i2c_port);
 int cx231xx_i2c_register(struct cx231xx_i2c *bus);
-void cx231xx_i2c_unregister(struct cx231xx_i2c *bus);
+int cx231xx_i2c_unregister(struct cx231xx_i2c *bus);
 int cx231xx_i2c_mux_create(struct cx231xx *dev);
 int cx231xx_i2c_mux_register(struct cx231xx *dev, int mux_no);
 void cx231xx_i2c_mux_unregister(struct cx231xx *dev);
@@ -1008,4 +1009,16 @@ static inline unsigned int norm_maxh(struct cx231xx *dev)
 	else
 		return (dev->norm & V4L2_STD_625_50) ? 576 : 480;
 }
+
+static inline bool is_model_avermedia_h837_series(int model)
+{
+	switch (model) {
+	case CX231XX_BOARD_AVERMEDIA_H837A:
+	case CX231XX_BOARD_AVERMEDIA_H837B:
+	case CX231XX_BOARD_AVERMEDIA_H837M:
+		return true;
+	}
+	return false;
+}
+
 #endif

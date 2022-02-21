@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _KERNEL_EVENTS_INTERNAL_H
 #define _KERNEL_EVENTS_INTERNAL_H
 
@@ -39,9 +38,9 @@ struct ring_buffer {
 	struct user_struct		*mmap_user;
 
 	/* AUX area */
-	long				aux_head;
+	local_t				aux_head;
 	local_t				aux_nest;
-	long				aux_wakeup;	/* last aux_watermark boundary crossed by aux_head */
+	local_t				aux_wakeup;
 	unsigned long			aux_pgoff;
 	int				aux_nr_pages;
 	int				aux_overwrite;
@@ -201,15 +200,19 @@ arch_perf_out_copy_user(void *dst, const void *src, unsigned long n)
 
 DEFINE_OUTPUT_COPY(__output_copy_user, arch_perf_out_copy_user)
 
+/* Callchain handling */
+extern struct perf_callchain_entry *
+perf_callchain(struct perf_event *event, struct pt_regs *regs);
+
 static inline int get_recursion_context(int *recursion)
 {
 	int rctx;
 
-	if (unlikely(in_nmi()))
+	if (in_nmi())
 		rctx = 3;
 	else if (in_irq())
 		rctx = 2;
-	else if (in_softirq())
+	else if (in_serving_softirq())
 		rctx = 1;
 	else
 		rctx = 0;

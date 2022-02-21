@@ -25,14 +25,13 @@
 #include <linux/skbuff.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-#include <net/pkt_cls.h>
+
 
 struct multiq_sched_data {
 	u16 bands;
 	u16 max_bands;
 	u16 curband;
 	struct tcf_proto __rcu *filter_list;
-	struct tcf_block *block;
 	struct Qdisc **queues;
 };
 
@@ -47,14 +46,12 @@ multiq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	int err;
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	err = tcf_classify(skb, fl, &res, false);
+	err = tc_classify(skb, fl, &res, false);
 #ifdef CONFIG_NET_CLS_ACT
 	switch (err) {
 	case TC_ACT_STOLEN:
 	case TC_ACT_QUEUED:
-	case TC_ACT_TRAP:
 		*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
-		/* fall through */
 	case TC_ACT_SHOT:
 		return NULL;
 	}
@@ -173,15 +170,14 @@ multiq_destroy(struct Qdisc *sch)
 	int band;
 	struct multiq_sched_data *q = qdisc_priv(sch);
 
-	tcf_block_put(q->block);
+	tcf_destroy_chain(&q->filter_list);
 	for (band = 0; band < q->bands; band++)
 		qdisc_destroy(q->queues[band]);
 
 	kfree(q->queues);
 }
 
-static int multiq_tune(struct Qdisc *sch, struct nlattr *opt,
-		       struct netlink_ext_ack *extack)
+static int multiq_tune(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
 	struct tc_multiq_qopt *qopt;
@@ -216,13 +212,11 @@ static int multiq_tune(struct Qdisc *sch, struct nlattr *opt,
 			child = qdisc_create_dflt(sch->dev_queue,
 						  &pfifo_qdisc_ops,
 						  TC_H_MAKE(sch->handle,
-							    i + 1), extack);
+							    i + 1));
 			if (child) {
 				sch_tree_lock(sch);
 				old = q->queues[i];
 				q->queues[i] = child;
-				if (child != &noop_qdisc)
-					qdisc_hash_add(child, true);
 
 				if (old != &noop_qdisc) {
 					qdisc_tree_reduce_backlog(old,
@@ -237,20 +231,15 @@ static int multiq_tune(struct Qdisc *sch, struct nlattr *opt,
 	return 0;
 }
 
-static int multiq_init(struct Qdisc *sch, struct nlattr *opt,
-		       struct netlink_ext_ack *extack)
+static int multiq_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
-	int i, err;
+	int i;
 
 	q->queues = NULL;
 
-	if (!opt)
+	if (opt == NULL)
 		return -EINVAL;
-
-	err = tcf_block_get(&q->block, &q->filter_list, sch, extack);
-	if (err)
-		return err;
 
 	q->max_bands = qdisc_dev(sch)->num_tx_queues;
 
@@ -260,7 +249,7 @@ static int multiq_init(struct Qdisc *sch, struct nlattr *opt,
 	for (i = 0; i < q->max_bands; i++)
 		q->queues[i] = &noop_qdisc;
 
-	return multiq_tune(sch, opt, extack);
+	return multiq_tune(sch, opt);
 }
 
 static int multiq_dump(struct Qdisc *sch, struct sk_buff *skb)
@@ -283,7 +272,7 @@ nla_put_failure:
 }
 
 static int multiq_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
-			struct Qdisc **old, struct netlink_ext_ack *extack)
+		      struct Qdisc **old)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
 	unsigned long band = arg - 1;
@@ -304,7 +293,7 @@ multiq_leaf(struct Qdisc *sch, unsigned long arg)
 	return q->queues[band];
 }
 
-static unsigned long multiq_find(struct Qdisc *sch, u32 classid)
+static unsigned long multiq_get(struct Qdisc *sch, u32 classid)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
 	unsigned long band = TC_H_MIN(classid);
@@ -317,11 +306,11 @@ static unsigned long multiq_find(struct Qdisc *sch, u32 classid)
 static unsigned long multiq_bind(struct Qdisc *sch, unsigned long parent,
 				 u32 classid)
 {
-	return multiq_find(sch, classid);
+	return multiq_get(sch, classid);
 }
 
 
-static void multiq_unbind(struct Qdisc *q, unsigned long cl)
+static void multiq_put(struct Qdisc *q, unsigned long cl)
 {
 }
 
@@ -371,24 +360,25 @@ static void multiq_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 	}
 }
 
-static struct tcf_block *multiq_tcf_block(struct Qdisc *sch, unsigned long cl,
-					  struct netlink_ext_ack *extack)
+static struct tcf_proto __rcu **multiq_find_tcf(struct Qdisc *sch,
+						unsigned long cl)
 {
 	struct multiq_sched_data *q = qdisc_priv(sch);
 
 	if (cl)
 		return NULL;
-	return q->block;
+	return &q->filter_list;
 }
 
 static const struct Qdisc_class_ops multiq_class_ops = {
 	.graft		=	multiq_graft,
 	.leaf		=	multiq_leaf,
-	.find		=	multiq_find,
+	.get		=	multiq_get,
+	.put		=	multiq_put,
 	.walk		=	multiq_walk,
-	.tcf_block	=	multiq_tcf_block,
+	.tcf_chain	=	multiq_find_tcf,
 	.bind_tcf	=	multiq_bind,
-	.unbind_tcf	=	multiq_unbind,
+	.unbind_tcf	=	multiq_put,
 	.dump		=	multiq_dump_class,
 	.dump_stats	=	multiq_dump_class_stats,
 };

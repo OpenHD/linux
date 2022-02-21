@@ -23,36 +23,36 @@ static void nft_reject_inet_eval(const struct nft_expr *expr,
 {
 	struct nft_reject *priv = nft_expr_priv(expr);
 
-	switch (nft_pf(pkt)) {
+	switch (pkt->pf) {
 	case NFPROTO_IPV4:
 		switch (priv->type) {
 		case NFT_REJECT_ICMP_UNREACH:
 			nf_send_unreach(pkt->skb, priv->icmp_code,
-					nft_hook(pkt));
+					pkt->hook);
 			break;
 		case NFT_REJECT_TCP_RST:
-			nf_send_reset(nft_net(pkt), pkt->skb, nft_hook(pkt));
+			nf_send_reset(pkt->net, pkt->skb, pkt->hook);
 			break;
 		case NFT_REJECT_ICMPX_UNREACH:
 			nf_send_unreach(pkt->skb,
 					nft_reject_icmp_code(priv->icmp_code),
-					nft_hook(pkt));
+					pkt->hook);
 			break;
 		}
 		break;
 	case NFPROTO_IPV6:
 		switch (priv->type) {
 		case NFT_REJECT_ICMP_UNREACH:
-			nf_send_unreach6(nft_net(pkt), pkt->skb,
-					 priv->icmp_code, nft_hook(pkt));
+			nf_send_unreach6(pkt->net, pkt->skb, priv->icmp_code,
+					 pkt->hook);
 			break;
 		case NFT_REJECT_TCP_RST:
-			nf_send_reset6(nft_net(pkt), pkt->skb, nft_hook(pkt));
+			nf_send_reset6(pkt->net, pkt->skb, pkt->hook);
 			break;
 		case NFT_REJECT_ICMPX_UNREACH:
-			nf_send_unreach6(nft_net(pkt), pkt->skb,
+			nf_send_unreach6(pkt->net, pkt->skb,
 					 nft_reject_icmpv6_code(priv->icmp_code),
-					 nft_hook(pkt));
+					 pkt->hook);
 			break;
 		}
 		break;
@@ -66,7 +66,11 @@ static int nft_reject_inet_init(const struct nft_ctx *ctx,
 				const struct nlattr * const tb[])
 {
 	struct nft_reject *priv = nft_expr_priv(expr);
-	int icmp_code;
+	int icmp_code, err;
+
+	err = nft_reject_validate(ctx, expr, NULL);
+	if (err < 0)
+		return err;
 
 	if (tb[NFTA_REJECT_TYPE] == NULL)
 		return -EINVAL;

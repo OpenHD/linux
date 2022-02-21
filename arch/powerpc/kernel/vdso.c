@@ -22,6 +22,7 @@
 #include <linux/security.h>
 #include <linux/memblock.h>
 
+#include <asm/cpu_has_feature.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/mmu.h>
@@ -98,28 +99,26 @@ static struct vdso_patch_def vdso_patches[] = {
 		CPU_FTR_COHERENT_ICACHE, CPU_FTR_COHERENT_ICACHE,
 		"__kernel_sync_dicache", "__kernel_sync_dicache_p5"
 	},
-#ifdef CONFIG_PPC32
 	{
-		CPU_FTR_USE_RTC, CPU_FTR_USE_RTC,
+		CPU_FTR_USE_TB, 0,
 		"__kernel_gettimeofday", NULL
 	},
 	{
-		CPU_FTR_USE_RTC, CPU_FTR_USE_RTC,
+		CPU_FTR_USE_TB, 0,
 		"__kernel_clock_gettime", NULL
 	},
 	{
-		CPU_FTR_USE_RTC, CPU_FTR_USE_RTC,
+		CPU_FTR_USE_TB, 0,
 		"__kernel_clock_getres", NULL
 	},
 	{
-		CPU_FTR_USE_RTC, CPU_FTR_USE_RTC,
+		CPU_FTR_USE_TB, 0,
 		"__kernel_get_tbfreq", NULL
 	},
 	{
-		CPU_FTR_USE_RTC, CPU_FTR_USE_RTC,
+		CPU_FTR_USE_TB, 0,
 		"__kernel_time", NULL
 	},
-#endif
 };
 
 /*
@@ -705,7 +704,7 @@ int vdso_getcpu_init(void)
 	node = cpu_to_node(cpu);
 	WARN_ON_ONCE(node > 0xffff);
 
-	val = (cpu & 0xfff) | ((node & 0xffff) << 16);
+	val = (cpu & 0xffff) | ((node & 0xffff) << 16);
 	mtspr(SPRN_SPRG_VDSO_WRITE, val);
 	get_paca()->sprg_vdso = val;
 
@@ -737,14 +736,16 @@ static int __init vdso_init(void)
 	if (firmware_has_feature(FW_FEATURE_LPAR))
 		vdso_data->platform |= 1;
 	vdso_data->physicalMemorySize = memblock_phys_mem_size();
-	vdso_data->dcache_size = ppc64_caches.l1d.size;
-	vdso_data->dcache_line_size = ppc64_caches.l1d.line_size;
-	vdso_data->icache_size = ppc64_caches.l1i.size;
-	vdso_data->icache_line_size = ppc64_caches.l1i.line_size;
-	vdso_data->dcache_block_size = ppc64_caches.l1d.block_size;
-	vdso_data->icache_block_size = ppc64_caches.l1i.block_size;
-	vdso_data->dcache_log_block_size = ppc64_caches.l1d.log_block_size;
-	vdso_data->icache_log_block_size = ppc64_caches.l1i.log_block_size;
+	vdso_data->dcache_size = ppc64_caches.dsize;
+	vdso_data->dcache_line_size = ppc64_caches.dline_size;
+	vdso_data->icache_size = ppc64_caches.isize;
+	vdso_data->icache_line_size = ppc64_caches.iline_size;
+
+	/* XXXOJN: Blocks should be added to ppc64_caches and used instead */
+	vdso_data->dcache_block_size = ppc64_caches.dline_size;
+	vdso_data->icache_block_size = ppc64_caches.iline_size;
+	vdso_data->dcache_log_block_size = ppc64_caches.log_dline_size;
+	vdso_data->icache_log_block_size = ppc64_caches.log_iline_size;
 
 	/*
 	 * Calculate the size of the 64 bits vDSO
@@ -790,7 +791,7 @@ static int __init vdso_init(void)
 
 #ifdef CONFIG_VDSO32
 	/* Make sure pages are in the correct state */
-	vdso32_pagelist = kcalloc(vdso32_pages + 2, sizeof(struct page *),
+	vdso32_pagelist = kzalloc(sizeof(struct page *) * (vdso32_pages + 2),
 				  GFP_KERNEL);
 	BUG_ON(vdso32_pagelist == NULL);
 	for (i = 0; i < vdso32_pages; i++) {
@@ -804,7 +805,7 @@ static int __init vdso_init(void)
 #endif
 
 #ifdef CONFIG_PPC64
-	vdso64_pagelist = kcalloc(vdso64_pages + 2, sizeof(struct page *),
+	vdso64_pagelist = kzalloc(sizeof(struct page *) * (vdso64_pages + 2),
 				  GFP_KERNEL);
 	BUG_ON(vdso64_pagelist == NULL);
 	for (i = 0; i < vdso64_pages; i++) {

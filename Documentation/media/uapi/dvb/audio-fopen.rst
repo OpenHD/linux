@@ -2,14 +2,14 @@
 
 .. _audio_fopen:
 
-=======================
-Digital TV audio open()
-=======================
+================
+DVB audio open()
+================
 
 Name
 ----
 
-Digital TV audio open()
+DVB audio open()
 
 .. attention:: This ioctl is deprecated
 

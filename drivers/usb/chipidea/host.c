@@ -1,10 +1,22 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * host.c - ChipIdea USB host controller driver
  *
  * Copyright (c) 2012 Intel Corporation
  *
  * Author: Alexander Shishkin
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -80,13 +92,6 @@ static int ehci_ci_reset(struct usb_hcd *hcd)
 
 	ehci->need_io_watchdog = 0;
 
-	if (ci->platdata->notify_event) {
-		ret = ci->platdata->notify_event(ci,
-				CI_HDRC_CONTROLLER_RESET_EVENT);
-		if (ret)
-			return ret;
-	}
-
 	ci_platform_configure(ci);
 
 	return ret;
@@ -113,8 +118,7 @@ static int host_start(struct ci_hdrc *ci)
 	if (usb_disabled())
 		return -ENODEV;
 
-	hcd = __usb_create_hcd(&ci_ehci_hc_driver, ci->dev->parent,
-			       ci->dev, dev_name(ci->dev), NULL);
+	hcd = usb_create_hcd(&ci_ehci_hc_driver, ci->dev, dev_name(ci->dev));
 	if (!hcd)
 		return -ENOMEM;
 
@@ -126,11 +130,10 @@ static int host_start(struct ci_hdrc *ci)
 
 	hcd->power_budget = ci->platdata->power_budget;
 	hcd->tpl_support = ci->platdata->tpl_support;
-	if (ci->phy || ci->usb_phy) {
-		hcd->skip_phy_initialization = 1;
-		if (ci->usb_phy)
-			hcd->usb_phy = ci->usb_phy;
-	}
+	if (ci->phy)
+		hcd->phy = ci->phy;
+	else
+		hcd->usb_phy = ci->usb_phy;
 
 	ehci = hcd_to_ehci(hcd);
 	ehci->caps = ci->hw_bank.cap;
@@ -186,9 +189,6 @@ static void host_stop(struct ci_hdrc *ci)
 	struct usb_hcd *hcd = ci->hcd;
 
 	if (hcd) {
-		if (ci->platdata->notify_event)
-			ci->platdata->notify_event(ci,
-				CI_HDRC_CONTROLLER_STOPPED_EVENT);
 		usb_remove_hcd(hcd);
 		ci->role = CI_ROLE_END;
 		synchronize_irq(ci->irq);

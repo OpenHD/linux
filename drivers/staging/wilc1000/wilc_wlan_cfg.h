@@ -1,8 +1,11 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (c) 2012 - 2018 Microchip Technology Inc., and its subsidiaries.
- * All rights reserved.
- */
+/* ////////////////////////////////////////////////////////////////////////// */
+/*  */
+/* Copyright (c) Atmel Corporation.  All rights reserved. */
+/*  */
+/* Module Name:  wilc_wlan_cfg.h */
+/*  */
+/*  */
+/* ///////////////////////////////////////////////////////////////////////// */
 
 #ifndef WILC_WLAN_CFG_H
 #define WILC_WLAN_CFG_H
@@ -18,12 +21,12 @@ struct wilc_cfg_hword {
 };
 
 struct wilc_cfg_word {
-	u16 id;
+	u32 id;
 	u32 val;
 };
 
 struct wilc_cfg_str {
-	u16 id;
+	u32 id;
 	u8 *str;
 };
 

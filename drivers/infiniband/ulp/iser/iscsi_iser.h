@@ -383,6 +383,10 @@ struct iser_device {
 	bool                         remote_inv_sup;
 };
 
+#define ISER_CHECK_GUARD	0xc0
+#define ISER_CHECK_REFTAG	0x0f
+#define ISER_CHECK_APPTAG	0x30
+
 /**
  * struct iser_reg_resources - Fast registration recources
  *
@@ -494,7 +498,7 @@ struct ib_conn {
  * @rx_descs:         rx buffers array (cyclic buffer)
  * @num_rx_descs:     number of rx descriptors
  * @scsi_sg_tablesize: scsi host sg_tablesize
- * @pages_per_mr:     maximum pages available for registration
+ * @scsi_max_sectors: scsi host max sectors
  */
 struct iser_conn {
 	struct ib_conn		     ib_conn;
@@ -517,7 +521,7 @@ struct iser_conn {
 	struct iser_rx_desc	     *rx_descs;
 	u32                          num_rx_descs;
 	unsigned short               scsi_sg_tablesize;
-	unsigned short               pages_per_mr;
+	unsigned int                 scsi_max_sectors;
 	bool			     snd_w_inv;
 };
 

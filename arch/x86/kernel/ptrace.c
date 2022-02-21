@@ -6,7 +6,6 @@
 
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/errno.h>
@@ -26,7 +25,7 @@
 #include <linux/context_tracking.h>
 #include <linux/nospec.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/fpu/internal.h>
@@ -40,7 +39,6 @@
 #include <asm/hw_breakpoint.h>
 #include <asm/traps.h>
 #include <asm/syscall.h>
-#include <asm/mmu_context.h>
 
 #include "tls.h"
 
@@ -344,49 +342,6 @@ static int set_segment_reg(struct task_struct *task,
 	return 0;
 }
 
-static unsigned long task_seg_base(struct task_struct *task,
-				   unsigned short selector)
-{
-	unsigned short idx = selector >> 3;
-	unsigned long base;
-
-	if (likely((selector & SEGMENT_TI_MASK) == 0)) {
-		if (unlikely(idx >= GDT_ENTRIES))
-			return 0;
-
-		/*
-		 * There are no user segments in the GDT with nonzero bases
-		 * other than the TLS segments.
-		 */
-		if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
-			return 0;
-
-		idx -= GDT_ENTRY_TLS_MIN;
-		base = get_desc_base(&task->thread.tls_array[idx]);
-	} else {
-#ifdef CONFIG_MODIFY_LDT_SYSCALL
-		struct ldt_struct *ldt;
-
-		/*
-		 * If performance here mattered, we could protect the LDT
-		 * with RCU.  This is a slow path, though, so we can just
-		 * take the mutex.
-		 */
-		mutex_lock(&task->mm->context.lock);
-		ldt = task->mm->context.ldt;
-		if (unlikely(idx >= ldt->nr_entries))
-			base = 0;
-		else
-			base = get_desc_base(ldt->entries + idx);
-		mutex_unlock(&task->mm->context.lock);
-#else
-		base = 0;
-#endif
-	}
-
-	return base;
-}
-
 #endif	/* CONFIG_X86_32 */
 
 static unsigned long get_flags(struct task_struct *task)
@@ -441,12 +396,12 @@ static int putreg(struct task_struct *child,
 		if (value >= TASK_SIZE_MAX)
 			return -EIO;
 		/*
-		 * When changing the segment base, use do_arch_prctl_64
+		 * When changing the segment base, use do_arch_prctl
 		 * to set either thread.fs or thread.fsindex and the
 		 * corresponding GDT slot.
 		 */
 		if (child->thread.fsbase != value)
-			return do_arch_prctl_64(child, ARCH_SET_FS, value);
+			return do_arch_prctl(child, ARCH_SET_FS, value);
 		return 0;
 	case offsetof(struct user_regs_struct,gs_base):
 		/*
@@ -455,7 +410,7 @@ static int putreg(struct task_struct *child,
 		if (value >= TASK_SIZE_MAX)
 			return -EIO;
 		if (child->thread.gsbase != value)
-			return do_arch_prctl_64(child, ARCH_SET_GS, value);
+			return do_arch_prctl(child, ARCH_SET_GS, value);
 		return 0;
 #endif
 	}
@@ -480,16 +435,18 @@ static unsigned long getreg(struct task_struct *task, unsigned long offset)
 
 #ifdef CONFIG_X86_64
 	case offsetof(struct user_regs_struct, fs_base): {
-		if (task->thread.fsindex == 0)
-			return task->thread.fsbase;
-		else
-			return task_seg_base(task, task->thread.fsindex);
+		/*
+		 * XXX: This will not behave as expected if called on
+		 * current or if fsindex != 0.
+		 */
+		return task->thread.fsbase;
 	}
 	case offsetof(struct user_regs_struct, gs_base): {
-		if (task->thread.gsindex == 0)
-			return task->thread.gsbase;
-		else
-			return task_seg_base(task, task->thread.gsindex);
+		/*
+		 * XXX: This will not behave as expected if called on
+		 * current or if fsindex != 0.
+		 */
+		return task->thread.gsbase;
 	}
 #endif
 	}
@@ -913,7 +870,7 @@ long arch_ptrace(struct task_struct *child, long request,
 		   Works just like arch_prctl, except that the arguments
 		   are reversed. */
 	case PTRACE_ARCH_PRCTL:
-		ret = do_arch_prctl_64(child, data, addr);
+		ret = do_arch_prctl(child, data, addr);
 		break;
 #endif
 
@@ -1421,6 +1378,7 @@ static void fill_sigtrap_info(struct task_struct *tsk,
 	tsk->thread.trap_nr = X86_TRAP_DB;
 	tsk->thread.error_code = error_code;
 
+	memset(info, 0, sizeof(*info));
 	info->si_signo = SIGTRAP;
 	info->si_code = si_code;
 	info->si_addr = user_mode(regs) ? (void __user *)regs->ip : NULL;
@@ -1438,7 +1396,6 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs,
 {
 	struct siginfo info;
 
-	clear_siginfo(&info);
 	fill_sigtrap_info(tsk, regs, error_code, si_code, &info);
 	/* Send us the fake SIGTRAP */
 	force_sig_info(SIGTRAP, &info, tsk);

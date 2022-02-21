@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
 /*-
  * Copyright (c) 2003, 2004
  *	Damien Bergamini <damien.bergamini@free.fr>. All rights reserved.
@@ -2218,7 +2217,7 @@ static int uea_boot(struct uea_softc *sc, struct usb_interface *intf)
 	ret = usb_submit_urb(sc->urb_int, GFP_KERNEL);
 	if (ret < 0) {
 		uea_err(INS_TO_USBDEV(sc),
-		       "urb submission failed with error %d\n", ret);
+		       "urb submition failed with error %d\n", ret);
 		goto err1;
 	}
 
@@ -2286,7 +2285,7 @@ static struct uea_softc *dev_to_uea(struct device *dev)
 	return usbatm->driver_data;
 }
 
-static ssize_t stat_status_show(struct device *dev, struct device_attribute *attr,
+static ssize_t read_status(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
 	int ret = -ENODEV;
@@ -2302,7 +2301,7 @@ out:
 	return ret;
 }
 
-static ssize_t stat_status_store(struct device *dev, struct device_attribute *attr,
+static ssize_t reboot(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
 	int ret = -ENODEV;
@@ -2319,9 +2318,9 @@ out:
 	return ret;
 }
 
-static DEVICE_ATTR_RW(stat_status);
+static DEVICE_ATTR(stat_status, S_IWUSR | S_IRUGO, read_status, reboot);
 
-static ssize_t stat_human_status_show(struct device *dev,
+static ssize_t read_human_status(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	int ret = -ENODEV;
@@ -2382,9 +2381,9 @@ out:
 	return ret;
 }
 
-static DEVICE_ATTR_RO(stat_human_status);
+static DEVICE_ATTR(stat_human_status, S_IRUGO, read_human_status, NULL);
 
-static ssize_t stat_delin_show(struct device *dev, struct device_attribute *attr,
+static ssize_t read_delin(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
 	int ret = -ENODEV;
@@ -2414,11 +2413,11 @@ out:
 	return ret;
 }
 
-static DEVICE_ATTR_RO(stat_delin);
+static DEVICE_ATTR(stat_delin, S_IRUGO, read_delin, NULL);
 
 #define UEA_ATTR(name, reset)					\
 								\
-static ssize_t stat_##name##_show(struct device *dev,		\
+static ssize_t read_##name(struct device *dev,			\
 		struct device_attribute *attr, char *buf)	\
 {								\
 	int ret = -ENODEV;					\
@@ -2436,7 +2435,7 @@ out:								\
 	return ret;						\
 }								\
 								\
-static DEVICE_ATTR_RO(stat_##name)
+static DEVICE_ATTR(stat_##name, S_IRUGO, read_##name, NULL)
 
 UEA_ATTR(mflags, 1);
 UEA_ATTR(vidcpe, 0);
@@ -2529,7 +2528,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_stat_firmid.attr,
 	NULL,
 };
-static const struct attribute_group attr_grp = {
+static struct attribute_group attr_grp = {
 	.attrs = attrs,
 };
 

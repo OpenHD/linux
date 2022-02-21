@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * latencytop.h: Infrastructure for displaying latency
  *

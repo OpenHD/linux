@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2011 Samsung Electronics
  *	MyungJoo Ham <myungjoo.ham@samsung.com>
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -11,7 +12,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/kmod.h>
 #include <linux/sched.h>
 #include <linux/errno.h>
 #include <linux/err.h>
@@ -28,9 +28,6 @@
 #include <linux/hrtimer.h>
 #include <linux/of.h>
 #include "governor.h"
-
-#define MAX(a,b)	((a > b) ? a : b)
-#define MIN(a,b)	((a < b) ? a : b)
 
 static struct class *devfreq_class;
 
@@ -73,34 +70,6 @@ static struct devfreq *find_device_devfreq(struct device *dev)
 	return ERR_PTR(-ENODEV);
 }
 
-static unsigned long find_available_min_freq(struct devfreq *devfreq)
-{
-	struct dev_pm_opp *opp;
-	unsigned long min_freq = 0;
-
-	opp = dev_pm_opp_find_freq_ceil(devfreq->dev.parent, &min_freq);
-	if (IS_ERR(opp))
-		min_freq = 0;
-	else
-		dev_pm_opp_put(opp);
-
-	return min_freq;
-}
-
-static unsigned long find_available_max_freq(struct devfreq *devfreq)
-{
-	struct dev_pm_opp *opp;
-	unsigned long max_freq = ULONG_MAX;
-
-	opp = dev_pm_opp_find_freq_floor(devfreq->dev.parent, &max_freq);
-	if (IS_ERR(opp))
-		max_freq = 0;
-	else
-		dev_pm_opp_put(opp);
-
-	return max_freq;
-}
-
 /**
  * devfreq_get_freq_level() - Lookup freq_table for the frequency
  * @devfreq:	the devfreq instance
@@ -110,14 +79,34 @@ static int devfreq_get_freq_level(struct devfreq *devfreq, unsigned long freq)
 {
 	int lev;
 
-	for (lev = 0; lev < devfreq->profile->max_state; lev++)
-		if (freq == devfreq->profile->freq_table[lev])
-			return lev;
+	if (!devfreq->profile->max_state)
+		return -EINVAL;
 
-	return -EINVAL;
+	for (lev = 0; lev < devfreq->profile->max_state; lev++) {
+		if (devfreq->profile->freq_table[lev] >= freq) {
+			/* below minimum frequency? just return zero level */
+			if (lev == 0)
+				return 0;
+
+			/* select high freq if the freq is closer to that */
+			if ((devfreq->profile->freq_table[lev] - freq) <
+			    (freq - devfreq->profile->freq_table[lev - 1]))
+				return lev;
+
+			/* ..otherwise return the low freq */
+			return lev - 1;
+		}
+	}
+
+	/* above max freq */
+	return devfreq->profile->max_state - 1;
 }
 
-static int set_freq_table(struct devfreq *devfreq)
+/**
+ * devfreq_set_freq_table() - Initialize freq_table for the frequency
+ * @devfreq:	the devfreq instance
+ */
+static void devfreq_set_freq_table(struct devfreq *devfreq)
 {
 	struct devfreq_dev_profile *profile = devfreq->profile;
 	struct dev_pm_opp *opp;
@@ -127,7 +116,7 @@ static int set_freq_table(struct devfreq *devfreq)
 	/* Initialize the freq_table from OPP table */
 	count = dev_pm_opp_get_opp_count(devfreq->dev.parent);
 	if (count <= 0)
-		return -EINVAL;
+		return;
 
 	profile->max_state = count;
 	profile->freq_table = devm_kcalloc(devfreq->dev.parent,
@@ -136,21 +125,21 @@ static int set_freq_table(struct devfreq *devfreq)
 					GFP_KERNEL);
 	if (!profile->freq_table) {
 		profile->max_state = 0;
-		return -ENOMEM;
+		return;
 	}
 
+	rcu_read_lock();
 	for (i = 0, freq = 0; i < profile->max_state; i++, freq++) {
 		opp = dev_pm_opp_find_freq_ceil(devfreq->dev.parent, &freq);
 		if (IS_ERR(opp)) {
 			devm_kfree(devfreq->dev.parent, profile->freq_table);
 			profile->max_state = 0;
-			return PTR_ERR(opp);
+			rcu_read_unlock();
+			return;
 		}
-		dev_pm_opp_put(opp);
 		profile->freq_table[i] = freq;
 	}
-
-	return 0;
+	rcu_read_unlock();
 }
 
 /**
@@ -162,6 +151,9 @@ int devfreq_update_status(struct devfreq *devfreq, unsigned long freq)
 {
 	int lev, prev_lev, ret = 0;
 	unsigned long cur_time;
+
+	if (devfreq->suspended)
+		return 0;
 
 	lockdep_assert_held(&devfreq->lock);
 	cur_time = jiffies;
@@ -223,49 +215,6 @@ static struct devfreq_governor *find_devfreq_governor(const char *name)
 	return ERR_PTR(-ENODEV);
 }
 
-/**
- * try_then_request_governor() - Try to find the governor and request the
- *                               module if is not found.
- * @name:	name of the governor
- *
- * Search the list of devfreq governors and request the module and try again
- * if is not found. This can happen when both drivers (the governor driver
- * and the driver that call devfreq_add_device) are built as modules.
- * devfreq_list_lock should be held by the caller. Returns the matched
- * governor's pointer or an error pointer.
- */
-static struct devfreq_governor *try_then_request_governor(const char *name)
-{
-	struct devfreq_governor *governor;
-	int err = 0;
-
-	if (IS_ERR_OR_NULL(name)) {
-		pr_err("DEVFREQ: %s: Invalid parameters\n", __func__);
-		return ERR_PTR(-EINVAL);
-	}
-	WARN(!mutex_is_locked(&devfreq_list_lock),
-	     "devfreq_list_lock must be locked.");
-
-	governor = find_devfreq_governor(name);
-	if (IS_ERR(governor)) {
-		mutex_unlock(&devfreq_list_lock);
-
-		if (!strncmp(name, DEVFREQ_GOV_SIMPLE_ONDEMAND,
-			     DEVFREQ_NAME_LEN))
-			err = request_module("governor_%s", "simpleondemand");
-		else
-			err = request_module("governor_%s", name);
-		/* Restore previous state before return */
-		mutex_lock(&devfreq_list_lock);
-		if (err)
-			return (err < 0) ? ERR_PTR(err) : ERR_PTR(-EINVAL);
-
-		governor = find_devfreq_governor(name);
-	}
-
-	return governor;
-}
-
 static int devfreq_notify_transition(struct devfreq *devfreq,
 		struct devfreq_freqs *freqs, unsigned int state)
 {
@@ -301,7 +250,7 @@ static int devfreq_notify_transition(struct devfreq *devfreq,
 int update_devfreq(struct devfreq *devfreq)
 {
 	struct devfreq_freqs freqs;
-	unsigned long freq, cur_freq, min_freq, max_freq;
+	unsigned long freq, cur_freq;
 	int err = 0;
 	u32 flags = 0;
 
@@ -313,27 +262,28 @@ int update_devfreq(struct devfreq *devfreq)
 	if (!devfreq->governor)
 		return -EINVAL;
 
+	if (devfreq->suspended)
+		return 0;
+
 	/* Reevaluate the proper frequency */
 	err = devfreq->governor->get_target_freq(devfreq, &freq);
 	if (err)
 		return err;
 
 	/*
-	 * Adjust the frequency with user freq, QoS and available freq.
+	 * Adjust the frequency with user freq and QoS.
 	 *
 	 * List from the highest priority
 	 * max_freq
 	 * min_freq
 	 */
-	max_freq = MIN(devfreq->scaling_max_freq, devfreq->max_freq);
-	min_freq = MAX(devfreq->scaling_min_freq, devfreq->min_freq);
 
-	if (freq < min_freq) {
-		freq = min_freq;
+	if (devfreq->min_freq && freq < devfreq->min_freq) {
+		freq = devfreq->min_freq;
 		flags &= ~DEVFREQ_FLAG_LEAST_UPPER_BOUND; /* Use GLB */
 	}
-	if (freq > max_freq) {
-		freq = max_freq;
+	if (devfreq->max_freq && freq > devfreq->max_freq) {
+		freq = devfreq->max_freq;
 		flags |= DEVFREQ_FLAG_LEAST_UPPER_BOUND; /* Use LUB */
 	}
 
@@ -356,9 +306,10 @@ int update_devfreq(struct devfreq *devfreq)
 	freqs.new = freq;
 	devfreq_notify_transition(devfreq, &freqs, DEVFREQ_POSTCHANGE);
 
-	if (devfreq_update_status(devfreq, freq))
-		dev_err(&devfreq->dev,
-			"Couldn't update frequency transition information.\n");
+	if (devfreq->profile->freq_table)
+		if (devfreq_update_status(devfreq, freq))
+			dev_err(&devfreq->dev,
+				"Couldn't update frequency transition information.\n");
 
 	devfreq->previous_freq = freq;
 	return err;
@@ -397,6 +348,9 @@ static void devfreq_monitor(struct work_struct *work)
  */
 void devfreq_monitor_start(struct devfreq *devfreq)
 {
+	if (devfreq->governor->interrupt_driven)
+		return;
+
 	INIT_DEFERRABLE_WORK(&devfreq->work, devfreq_monitor);
 	if (devfreq->profile->polling_ms)
 		queue_delayed_work(devfreq_wq, &devfreq->work,
@@ -414,6 +368,9 @@ EXPORT_SYMBOL(devfreq_monitor_start);
  */
 void devfreq_monitor_stop(struct devfreq *devfreq)
 {
+	if (devfreq->governor->interrupt_driven)
+		return;
+
 	cancel_delayed_work_sync(&devfreq->work);
 }
 EXPORT_SYMBOL(devfreq_monitor_stop);
@@ -441,6 +398,10 @@ void devfreq_monitor_suspend(struct devfreq *devfreq)
 	devfreq_update_status(devfreq, devfreq->previous_freq);
 	devfreq->stop_polling = true;
 	mutex_unlock(&devfreq->lock);
+
+	if (devfreq->governor->interrupt_driven)
+		return;
+
 	cancel_delayed_work_sync(&devfreq->work);
 }
 EXPORT_SYMBOL(devfreq_monitor_suspend);
@@ -461,11 +422,15 @@ void devfreq_monitor_resume(struct devfreq *devfreq)
 	if (!devfreq->stop_polling)
 		goto out;
 
+	if (devfreq->governor->interrupt_driven)
+		goto out_update;
+
 	if (!delayed_work_pending(&devfreq->work) &&
 			devfreq->profile->polling_ms)
 		queue_delayed_work(devfreq_wq, &devfreq->work,
 			msecs_to_jiffies(devfreq->profile->polling_ms));
 
+out_update:
 	devfreq->last_stat_updated = jiffies;
 	devfreq->stop_polling = false;
 
@@ -495,6 +460,9 @@ void devfreq_interval_update(struct devfreq *devfreq, unsigned int *delay)
 	devfreq->profile->polling_ms = new_delay;
 
 	if (devfreq->stop_polling)
+		goto out;
+
+	if (devfreq->governor->interrupt_driven)
 		goto out;
 
 	/* if new delay is zero, stop polling */
@@ -538,51 +506,47 @@ static int devfreq_notifier_call(struct notifier_block *nb, unsigned long type,
 				 void *devp)
 {
 	struct devfreq *devfreq = container_of(nb, struct devfreq, nb);
-	int err = -EINVAL;
+	int ret;
 
 	mutex_lock(&devfreq->lock);
-
-	devfreq->scaling_min_freq = find_available_min_freq(devfreq);
-	if (!devfreq->scaling_min_freq)
-		goto out;
-
-	devfreq->scaling_max_freq = find_available_max_freq(devfreq);
-	if (!devfreq->scaling_max_freq) {
-		devfreq->scaling_max_freq = ULONG_MAX;
-		goto out;
-	}
-
-	err = update_devfreq(devfreq);
-
-out:
+	ret = update_devfreq(devfreq);
 	mutex_unlock(&devfreq->lock);
-	if (err)
-		dev_err(devfreq->dev.parent,
-			"failed to update frequency from OPP notifier (%d)\n",
-			err);
 
-	return NOTIFY_OK;
+	return ret;
 }
 
 /**
- * devfreq_dev_release() - Callback for struct device to release the device.
- * @dev:	the devfreq device
- *
- * Remove devfreq from the list and release its resources.
+ * _remove_devfreq() - Remove devfreq from the list and release its resources.
+ * @devfreq:	the devfreq struct
  */
-static void devfreq_dev_release(struct device *dev)
+static void _remove_devfreq(struct devfreq *devfreq)
 {
-	struct devfreq *devfreq = to_devfreq(dev);
-
 	mutex_lock(&devfreq_list_lock);
 	list_del(&devfreq->node);
 	mutex_unlock(&devfreq_list_lock);
+
+	if (devfreq->governor)
+		devfreq->governor->event_handler(devfreq,
+						 DEVFREQ_GOV_STOP, NULL);
 
 	if (devfreq->profile->exit)
 		devfreq->profile->exit(devfreq->dev.parent);
 
 	mutex_destroy(&devfreq->lock);
 	kfree(devfreq);
+}
+
+/**
+ * devfreq_dev_release() - Callback for struct device to release the device.
+ * @dev:	the devfreq device
+ *
+ * This calls _remove_devfreq() if _remove_devfreq() is not called.
+ */
+static void devfreq_dev_release(struct device *dev)
+{
+	struct devfreq *devfreq = to_devfreq(dev);
+
+	_remove_devfreq(devfreq);
 }
 
 /**
@@ -600,7 +564,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 {
 	struct devfreq *devfreq;
 	struct devfreq_governor *governor;
-	static atomic_t devfreq_no = ATOMIC_INIT(-1);
 	int err = 0;
 
 	if (!dev || !profile || !governor_name) {
@@ -612,14 +575,15 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq = find_device_devfreq(dev);
 	mutex_unlock(&devfreq_list_lock);
 	if (!IS_ERR(devfreq)) {
-		dev_err(dev, "%s: Unable to create devfreq for the device.\n",
-			__func__);
+		dev_err(dev, "%s: Unable to create devfreq for the device. It already has one.\n", __func__);
 		err = -EINVAL;
 		goto err_out;
 	}
 
 	devfreq = kzalloc(sizeof(struct devfreq), GFP_KERNEL);
 	if (!devfreq) {
+		dev_err(dev, "%s: Unable to create devfreq for the device\n",
+			__func__);
 		err = -ENOMEM;
 		goto err_out;
 	}
@@ -631,7 +595,7 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->dev.release = devfreq_dev_release;
 	INIT_LIST_HEAD(&devfreq->node);
 	devfreq->profile = profile;
-	strncpy(devfreq->governor_name, governor_name, DEVFREQ_NAME_LEN);
+	strlcpy(devfreq->governor_name, governor_name, DEVFREQ_NAME_LEN);
 	devfreq->previous_freq = profile->initial_freq;
 	devfreq->last_status.current_frequency = profile->initial_freq;
 	devfreq->data = data;
@@ -639,46 +603,23 @@ struct devfreq *devfreq_add_device(struct device *dev,
 
 	if (!devfreq->profile->max_state && !devfreq->profile->freq_table) {
 		mutex_unlock(&devfreq->lock);
-		err = set_freq_table(devfreq);
-		if (err < 0)
-			goto err_out;
+		devfreq_set_freq_table(devfreq);
 		mutex_lock(&devfreq->lock);
 	}
 
-	devfreq->scaling_min_freq = find_available_min_freq(devfreq);
-	if (!devfreq->scaling_min_freq) {
-		mutex_unlock(&devfreq->lock);
-		err = -EINVAL;
-		goto err_dev;
-	}
-	devfreq->min_freq = devfreq->scaling_min_freq;
-
-	devfreq->scaling_max_freq = find_available_max_freq(devfreq);
-	if (!devfreq->scaling_max_freq) {
-		mutex_unlock(&devfreq->lock);
-		err = -EINVAL;
-		goto err_dev;
-	}
-	devfreq->max_freq = devfreq->scaling_max_freq;
-
-	dev_set_name(&devfreq->dev, "devfreq%d",
-				atomic_inc_return(&devfreq_no));
+	dev_set_name(&devfreq->dev, "%s", dev_name(dev));
 	err = device_register(&devfreq->dev);
 	if (err) {
 		mutex_unlock(&devfreq->lock);
-		put_device(&devfreq->dev);
-		goto err_out;
+		goto err_dev;
 	}
 
-	devfreq->trans_table =
-		devm_kzalloc(&devfreq->dev,
-			     array3_size(sizeof(unsigned int),
-					 devfreq->profile->max_state,
-					 devfreq->profile->max_state),
-			     GFP_KERNEL);
-	devfreq->time_in_state = devm_kcalloc(&devfreq->dev,
+	devfreq->trans_table =	devm_kzalloc(&devfreq->dev, sizeof(unsigned int) *
+						devfreq->profile->max_state *
 						devfreq->profile->max_state,
-						sizeof(unsigned long),
+						GFP_KERNEL);
+	devfreq->time_in_state = devm_kzalloc(&devfreq->dev, sizeof(unsigned long) *
+						devfreq->profile->max_state,
 						GFP_KERNEL);
 	devfreq->last_stat_updated = jiffies;
 
@@ -687,8 +628,9 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	mutex_unlock(&devfreq->lock);
 
 	mutex_lock(&devfreq_list_lock);
+	list_add(&devfreq->node, &devfreq_list);
 
-	governor = try_then_request_governor(devfreq->governor_name);
+	governor = find_devfreq_governor(devfreq->governor_name);
 	if (IS_ERR(governor)) {
 		dev_err(dev, "%s: Unable to find governor for the device\n",
 			__func__);
@@ -704,18 +646,15 @@ struct devfreq *devfreq_add_device(struct device *dev,
 			__func__);
 		goto err_init;
 	}
-
-	list_add(&devfreq->node, &devfreq_list);
-
 	mutex_unlock(&devfreq_list_lock);
 
 	return devfreq;
 
 err_init:
+	list_del(&devfreq->node);
 	mutex_unlock(&devfreq_list_lock);
 
-	devfreq_remove_device(devfreq);
-	devfreq = NULL;
+	device_unregister(&devfreq->dev);
 err_dev:
 	if (devfreq)
 		kfree(devfreq);
@@ -735,9 +674,6 @@ int devfreq_remove_device(struct devfreq *devfreq)
 	if (!devfreq)
 		return -EINVAL;
 
-	if (devfreq->governor)
-		devfreq->governor->event_handler(devfreq,
-						 DEVFREQ_GOV_STOP, NULL);
 	device_unregister(&devfreq->dev);
 
 	return 0;
@@ -865,6 +801,12 @@ int devfreq_suspend_device(struct devfreq *devfreq)
 	if (!devfreq)
 		return -EINVAL;
 
+	/* Last update before suspend */
+	mutex_lock(&devfreq->lock);
+	devfreq_update_status(devfreq, devfreq->previous_freq);
+	devfreq->suspended = true;
+	mutex_unlock(&devfreq->lock);
+
 	if (!devfreq->governor)
 		return 0;
 
@@ -885,6 +827,12 @@ int devfreq_resume_device(struct devfreq *devfreq)
 {
 	if (!devfreq)
 		return -EINVAL;
+
+	/* Update the timestamp before resuming */
+	mutex_lock(&devfreq->lock);
+	devfreq->last_stat_updated = jiffies;
+	devfreq->suspended = false;
+	mutex_unlock(&devfreq->lock);
 
 	if (!devfreq->governor)
 		return 0;
@@ -960,7 +908,7 @@ err_out:
 EXPORT_SYMBOL(devfreq_add_governor);
 
 /**
- * devfreq_remove_governor() - Remove devfreq feature from a device.
+ * devfreq_remove_device() - Remove devfreq feature from a device.
  * @governor:	the devfreq governor to be removed
  */
 int devfreq_remove_governor(struct devfreq_governor *governor)
@@ -1014,21 +962,13 @@ err_out:
 }
 EXPORT_SYMBOL(devfreq_remove_governor);
 
-static ssize_t name_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct devfreq *devfreq = to_devfreq(dev);
-	return sprintf(buf, "%s\n", dev_name(devfreq->dev.parent));
-}
-static DEVICE_ATTR_RO(name);
-
 static ssize_t governor_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
 	if (!to_devfreq(dev)->governor)
 		return -EINVAL;
 
-	return sprintf(buf, "%s\n", to_devfreq(dev)->governor->name);
+	return snprintf(buf, PAGE_SIZE, "%s\n", to_devfreq(dev)->governor->name);
 }
 
 static ssize_t governor_store(struct device *dev, struct device_attribute *attr,
@@ -1044,7 +984,7 @@ static ssize_t governor_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 
 	mutex_lock(&devfreq_list_lock);
-	governor = try_then_request_governor(str_governor);
+	governor = find_devfreq_governor(str_governor);
 	if (IS_ERR(governor)) {
 		ret = PTR_ERR(governor);
 		goto out;
@@ -1067,7 +1007,7 @@ static ssize_t governor_store(struct device *dev, struct device_attribute *attr,
 		}
 	}
 	df->governor = governor;
-	strncpy(df->governor_name, governor->name, DEVFREQ_NAME_LEN);
+	strlcpy(df->governor_name, governor->name, DEVFREQ_NAME_LEN);
 	ret = df->governor->event_handler(df, DEVFREQ_GOV_START, NULL);
 	if (ret)
 		dev_warn(dev, "%s: Governor %s not started(%d)\n",
@@ -1118,7 +1058,7 @@ static ssize_t available_governors_show(struct device *d,
 	if (count)
 		count--;
 
-	count += sprintf(&buf[count], "\n");
+	count += snprintf(&buf[count], (PAGE_SIZE - count), "\n");
 
 	return count;
 }
@@ -1132,23 +1072,25 @@ static ssize_t cur_freq_show(struct device *dev, struct device_attribute *attr,
 
 	if (devfreq->profile->get_cur_freq &&
 		!devfreq->profile->get_cur_freq(devfreq->dev.parent, &freq))
-		return sprintf(buf, "%lu\n", freq);
+			return snprintf(buf, PAGE_SIZE, "%lu\n", freq);
 
-	return sprintf(buf, "%lu\n", devfreq->previous_freq);
+	return snprintf(buf, PAGE_SIZE, "%lu\n", devfreq->previous_freq);
 }
 static DEVICE_ATTR_RO(cur_freq);
 
 static ssize_t target_freq_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%lu\n", to_devfreq(dev)->previous_freq);
+	return snprintf(buf, PAGE_SIZE, "%lu\n",
+			to_devfreq(dev)->previous_freq);
 }
 static DEVICE_ATTR_RO(target_freq);
 
 static ssize_t polling_interval_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", to_devfreq(dev)->profile->polling_ms);
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			to_devfreq(dev)->profile->polling_ms);
 }
 
 static ssize_t polling_interval_store(struct device *dev,
@@ -1179,27 +1121,22 @@ static ssize_t min_freq_store(struct device *dev, struct device_attribute *attr,
 	struct devfreq *df = to_devfreq(dev);
 	unsigned long value;
 	int ret;
+	unsigned long max;
 
 	ret = sscanf(buf, "%lu", &value);
 	if (ret != 1)
 		return -EINVAL;
 
 	mutex_lock(&df->lock);
-
-	if (value) {
-		if (value > df->max_freq) {
-			ret = -EINVAL;
-			goto unlock;
-		}
-	} else {
-		unsigned long *freq_table = df->profile->freq_table;
-
-		/* Get minimum frequency according to sorting order */
-		if (freq_table[0] < freq_table[df->profile->max_state - 1])
-			value = freq_table[0];
-		else
-			value = freq_table[df->profile->max_state - 1];
+	max = df->max_freq;
+	if (value && max && value > max) {
+		ret = -EINVAL;
+		goto unlock;
 	}
+
+	/* can't drop below supported MIN */
+	if (value < df->profile->freq_table[0])
+		value = df->profile->freq_table[0];
 
 	df->min_freq = value;
 	update_devfreq(df);
@@ -1209,41 +1146,30 @@ unlock:
 	return ret;
 }
 
-static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
-{
-	struct devfreq *df = to_devfreq(dev);
-
-	return sprintf(buf, "%lu\n", MAX(df->scaling_min_freq, df->min_freq));
-}
-
 static ssize_t max_freq_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
 	struct devfreq *df = to_devfreq(dev);
 	unsigned long value;
 	int ret;
+	unsigned long min;
+	unsigned int max_states;
 
 	ret = sscanf(buf, "%lu", &value);
 	if (ret != 1)
 		return -EINVAL;
 
 	mutex_lock(&df->lock);
-
-	if (value) {
-		if (value < df->min_freq) {
-			ret = -EINVAL;
-			goto unlock;
-		}
-	} else {
-		unsigned long *freq_table = df->profile->freq_table;
-
-		/* Get maximum frequency according to sorting order */
-		if (freq_table[0] < freq_table[df->profile->max_state - 1])
-			value = freq_table[df->profile->max_state - 1];
-		else
-			value = freq_table[0];
+	min = df->min_freq;
+	if (value && min && value < min) {
+		ret = -EINVAL;
+		goto unlock;
 	}
+
+	/* can't exceed supported MAX */
+	max_states = df->profile->max_state;
+	if (value > df->profile->freq_table[max_states - 1])
+		value = df->profile->freq_table[max_states - 1];
 
 	df->max_freq = value;
 	update_devfreq(df);
@@ -1252,15 +1178,17 @@ unlock:
 	mutex_unlock(&df->lock);
 	return ret;
 }
-static DEVICE_ATTR_RW(min_freq);
 
-static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
-{
-	struct devfreq *df = to_devfreq(dev);
-
-	return sprintf(buf, "%lu\n", MIN(df->scaling_max_freq, df->max_freq));
+#define show_one(name)						\
+static ssize_t name##_show					\
+(struct device *dev, struct device_attribute *attr, char *buf)	\
+{								\
+	return snprintf(buf, PAGE_SIZE, "%lu\n", to_devfreq(dev)->name);	\
 }
+show_one(min_freq);
+show_one(max_freq);
+
+static DEVICE_ATTR_RW(min_freq);
 static DEVICE_ATTR_RW(max_freq);
 
 static ssize_t available_frequencies_show(struct device *d,
@@ -1268,21 +1196,40 @@ static ssize_t available_frequencies_show(struct device *d,
 					  char *buf)
 {
 	struct devfreq *df = to_devfreq(d);
+	struct device *dev = df->dev.parent;
+	struct dev_pm_opp *opp;
 	ssize_t count = 0;
-	int i;
+	unsigned long freq = 0;
 
-	mutex_lock(&df->lock);
+	if (df->profile->max_state) {
+		int i;
 
-	for (i = 0; i < df->profile->max_state; i++)
-		count += scnprintf(&buf[count], (PAGE_SIZE - count - 2),
-				"%lu ", df->profile->freq_table[i]);
+		for (i = 0; i < df->profile->max_state; i++) {
+			freq = df->profile->freq_table[i];
+			count += scnprintf(&buf[count],
+					   (PAGE_SIZE - count - 2), "%lu ",
+					   freq);
+		}
+	} else {
+		rcu_read_lock();
+		do {
+			opp = dev_pm_opp_find_freq_ceil(dev, &freq);
+			if (IS_ERR(opp))
+				break;
 
-	mutex_unlock(&df->lock);
+			count += scnprintf(&buf[count],
+					   (PAGE_SIZE - count - 2), "%lu ",
+					   freq);
+			freq++;
+		} while (1);
+		rcu_read_unlock();
+	}
+
 	/* Truncate the trailing space */
 	if (count)
 		count--;
 
-	count += sprintf(&buf[count], "\n");
+	count += snprintf(&buf[count], PAGE_SIZE - count, "\n");
 
 	return count;
 }
@@ -1295,6 +1242,8 @@ static ssize_t trans_stat_show(struct device *dev,
 	ssize_t len;
 	int i, j;
 	unsigned int max_state = devfreq->profile->max_state;
+	int prev_freq_level;
+	unsigned long prev_freq;
 
 	if (max_state == 0)
 		return sprintf(buf, "Not Supported.\n");
@@ -1307,38 +1256,46 @@ static ssize_t trans_stat_show(struct device *dev,
 	}
 	mutex_unlock(&devfreq->lock);
 
-	len = sprintf(buf, "     From  :   To\n");
-	len += sprintf(buf + len, "           :");
+	/* round the current frequency */
+	prev_freq_level = devfreq_get_freq_level(devfreq,
+						 devfreq->previous_freq);
+
+	if (prev_freq_level < 0)
+		prev_freq = devfreq->previous_freq;
+	else
+		prev_freq = devfreq->profile->freq_table[prev_freq_level];
+
+	len = snprintf(buf, PAGE_SIZE, "     From  :   To\n");
+	len += snprintf(buf + len, PAGE_SIZE - len, "           :");
 	for (i = 0; i < max_state; i++)
-		len += sprintf(buf + len, "%10lu",
+		len += snprintf(buf + len, PAGE_SIZE - len, "%10lu",
 				devfreq->profile->freq_table[i]);
 
-	len += sprintf(buf + len, "   time(ms)\n");
+	len += snprintf(buf + len, PAGE_SIZE - len, "   time(ms)\n");
 
 	for (i = 0; i < max_state; i++) {
-		if (devfreq->profile->freq_table[i]
-					== devfreq->previous_freq) {
-			len += sprintf(buf + len, "*");
+		if (devfreq->profile->freq_table[i] == prev_freq &&
+		    !devfreq->suspended) {
+			len += snprintf(buf + len, PAGE_SIZE - len, "*");
 		} else {
-			len += sprintf(buf + len, " ");
+			len += snprintf(buf + len, PAGE_SIZE - len, " ");
 		}
-		len += sprintf(buf + len, "%10lu:",
+		len += snprintf(buf + len, PAGE_SIZE - len, "%10lu:",
 				devfreq->profile->freq_table[i]);
 		for (j = 0; j < max_state; j++)
-			len += sprintf(buf + len, "%10u",
+			len += snprintf(buf + len, PAGE_SIZE - len, "%10u",
 				devfreq->trans_table[(i * max_state) + j]);
-		len += sprintf(buf + len, "%10u\n",
+		len += snprintf(buf + len, PAGE_SIZE - len, "%10u\n",
 			jiffies_to_msecs(devfreq->time_in_state[i]));
 	}
 
-	len += sprintf(buf + len, "Total transition : %u\n",
+	len += snprintf(buf + len, PAGE_SIZE - len, "Total transition : %u\n",
 					devfreq->total_trans);
 	return len;
 }
 static DEVICE_ATTR_RO(trans_stat);
 
 static struct attribute *devfreq_attrs[] = {
-	&dev_attr_name.attr,
 	&dev_attr_governor.attr,
 	&dev_attr_available_governors.attr,
 	&dev_attr_cur_freq.attr,
@@ -1351,6 +1308,25 @@ static struct attribute *devfreq_attrs[] = {
 	NULL,
 };
 ATTRIBUTE_GROUPS(devfreq);
+
+/**
+ * devfreq_watermark_event() - Handles watermark events
+ * @devfreq: the devfreq instance to be updated
+ * @type: type of watermark event
+ */
+int devfreq_watermark_event(struct devfreq *devfreq, int type)
+{
+	if (!devfreq)
+		return -EINVAL;
+
+	if (!devfreq->governor)
+		return -EINVAL;
+
+	return devfreq->governor->event_handler(devfreq,
+				DEVFREQ_GOV_WMARK, &type);
+}
+EXPORT_SYMBOL(devfreq_watermark_event);
+
 
 static int __init devfreq_init(void)
 {
@@ -1373,7 +1349,7 @@ static int __init devfreq_init(void)
 subsys_initcall(devfreq_init);
 
 /*
- * The following are helper functions for devfreq user device drivers with
+ * The followings are helper functions for devfreq user device drivers with
  * OPP framework.
  */
 
@@ -1384,8 +1360,11 @@ subsys_initcall(devfreq_init);
  * @freq:	The frequency given to target function
  * @flags:	Flags handed from devfreq framework.
  *
- * The callers are required to call dev_pm_opp_put() for the returned OPP after
- * use.
+ * Locking: This function must be called under rcu_read_lock(). opp is a rcu
+ * protected pointer. The reason for the same is that the opp pointer which is
+ * returned will remain valid for use with opp_get_{voltage, freq} only while
+ * under the locked area. The pointer returned must be used prior to unlocking
+ * with rcu_read_unlock() to maintain the integrity of the pointer.
  */
 struct dev_pm_opp *devfreq_recommended_opp(struct device *dev,
 					   unsigned long *freq,
@@ -1422,7 +1401,18 @@ EXPORT_SYMBOL(devfreq_recommended_opp);
  */
 int devfreq_register_opp_notifier(struct device *dev, struct devfreq *devfreq)
 {
-	return dev_pm_opp_register_notifier(dev, &devfreq->nb);
+	struct srcu_notifier_head *nh;
+	int ret = 0;
+
+	rcu_read_lock();
+	nh = dev_pm_opp_get_notifier(dev);
+	if (IS_ERR(nh))
+		ret = PTR_ERR(nh);
+	rcu_read_unlock();
+	if (!ret)
+		ret = srcu_notifier_chain_register(nh, &devfreq->nb);
+
+	return ret;
 }
 EXPORT_SYMBOL(devfreq_register_opp_notifier);
 
@@ -1438,7 +1428,18 @@ EXPORT_SYMBOL(devfreq_register_opp_notifier);
  */
 int devfreq_unregister_opp_notifier(struct device *dev, struct devfreq *devfreq)
 {
-	return dev_pm_opp_unregister_notifier(dev, &devfreq->nb);
+	struct srcu_notifier_head *nh;
+	int ret = 0;
+
+	rcu_read_lock();
+	nh = dev_pm_opp_get_notifier(dev);
+	if (IS_ERR(nh))
+		ret = PTR_ERR(nh);
+	rcu_read_unlock();
+	if (!ret)
+		ret = srcu_notifier_chain_unregister(nh, &devfreq->nb);
+
+	return ret;
 }
 EXPORT_SYMBOL(devfreq_unregister_opp_notifier);
 

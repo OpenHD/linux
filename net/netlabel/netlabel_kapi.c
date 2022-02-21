@@ -748,6 +748,12 @@ int netlbl_catmap_getlong(struct netlbl_lsm_catmap *catmap,
 	if ((off & (BITS_PER_LONG - 1)) != 0)
 		return -EINVAL;
 
+	/* a null catmap is equivalent to an empty one */
+	if (!catmap) {
+		*offset = (u32)-1;
+		return 0;
+	}
+
 	if (off < catmap->startbit) {
 		off = catmap->startbit;
 		*offset = off;
@@ -1503,7 +1509,10 @@ static int __init netlbl_init(void)
 	printk(KERN_INFO "NetLabel: Initializing\n");
 	printk(KERN_INFO "NetLabel:  domain hash size = %u\n",
 	       (1 << NETLBL_DOMHSH_BITSIZE));
-	printk(KERN_INFO "NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO\n");
+	printk(KERN_INFO "NetLabel:  protocols ="
+	       " UNLABELED"
+	       " CIPSOv4"
+	       "\n");
 
 	ret_val = netlbl_domhsh_init(NETLBL_DOMHSH_BITSIZE);
 	if (ret_val != 0)

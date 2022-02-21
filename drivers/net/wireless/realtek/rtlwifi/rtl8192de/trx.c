@@ -11,6 +11,10 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -503,9 +507,9 @@ bool rtl92de_rx_query_desc(struct ieee80211_hw *hw,	struct rtl_stats *stats,
 	if (!GET_RX_DESC_SWDEC(pdesc))
 		rx_status->flag |= RX_FLAG_DECRYPTED;
 	if (GET_RX_DESC_BW(pdesc))
-		rx_status->bw = RATE_INFO_BW_40;
+		rx_status->flag |= RX_FLAG_40MHZ;
 	if (GET_RX_DESC_RXHT(pdesc))
-		rx_status->encoding = RX_ENC_HT;
+		rx_status->flag |= RX_FLAG_HT;
 	rx_status->flag |= RX_FLAG_MACTIME_START;
 	if (stats->decrypted)
 		rx_status->flag |= RX_FLAG_DECRYPTED;
@@ -794,7 +798,7 @@ void rtl92de_set_desc(struct ieee80211_hw *hw, u8 *pdesc, bool istx,
 			SET_TX_DESC_NEXT_DESC_ADDRESS(pdesc, *(u32 *) val);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8192de: ERR txdesc :%d not processed\n",
+			RT_ASSERT(false, "ERR txdesc :%d not process\n",
 				  desc_name);
 			break;
 		}
@@ -814,15 +818,14 @@ void rtl92de_set_desc(struct ieee80211_hw *hw, u8 *pdesc, bool istx,
 			SET_RX_DESC_EOR(pdesc, 1);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8192de: ERR rxdesc :%d not processed\n",
+			RT_ASSERT(false, "ERR rxdesc :%d not process\n",
 				  desc_name);
 			break;
 		}
 	}
 }
 
-u64 rtl92de_get_desc(struct ieee80211_hw *hw,
-		     u8 *p_desc, bool istx, u8 desc_name)
+u32 rtl92de_get_desc(u8 *p_desc, bool istx, u8 desc_name)
 {
 	u32 ret = 0;
 
@@ -835,7 +838,7 @@ u64 rtl92de_get_desc(struct ieee80211_hw *hw,
 			ret = GET_TX_DESC_TX_BUFFER_ADDRESS(p_desc);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8192de: ERR txdesc :%d not processed\n",
+			RT_ASSERT(false, "ERR txdesc :%d not process\n",
 				  desc_name);
 			break;
 		}
@@ -851,7 +854,7 @@ u64 rtl92de_get_desc(struct ieee80211_hw *hw,
 			ret = GET_RX_DESC_BUFF_ADDR(p_desc);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8192de: ERR rxdesc :%d not processed\n",
+			RT_ASSERT(false, "ERR rxdesc :%d not process\n",
 				  desc_name);
 			break;
 		}
@@ -865,7 +868,7 @@ bool rtl92de_is_tx_desc_closed(struct ieee80211_hw *hw,
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 	struct rtl8192_tx_ring *ring = &rtlpci->tx_ring[hw_queue];
 	u8 *entry = (u8 *)(&ring->desc[ring->idx]);
-	u8 own = (u8)rtl92de_get_desc(hw, entry, true, HW_DESC_OWN);
+	u8 own = (u8)rtl92de_get_desc(entry, true, HW_DESC_OWN);
 
 	/* a beacon packet will only use the first
 	 * descriptor by defaut, and the own bit may not

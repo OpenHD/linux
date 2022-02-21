@@ -10,25 +10,33 @@
  */
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
 
 #include "cirrus_drv.h"
 
+
+static void cirrus_user_framebuffer_destroy(struct drm_framebuffer *fb)
+{
+	struct cirrus_framebuffer *cirrus_fb = to_cirrus_framebuffer(fb);
+
+	drm_gem_object_unreference_unlocked(cirrus_fb->obj);
+	drm_framebuffer_cleanup(fb);
+	kfree(fb);
+}
+
 static const struct drm_framebuffer_funcs cirrus_fb_funcs = {
-	.create_handle = drm_gem_fb_create_handle,
-	.destroy = drm_gem_fb_destroy,
+	.destroy = cirrus_user_framebuffer_destroy,
 };
 
 int cirrus_framebuffer_init(struct drm_device *dev,
-			    struct drm_framebuffer *gfb,
+			    struct cirrus_framebuffer *gfb,
 			    const struct drm_mode_fb_cmd2 *mode_cmd,
 			    struct drm_gem_object *obj)
 {
 	int ret;
 
-	drm_helper_mode_fill_fb_struct(dev, gfb, mode_cmd);
-	gfb->obj[0] = obj;
-	ret = drm_framebuffer_init(dev, gfb, &cirrus_fb_funcs);
+	drm_helper_mode_fill_fb_struct(&gfb->base, mode_cmd);
+	gfb->obj = obj;
+	ret = drm_framebuffer_init(dev, &gfb->base, &cirrus_fb_funcs);
 	if (ret) {
 		DRM_ERROR("drm_framebuffer_init failed: %d\n", ret);
 		return ret;
@@ -43,11 +51,11 @@ cirrus_user_framebuffer_create(struct drm_device *dev,
 {
 	struct cirrus_device *cdev = dev->dev_private;
 	struct drm_gem_object *obj;
-	struct drm_framebuffer *fb;
-	u32 bpp;
+	struct cirrus_framebuffer *cirrus_fb;
 	int ret;
+	u32 bpp, depth;
 
-	bpp = drm_format_plane_cpp(mode_cmd->pixel_format, 0) * 8;
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &depth, &bpp);
 
 	if (!cirrus_check_framebuffer(cdev, mode_cmd->width, mode_cmd->height,
 				      bpp, mode_cmd->pitches[0]))
@@ -57,19 +65,19 @@ cirrus_user_framebuffer_create(struct drm_device *dev,
 	if (obj == NULL)
 		return ERR_PTR(-ENOENT);
 
-	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
-	if (!fb) {
-		drm_gem_object_put_unlocked(obj);
+	cirrus_fb = kzalloc(sizeof(*cirrus_fb), GFP_KERNEL);
+	if (!cirrus_fb) {
+		drm_gem_object_unreference_unlocked(obj);
 		return ERR_PTR(-ENOMEM);
 	}
 
-	ret = cirrus_framebuffer_init(dev, fb, mode_cmd, obj);
+	ret = cirrus_framebuffer_init(dev, cirrus_fb, mode_cmd, obj);
 	if (ret) {
-		drm_gem_object_put_unlocked(obj);
-		kfree(fb);
+		drm_gem_object_unreference_unlocked(obj);
+		kfree(cirrus_fb);
 		return ERR_PTR(ret);
 	}
-	return fb;
+	return &cirrus_fb->base;
 }
 
 static const struct drm_mode_config_funcs cirrus_mode_funcs = {
@@ -200,17 +208,18 @@ out:
 	return r;
 }
 
-void cirrus_driver_unload(struct drm_device *dev)
+int cirrus_driver_unload(struct drm_device *dev)
 {
 	struct cirrus_device *cdev = dev->dev_private;
 
 	if (cdev == NULL)
-		return;
+		return 0;
 	cirrus_modeset_fini(cdev);
 	cirrus_mm_fini(cdev);
 	cirrus_device_fini(cdev);
 	kfree(cdev);
 	dev->dev_private = NULL;
+	return 0;
 }
 
 int cirrus_gem_create(struct drm_device *dev,
@@ -253,7 +262,7 @@ int cirrus_dumb_create(struct drm_file *file,
 		return ret;
 
 	ret = drm_gem_handle_create(file, gobj, &handle);
-	drm_gem_object_put_unlocked(gobj);
+	drm_gem_object_unreference_unlocked(gobj);
 	if (ret)
 		return ret;
 
@@ -302,7 +311,7 @@ cirrus_dumb_mmap_offset(struct drm_file *file,
 	bo = gem_to_cirrus_bo(obj);
 	*offset = cirrus_bo_mmap_offset(bo);
 
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 
 	return 0;
 }

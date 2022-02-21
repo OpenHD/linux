@@ -147,6 +147,7 @@ vchiq_static_assert((sizeof(BITSET_T) * 8) == 32);
 #define BITSET_SIZE(b)        ((b + 31) >> 5)
 #define BITSET_WORD(b)        (b >> 5)
 #define BITSET_BIT(b)         (1 << (b & 31))
+#define BITSET_ZERO(bs)       memset(bs, 0, sizeof(bs))
 #define BITSET_IS_SET(bs, b)  (bs[BITSET_WORD(b)] & BITSET_BIT(b))
 #define BITSET_SET(bs, b)     (bs[BITSET_WORD(b)] |= BITSET_BIT(b))
 #define BITSET_CLR(bs, b)     (bs[BITSET_WORD(b)] &= ~BITSET_BIT(b))
@@ -183,11 +184,11 @@ enum {
 
 #define DEBUG_INITIALISE(local) int *debug_ptr = (local)->debug;
 #define DEBUG_TRACE(d) \
-	do { debug_ptr[DEBUG_ ## d] = __LINE__; dsb(sy); } while (0)
+	do { debug_ptr[DEBUG_ ## d] = __LINE__; dsb(); } while (0)
 #define DEBUG_VALUE(d, v) \
-	do { debug_ptr[DEBUG_ ## d] = (v); dsb(sy); } while (0)
+	do { debug_ptr[DEBUG_ ## d] = (v); dsb(); } while (0)
 #define DEBUG_COUNT(d) \
-	do { debug_ptr[DEBUG_ ## d]++; dsb(sy); } while (0)
+	do { debug_ptr[DEBUG_ ## d]++; dsb(); } while (0)
 
 #else /* VCHIQ_ENABLE_DEBUG */
 
@@ -263,8 +264,7 @@ typedef struct vchiq_bulk_queue_struct {
 typedef struct remote_event_struct {
 	int armed;
 	int fired;
-	/* Contains offset from the beginning of the VCHIQ_STATE_T structure */
-	u32 event;
+	struct semaphore *event;
 } REMOTE_EVENT_T;
 
 typedef struct opaque_platform_state_t *VCHIQ_PLATFORM_STATE_T;
@@ -633,6 +633,9 @@ vchiq_transfer_bulk(VCHIQ_BULK_T *bulk);
 extern void
 vchiq_complete_bulk(VCHIQ_BULK_T *bulk);
 
+extern VCHIQ_STATUS_T
+vchiq_copy_from_user(void *dst, const void *src, int size);
+
 extern void
 remote_event_signal(REMOTE_EVENT_T *event);
 
@@ -700,6 +703,7 @@ vchiq_platform_handle_timeout(VCHIQ_STATE_T *state);
 
 extern void
 vchiq_set_conn_state(VCHIQ_STATE_T *state, VCHIQ_CONNSTATE_T newstate);
+
 
 extern void
 vchiq_log_dump_mem(const char *label, uint32_t addr, const void *voidMem,

@@ -6,8 +6,6 @@
  *
  * Copyright (C) 2016 Pengutronix, Philipp Zabel <p.zabel@pengutronix.de>
  *
- * Copyright (C) 2016 Zodiac Inflight Innovations
- *
  * Initially based on: drivers/gpu/drm/i2c/tda998x_drv.c
  *
  * Copyright (C) 2012 Texas Instruments
@@ -932,7 +930,7 @@ static int tc_main_link_setup(struct tc_data *tc)
 			goto err_dpcd_read;
 
 		if (tmp[0] != tc->assr) {
-			dev_dbg(dev, "Failed to switch display ASSR to %d, falling back to unscrambled mode\n",
+			dev_warn(dev, "Failed to switch display ASSR to %d, falling back to unscrambled mode\n",
 				 tc->assr);
 			/* trying with disabled scrambler */
 			tc->link.scrambler_dis = 1;
@@ -1057,6 +1055,12 @@ err:
 	return ret;
 }
 
+static enum drm_connector_status
+tc_connector_detect(struct drm_connector *connector, bool force)
+{
+	return connector_status_connected;
+}
+
 static void tc_bridge_pre_enable(struct drm_bridge *bridge)
 {
 	struct tc_data *tc = bridge_to_tc(bridge);
@@ -1115,7 +1119,7 @@ static bool tc_bridge_mode_fixup(struct drm_bridge *bridge,
 	return true;
 }
 
-static enum drm_mode_status tc_connector_mode_valid(struct drm_connector *connector,
+static int tc_connector_mode_valid(struct drm_connector *connector,
 				   struct drm_display_mode *mode)
 {
 	struct tc_data *tc = connector_to_tc(connector);
@@ -1170,7 +1174,7 @@ static int tc_connector_get_modes(struct drm_connector *connector)
 	if (!edid)
 		return 0;
 
-	drm_connector_update_edid_property(connector, edid);
+	drm_mode_connector_update_edid_property(connector, edid);
 	count = drm_add_edid_modes(connector, edid);
 
 	return count;
@@ -1199,7 +1203,9 @@ static const struct drm_connector_helper_funcs tc_connector_helper_funcs = {
 };
 
 static const struct drm_connector_funcs tc_connector_funcs = {
+	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
+	.detect = tc_connector_detect,
 	.destroy = drm_connector_cleanup,
 	.reset = drm_atomic_helper_connector_reset,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
@@ -1225,11 +1231,7 @@ static int tc_bridge_attach(struct drm_bridge *bridge)
 
 	drm_display_info_set_bus_formats(&tc->connector.display_info,
 					 &bus_format, 1);
-	tc->connector.display_info.bus_flags =
-		DRM_BUS_FLAG_DE_HIGH |
-		DRM_BUS_FLAG_PIXDATA_NEGEDGE |
-		DRM_BUS_FLAG_SYNC_NEGEDGE;
-	drm_connector_attach_encoder(&tc->connector, tc->bridge.encoder);
+	drm_mode_connector_attach_encoder(&tc->connector, tc->bridge.encoder);
 
 	return 0;
 }
@@ -1286,6 +1288,7 @@ static const struct regmap_config tc_regmap_config = {
 static int tc_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
+	struct device_node *ep;
 	struct tc_data *tc;
 	int ret;
 
@@ -1296,9 +1299,29 @@ static int tc_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	tc->dev = dev;
 
 	/* port@2 is the output port */
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 2, 0, &tc->panel, NULL);
-	if (ret && ret != -ENODEV)
-		return ret;
+	ep = of_graph_get_endpoint_by_regs(dev->of_node, 2, -1);
+	if (ep) {
+		struct device_node *remote;
+
+		remote = of_graph_get_remote_port_parent(ep);
+		if (!remote) {
+			dev_warn(dev, "endpoint %s not connected\n",
+				 ep->full_name);
+			of_node_put(ep);
+			return -ENODEV;
+		}
+		of_node_put(ep);
+		tc->panel = of_drm_find_panel(remote);
+		if (tc->panel) {
+			dev_dbg(dev, "found panel %s\n", remote->full_name);
+		} else {
+			dev_dbg(dev, "waiting for panel %s\n",
+				remote->full_name);
+			of_node_put(remote);
+			return -EPROBE_DEFER;
+		}
+		of_node_put(remote);
+	}
 
 	/* Shut down GPIO is optional */
 	tc->sd_gpio = devm_gpiod_get_optional(dev, "shutdown", GPIOD_OUT_HIGH);
@@ -1367,7 +1390,11 @@ static int tc_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	tc->bridge.funcs = &tc_bridge_funcs;
 	tc->bridge.of_node = dev->of_node;
-	drm_bridge_add(&tc->bridge);
+	ret = drm_bridge_add(&tc->bridge);
+	if (ret) {
+		dev_err(dev, "Failed to add drm_bridge: %d\n", ret);
+		goto err_unregister_aux;
+	}
 
 	i2c_set_clientdata(client, tc);
 

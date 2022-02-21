@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * (C) Copyright Linus Torvalds 1999
  * (C) Copyright Johannes Erdfelt 1999-2001
@@ -7,13 +6,26 @@
  * (C) Copyright Deti Fliegl 1999
  * (C) Copyright Randy Dunlap 2000
  * (C) Copyright David Brownell 2000-2002
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/bcd.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
-#include <linux/sched/task_stack.h>
 #include <linux/slab.h>
 #include <linux/completion.h>
 #include <linux/utsname.h>
@@ -33,10 +45,10 @@
 #include <linux/phy/phy.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
+#include <linux/usb/phy.h>
 #include <linux/usb/otg.h>
 
 #include "usb.h"
-#include "phy.h"
 
 
 /*-------------------------------------------------------------------------*/
@@ -567,7 +579,6 @@ static int rh_call_control (struct usb_hcd *hcd, struct urb *urb)
 		switch (wValue & 0xff00) {
 		case USB_DT_DEVICE << 8:
 			switch (hcd->speed) {
-			case HCD_USB32:
 			case HCD_USB31:
 				bufp = usb31_rh_dev_descriptor;
 				break;
@@ -592,7 +603,6 @@ static int rh_call_control (struct usb_hcd *hcd, struct urb *urb)
 			break;
 		case USB_DT_CONFIG << 8:
 			switch (hcd->speed) {
-			case HCD_USB32:
 			case HCD_USB31:
 			case HCD_USB3:
 				bufp = ss_rh_config_descriptor;
@@ -790,11 +800,9 @@ void usb_hcd_poll_rh_status(struct usb_hcd *hcd)
 EXPORT_SYMBOL_GPL(usb_hcd_poll_rh_status);
 
 /* timer callback */
-static void rh_timer_func (struct timer_list *t)
+static void rh_timer_func (unsigned long _hcd)
 {
-	struct usb_hcd *_hcd = from_timer(_hcd, t, rh_timer);
-
-	usb_hcd_poll_rh_status(_hcd);
+	usb_hcd_poll_rh_status((struct usb_hcd *) _hcd);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -963,7 +971,7 @@ static struct attribute *usb_bus_attrs[] = {
 		NULL,
 };
 
-static const struct attribute_group usb_bus_attr_group = {
+static struct attribute_group usb_bus_attr_group = {
 	.name = NULL,	/* we want them in the same directory */
 	.attrs = usb_bus_attrs,
 };
@@ -1114,6 +1122,7 @@ static int register_root_hub(struct usb_hcd *hcd)
 		/* Did the HC die before the root hub was registered? */
 		if (HCD_DEAD(hcd))
 			usb_hc_died (hcd);	/* This time clean up */
+		usb_dev->dev.of_node = parent_dev->of_node;
 	}
 	mutex_unlock(&usb_bus_idr_lock);
 
@@ -1426,7 +1435,7 @@ void usb_hcd_unmap_urb_setup_for_dma(struct usb_hcd *hcd, struct urb *urb)
 {
 	if (IS_ENABLED(CONFIG_HAS_DMA) &&
 	    (urb->transfer_flags & URB_SETUP_MAP_SINGLE))
-		dma_unmap_single(hcd->self.sysdev,
+		dma_unmap_single(hcd->self.controller,
 				urb->setup_dma,
 				sizeof(struct usb_ctrlrequest),
 				DMA_TO_DEVICE);
@@ -1459,19 +1468,19 @@ void usb_hcd_unmap_urb_for_dma(struct usb_hcd *hcd, struct urb *urb)
 	dir = usb_urb_dir_in(urb) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
 	if (IS_ENABLED(CONFIG_HAS_DMA) &&
 	    (urb->transfer_flags & URB_DMA_MAP_SG))
-		dma_unmap_sg(hcd->self.sysdev,
+		dma_unmap_sg(hcd->self.controller,
 				urb->sg,
 				urb->num_sgs,
 				dir);
 	else if (IS_ENABLED(CONFIG_HAS_DMA) &&
 		 (urb->transfer_flags & URB_DMA_MAP_PAGE))
-		dma_unmap_page(hcd->self.sysdev,
+		dma_unmap_page(hcd->self.controller,
 				urb->transfer_dma,
 				urb->transfer_buffer_length,
 				dir);
 	else if (IS_ENABLED(CONFIG_HAS_DMA) &&
 		 (urb->transfer_flags & URB_DMA_MAP_SINGLE))
-		dma_unmap_single(hcd->self.sysdev,
+		dma_unmap_single(hcd->self.controller,
 				urb->transfer_dma,
 				urb->transfer_buffer_length,
 				dir);
@@ -1513,20 +1522,12 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb,
 		if (hcd->self.uses_pio_for_control)
 			return ret;
 		if (IS_ENABLED(CONFIG_HAS_DMA) && hcd->self.uses_dma) {
-			if (is_vmalloc_addr(urb->setup_packet)) {
-				WARN_ONCE(1, "setup packet is not dma capable\n");
-				return -EAGAIN;
-			} else if (object_is_on_stack(urb->setup_packet)) {
-				WARN_ONCE(1, "setup packet is on stack\n");
-				return -EAGAIN;
-			}
-
 			urb->setup_dma = dma_map_single(
-					hcd->self.sysdev,
+					hcd->self.controller,
 					urb->setup_packet,
 					sizeof(struct usb_ctrlrequest),
 					DMA_TO_DEVICE);
-			if (dma_mapping_error(hcd->self.sysdev,
+			if (dma_mapping_error(hcd->self.controller,
 						urb->setup_dma))
 				return -EAGAIN;
 			urb->transfer_flags |= URB_SETUP_MAP_SINGLE;
@@ -1557,7 +1558,7 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb,
 				}
 
 				n = dma_map_sg(
-						hcd->self.sysdev,
+						hcd->self.controller,
 						urb->sg,
 						urb->num_sgs,
 						dir);
@@ -1572,12 +1573,12 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb,
 			} else if (urb->sg) {
 				struct scatterlist *sg = urb->sg;
 				urb->transfer_dma = dma_map_page(
-						hcd->self.sysdev,
+						hcd->self.controller,
 						sg_page(sg),
 						sg->offset,
 						urb->transfer_buffer_length,
 						dir);
-				if (dma_mapping_error(hcd->self.sysdev,
+				if (dma_mapping_error(hcd->self.controller,
 						urb->transfer_dma))
 					ret = -EAGAIN;
 				else
@@ -1585,16 +1586,13 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb,
 			} else if (is_vmalloc_addr(urb->transfer_buffer)) {
 				WARN_ONCE(1, "transfer buffer not dma capable\n");
 				ret = -EAGAIN;
-			} else if (object_is_on_stack(urb->transfer_buffer)) {
-				WARN_ONCE(1, "transfer buffer is on stack\n");
-				ret = -EAGAIN;
 			} else {
 				urb->transfer_dma = dma_map_single(
-						hcd->self.sysdev,
+						hcd->self.controller,
 						urb->transfer_buffer,
 						urb->transfer_buffer_length,
 						dir);
-				if (dma_mapping_error(hcd->self.sysdev,
+				if (dma_mapping_error(hcd->self.controller,
 						urb->transfer_dma))
 					ret = -EAGAIN;
 				else
@@ -2071,16 +2069,6 @@ reset:
 	return ret;
 }
 
-void usb_hcd_fixup_endpoint(struct usb_device *udev,
-			    struct usb_host_endpoint *ep, int interval)
-{
-	struct usb_hcd *hcd;
-
-	hcd = bus_to_hcd(udev->bus);
-	if (hcd->driver->fixup_endpoint)
-		hcd->driver->fixup_endpoint(hcd, udev, ep, interval);
-}
-
 /* Disables the endpoint: synchronizes with the hcd to make sure all
  * endpoint state is gone from hardware.  usb_hcd_flush_endpoint() must
  * have been called previously.  Use for set_configuration, set_interface,
@@ -2272,10 +2260,6 @@ int hcd_bus_suspend(struct usb_device *rhdev, pm_message_t msg)
 		usb_set_device_state(rhdev, USB_STATE_SUSPENDED);
 		hcd->state = HC_STATE_SUSPENDED;
 
-		if (!PMSG_IS_AUTO(msg))
-			usb_phy_roothub_suspend(hcd->self.sysdev,
-						hcd->phy_roothub);
-
 		/* Did we race with a root-hub wakeup event? */
 		if (rhdev->do_remote_wakeup) {
 			char	buffer[6];
@@ -2312,14 +2296,6 @@ int hcd_bus_resume(struct usb_device *rhdev, pm_message_t msg)
 		dev_dbg(&rhdev->dev, "skipped %s of dead bus\n", "resume");
 		return 0;
 	}
-
-	if (!PMSG_IS_AUTO(msg)) {
-		status = usb_phy_roothub_resume(hcd->self.sysdev,
-						hcd->phy_roothub);
-		if (status)
-			return status;
-	}
-
 	if (!hcd->driver->bus_resume)
 		return -ENOENT;
 	if (HCD_RH_RUNNING(hcd))
@@ -2357,7 +2333,6 @@ int hcd_bus_resume(struct usb_device *rhdev, pm_message_t msg)
 		}
 	} else {
 		hcd->state = old_state;
-		usb_phy_roothub_suspend(hcd->self.sysdev, hcd->phy_roothub);
 		dev_dbg(&rhdev->dev, "bus %s fail, err %d\n",
 				"resume", status);
 		if (status != -ESHUTDOWN)
@@ -2526,8 +2501,24 @@ static void init_giveback_urb_bh(struct giveback_urb_bh *bh)
 	tasklet_init(&bh->bh, usb_giveback_urb_bh, (unsigned long)bh);
 }
 
-struct usb_hcd *__usb_create_hcd(const struct hc_driver *driver,
-		struct device *sysdev, struct device *dev, const char *bus_name,
+/**
+ * usb_create_shared_hcd - create and initialize an HCD structure
+ * @driver: HC driver that will use this hcd
+ * @dev: device for this HC, stored in hcd->self.controller
+ * @bus_name: value to store in hcd->self.bus_name
+ * @primary_hcd: a pointer to the usb_hcd structure that is sharing the
+ *              PCI device.  Only allocate certain resources for the primary HCD
+ * Context: !in_interrupt()
+ *
+ * Allocate a struct usb_hcd, with extra space at the end for the
+ * HC driver's private data.  Initialize the generic members of the
+ * hcd structure.
+ *
+ * Return: On success, a pointer to the created and initialized HCD structure.
+ * On failure (e.g. if memory is unavailable), %NULL.
+ */
+struct usb_hcd *usb_create_shared_hcd(const struct hc_driver *driver,
+		struct device *dev, const char *bus_name,
 		struct usb_hcd *primary_hcd)
 {
 	struct usb_hcd *hcd;
@@ -2569,11 +2560,12 @@ struct usb_hcd *__usb_create_hcd(const struct hc_driver *driver,
 
 	usb_bus_init(&hcd->self);
 	hcd->self.controller = dev;
-	hcd->self.sysdev = sysdev;
 	hcd->self.bus_name = bus_name;
-	hcd->self.uses_dma = (sysdev->dma_mask != NULL);
+	hcd->self.uses_dma = (dev->dma_mask != NULL);
 
-	timer_setup(&hcd->rh_timer, rh_timer_func, 0);
+	init_timer(&hcd->rh_timer);
+	hcd->rh_timer.function = rh_timer_func;
+	hcd->rh_timer.data = (unsigned long) hcd;
 #ifdef CONFIG_PM
 	INIT_WORK(&hcd->wakeup_work, hcd_resume_work);
 #endif
@@ -2583,30 +2575,6 @@ struct usb_hcd *__usb_create_hcd(const struct hc_driver *driver,
 	hcd->product_desc = (driver->product_desc) ? driver->product_desc :
 			"USB Host Controller";
 	return hcd;
-}
-EXPORT_SYMBOL_GPL(__usb_create_hcd);
-
-/**
- * usb_create_shared_hcd - create and initialize an HCD structure
- * @driver: HC driver that will use this hcd
- * @dev: device for this HC, stored in hcd->self.controller
- * @bus_name: value to store in hcd->self.bus_name
- * @primary_hcd: a pointer to the usb_hcd structure that is sharing the
- *              PCI device.  Only allocate certain resources for the primary HCD
- * Context: !in_interrupt()
- *
- * Allocate a struct usb_hcd, with extra space at the end for the
- * HC driver's private data.  Initialize the generic members of the
- * hcd structure.
- *
- * Return: On success, a pointer to the created and initialized HCD structure.
- * On failure (e.g. if memory is unavailable), %NULL.
- */
-struct usb_hcd *usb_create_shared_hcd(const struct hc_driver *driver,
-		struct device *dev, const char *bus_name,
-		struct usb_hcd *primary_hcd)
-{
-	return __usb_create_hcd(driver, dev, dev, bus_name, primary_hcd);
 }
 EXPORT_SYMBOL_GPL(usb_create_shared_hcd);
 
@@ -2627,7 +2595,7 @@ EXPORT_SYMBOL_GPL(usb_create_shared_hcd);
 struct usb_hcd *usb_create_hcd(const struct hc_driver *driver,
 		struct device *dev, const char *bus_name)
 {
-	return __usb_create_hcd(driver, dev, dev, bus_name, NULL);
+	return usb_create_shared_hcd(driver, dev, bus_name, NULL);
 }
 EXPORT_SYMBOL_GPL(usb_create_hcd);
 
@@ -2753,18 +2721,46 @@ int usb_add_hcd(struct usb_hcd *hcd,
 	int retval;
 	struct usb_device *rhdev;
 
-	if (!hcd->skip_phy_initialization && usb_hcd_is_primary_hcd(hcd)) {
-		hcd->phy_roothub = usb_phy_roothub_alloc(hcd->self.sysdev);
-		if (IS_ERR(hcd->phy_roothub))
-			return PTR_ERR(hcd->phy_roothub);
+	if (IS_ENABLED(CONFIG_USB_PHY) && !hcd->usb_phy) {
+		struct usb_phy *phy = usb_get_phy_dev(hcd->self.controller, 0);
 
-		retval = usb_phy_roothub_init(hcd->phy_roothub);
-		if (retval)
-			return retval;
+		if (IS_ERR(phy)) {
+			retval = PTR_ERR(phy);
+			if (retval == -EPROBE_DEFER)
+				return retval;
+		} else {
+			retval = usb_phy_init(phy);
+			if (retval) {
+				usb_put_phy(phy);
+				return retval;
+			}
+			hcd->usb_phy = phy;
+			hcd->remove_phy = 1;
+		}
+	}
 
-		retval = usb_phy_roothub_power_on(hcd->phy_roothub);
-		if (retval)
-			goto err_usb_phy_roothub_power_on;
+	if (IS_ENABLED(CONFIG_GENERIC_PHY) && !hcd->phy) {
+		struct phy *phy = phy_get(hcd->self.controller, "usb");
+
+		if (IS_ERR(phy)) {
+			retval = PTR_ERR(phy);
+			if (retval == -EPROBE_DEFER)
+				goto err_phy;
+		} else {
+			retval = phy_init(phy);
+			if (retval) {
+				phy_put(phy);
+				goto err_phy;
+			}
+			retval = phy_power_on(phy);
+			if (retval) {
+				phy_exit(phy);
+				phy_put(phy);
+				goto err_phy;
+			}
+			hcd->phy = phy;
+			hcd->remove_phy = 1;
+		}
 	}
 
 	dev_info(hcd->self.controller, "%s\n", hcd->product_desc);
@@ -2792,7 +2788,7 @@ int usb_add_hcd(struct usb_hcd *hcd,
 	 */
 	retval = hcd_buffer_create(hcd);
 	if (retval != 0) {
-		dev_dbg(hcd->self.sysdev, "pool alloc failed\n");
+		dev_dbg(hcd->self.controller, "pool alloc failed\n");
 		goto err_create_buf;
 	}
 
@@ -2802,16 +2798,13 @@ int usb_add_hcd(struct usb_hcd *hcd,
 
 	rhdev = usb_alloc_dev(NULL, &hcd->self, 0);
 	if (rhdev == NULL) {
-		dev_err(hcd->self.sysdev, "unable to allocate root hub\n");
+		dev_err(hcd->self.controller, "unable to allocate root hub\n");
 		retval = -ENOMEM;
 		goto err_allocate_root_hub;
 	}
 	mutex_lock(&usb_port_peer_mutex);
 	hcd->self.root_hub = rhdev;
 	mutex_unlock(&usb_port_peer_mutex);
-
-	rhdev->rx_lanes = 1;
-	rhdev->tx_lanes = 1;
 
 	switch (hcd->speed) {
 	case HCD_USB11:
@@ -2826,10 +2819,6 @@ int usb_add_hcd(struct usb_hcd *hcd,
 	case HCD_USB3:
 		rhdev->speed = USB_SPEED_SUPER;
 		break;
-	case HCD_USB32:
-		rhdev->rx_lanes = 2;
-		rhdev->tx_lanes = 2;
-		/* fall through */
 	case HCD_USB31:
 		rhdev->speed = USB_SPEED_SUPER_PLUS;
 		break;
@@ -2938,10 +2927,18 @@ err_allocate_root_hub:
 err_register_bus:
 	hcd_buffer_destroy(hcd);
 err_create_buf:
-	usb_phy_roothub_power_off(hcd->phy_roothub);
-err_usb_phy_roothub_power_on:
-	usb_phy_roothub_exit(hcd->phy_roothub);
-
+	if (IS_ENABLED(CONFIG_GENERIC_PHY) && hcd->remove_phy && hcd->phy) {
+		phy_power_off(hcd->phy);
+		phy_exit(hcd->phy);
+		phy_put(hcd->phy);
+		hcd->phy = NULL;
+	}
+err_phy:
+	if (hcd->remove_phy && hcd->usb_phy) {
+		usb_phy_shutdown(hcd->usb_phy);
+		usb_put_phy(hcd->usb_phy);
+		hcd->usb_phy = NULL;
+	}
 	return retval;
 }
 EXPORT_SYMBOL_GPL(usb_add_hcd);
@@ -3014,8 +3011,17 @@ void usb_remove_hcd(struct usb_hcd *hcd)
 	usb_deregister_bus(&hcd->self);
 	hcd_buffer_destroy(hcd);
 
-	usb_phy_roothub_power_off(hcd->phy_roothub);
-	usb_phy_roothub_exit(hcd->phy_roothub);
+	if (IS_ENABLED(CONFIG_GENERIC_PHY) && hcd->remove_phy && hcd->phy) {
+		phy_power_off(hcd->phy);
+		phy_exit(hcd->phy);
+		phy_put(hcd->phy);
+		hcd->phy = NULL;
+	}
+	if (hcd->remove_phy && hcd->usb_phy) {
+		usb_phy_shutdown(hcd->usb_phy);
+		usb_put_phy(hcd->usb_phy);
+		hcd->usb_phy = NULL;
+	}
 
 	usb_put_invalidate_rhdev(hcd);
 	hcd->flags = 0;

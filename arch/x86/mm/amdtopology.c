@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * AMD NUMA support.
  * Discover the memory map and associated nodes.
@@ -20,7 +19,7 @@
 #include <asm/types.h>
 #include <asm/mmzone.h>
 #include <asm/proto.h>
-#include <asm/e820/api.h>
+#include <asm/e820.h>
 #include <asm/pci-direct.h>
 #include <asm/numa.h>
 #include <asm/mpspec.h>

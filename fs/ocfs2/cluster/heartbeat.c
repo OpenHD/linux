@@ -127,13 +127,13 @@ enum o2hb_heartbeat_modes {
 	O2HB_HEARTBEAT_NUM_MODES,
 };
 
-static const char *o2hb_heartbeat_mode_desc[O2HB_HEARTBEAT_NUM_MODES] = {
-	"local",	/* O2HB_HEARTBEAT_LOCAL */
-	"global",	/* O2HB_HEARTBEAT_GLOBAL */
+char *o2hb_heartbeat_mode_desc[O2HB_HEARTBEAT_NUM_MODES] = {
+		"local",	/* O2HB_HEARTBEAT_LOCAL */
+		"global",	/* O2HB_HEARTBEAT_GLOBAL */
 };
 
 unsigned int o2hb_dead_threshold = O2HB_DEFAULT_DEAD_THRESHOLD;
-static unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
+unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
 
 /*
  * o2hb_dependent_users tracks the number of registered callbacks that depend
@@ -141,7 +141,7 @@ static unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
  * However only o2dlm depends on the heartbeat. It does not want the heartbeat
  * to stop while a dlm domain is still active.
  */
-static unsigned int o2hb_dependent_users;
+unsigned int o2hb_dependent_users;
 
 /*
  * In global heartbeat mode, all regions are pinned if there are one or more
@@ -505,7 +505,8 @@ static inline void o2hb_bio_wait_dec(struct o2hb_bio_wait_ctxt *wc,
 	}
 }
 
-static void o2hb_wait_on_io(struct o2hb_bio_wait_ctxt *wc)
+static void o2hb_wait_on_io(struct o2hb_region *reg,
+			    struct o2hb_bio_wait_ctxt *wc)
 {
 	o2hb_bio_wait_dec(wc, 1);
 	wait_for_completion(&wc->wc_io_complete);
@@ -515,9 +516,9 @@ static void o2hb_bio_end_io(struct bio *bio)
 {
 	struct o2hb_bio_wait_ctxt *wc = bio->bi_private;
 
-	if (bio->bi_status) {
-		mlog(ML_ERROR, "IO Error %d\n", bio->bi_status);
-		wc->wc_error = blk_status_to_errno(bio->bi_status);
+	if (bio->bi_error) {
+		mlog(ML_ERROR, "IO Error %d\n", bio->bi_error);
+		wc->wc_error = bio->bi_error;
 	}
 
 	o2hb_bio_wait_dec(wc, 1);
@@ -553,7 +554,7 @@ static struct bio *o2hb_setup_one_bio(struct o2hb_region *reg,
 
 	/* Must put everything in 512 byte sectors for the bio... */
 	bio->bi_iter.bi_sector = (reg->hr_start_block + cs) << (bits - 9);
-	bio_set_dev(bio, reg->hr_bdev);
+	bio->bi_bdev = reg->hr_bdev;
 	bio->bi_private = wc;
 	bio->bi_end_io = o2hb_bio_end_io;
 	bio_set_op_attrs(bio, op, op_flags);
@@ -607,7 +608,7 @@ static int o2hb_read_slots(struct o2hb_region *reg,
 	status = 0;
 
 bail_and_wait:
-	o2hb_wait_on_io(&wc);
+	o2hb_wait_on_io(reg, &wc);
 	if (wc.wc_error && !status)
 		status = wc.wc_error;
 
@@ -626,7 +627,7 @@ static int o2hb_issue_node_write(struct o2hb_region *reg,
 	slot = o2nm_this_node();
 
 	bio = o2hb_setup_one_bio(reg, write_wc, &slot, slot+1, REQ_OP_WRITE,
-				 REQ_SYNC);
+				 WRITE_SYNC);
 	if (IS_ERR(bio)) {
 		status = PTR_ERR(bio);
 		mlog_errno(status);
@@ -740,7 +741,7 @@ static inline void o2hb_prepare_block(struct o2hb_region *reg,
 	hb_block = (struct o2hb_disk_heartbeat_block *)slot->ds_raw_block;
 	memset(hb_block, 0, reg->hr_block_bytes);
 	/* TODO: time stuff */
-	cputime = ktime_get_real_seconds();
+	cputime = CURRENT_TIME.tv_sec;
 	if (!cputime)
 		cputime = 1;
 
@@ -1161,7 +1162,7 @@ static int o2hb_do_disk_heartbeat(struct o2hb_region *reg)
 	 * before we can go to steady state.  This ensures that
 	 * people we find in our steady state have seen us.
 	 */
-	o2hb_wait_on_io(&write_wc);
+	o2hb_wait_on_io(reg, &write_wc);
 	if (write_wc.wc_error) {
 		/* Do not re-arm the write timeout on I/O error - we
 		 * can't be sure that the new block ever made it to
@@ -1249,7 +1250,7 @@ static int o2hb_thread(void *data)
 
 		mlog(ML_HEARTBEAT,
 		     "start = %lld, end = %lld, msec = %u, ret = %d\n",
-		     before_hb, after_hb, elapsed_msec, ret);
+		     before_hb.tv64, after_hb.tv64, elapsed_msec, ret);
 
 		if (!kthread_should_stop() &&
 		    elapsed_msec < reg->hr_timeout_ms) {
@@ -1274,7 +1275,7 @@ static int o2hb_thread(void *data)
 		o2hb_prepare_block(reg, 0);
 		ret = o2hb_issue_node_write(reg, &write_wc);
 		if (ret == 0)
-			o2hb_wait_on_io(&write_wc);
+			o2hb_wait_on_io(reg, &write_wc);
 		else
 			mlog_errno(ret);
 	}
@@ -2025,7 +2026,7 @@ static struct configfs_item_operations o2hb_region_item_ops = {
 	.release		= o2hb_region_release,
 };
 
-static const struct config_item_type o2hb_region_type = {
+static struct config_item_type o2hb_region_type = {
 	.ct_item_ops	= &o2hb_region_item_ops,
 	.ct_attrs	= o2hb_region_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -2310,7 +2311,7 @@ static struct configfs_group_operations o2hb_heartbeat_group_group_ops = {
 	.drop_item	= o2hb_heartbeat_group_drop_item,
 };
 
-static const struct config_item_type o2hb_heartbeat_group_type = {
+static struct config_item_type o2hb_heartbeat_group_type = {
 	.ct_group_ops	= &o2hb_heartbeat_group_group_ops,
 	.ct_attrs	= o2hb_heartbeat_group_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -2486,7 +2487,7 @@ unlock:
 	return ret;
 }
 
-static void o2hb_region_dec_user(const char *region_uuid)
+void o2hb_region_dec_user(const char *region_uuid)
 {
 	spin_lock(&o2hb_live_lock);
 
@@ -2575,6 +2576,22 @@ void o2hb_unregister_callback(const char *region_uuid,
 }
 EXPORT_SYMBOL_GPL(o2hb_unregister_callback);
 
+int o2hb_check_node_heartbeating(u8 node_num)
+{
+	unsigned long testing_map[BITS_TO_LONGS(O2NM_MAX_NODES)];
+
+	o2hb_fill_node_map(testing_map, sizeof(testing_map));
+	if (!test_bit(node_num, testing_map)) {
+		mlog(ML_HEARTBEAT,
+		     "node (%u) does not have heartbeating enabled.\n",
+		     node_num);
+		return 0;
+	}
+
+	return 1;
+}
+EXPORT_SYMBOL_GPL(o2hb_check_node_heartbeating);
+
 int o2hb_check_node_heartbeating_no_sem(u8 node_num)
 {
 	unsigned long testing_map[BITS_TO_LONGS(O2NM_MAX_NODES)];
@@ -2608,6 +2625,23 @@ int o2hb_check_node_heartbeating_from_callback(u8 node_num)
 	return 1;
 }
 EXPORT_SYMBOL_GPL(o2hb_check_node_heartbeating_from_callback);
+
+/* Makes sure our local node is configured with a node number, and is
+ * heartbeating. */
+int o2hb_check_local_node_heartbeating(void)
+{
+	u8 node_num;
+
+	/* if this node was set then we have networking */
+	node_num = o2nm_this_node();
+	if (node_num == O2NM_MAX_NODES) {
+		mlog(ML_HEARTBEAT, "this node has not been configured.\n");
+		return 0;
+	}
+
+	return o2hb_check_node_heartbeating(node_num);
+}
+EXPORT_SYMBOL_GPL(o2hb_check_local_node_heartbeating);
 
 /*
  * this is just a hack until we get the plumbing which flips file systems

@@ -30,6 +30,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
 
@@ -201,14 +205,14 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* IRQ_N */
 				if (p[i].flags &
-					(BIT(V4L2_SUBDEV_IO_PIN_DISABLE) |
-					 BIT(V4L2_SUBDEV_IO_PIN_INPUT))) {
+					(V4L2_SUBDEV_IO_PIN_DISABLE |
+					 V4L2_SUBDEV_IO_PIN_INPUT)) {
 					pin_ctrl &= ~(0x1 << 25);
 				} else {
 					pin_ctrl |= (0x1 << 25);
 				}
 				if (p[i].flags &
-					BIT(V4L2_SUBDEV_IO_PIN_ACTIVE_LOW)) {
+					V4L2_SUBDEV_IO_PIN_ACTIVE_LOW) {
 					pin_ctrl &= ~(0x1 << 24);
 				} else {
 					pin_ctrl |= (0x1 << 24);
@@ -224,7 +228,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* GPIO19 */
 				gpio_oe &= ~(0x1 << 0);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_SET_VALUE)) {
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_SET_VALUE) {
 					gpio_data &= ~(0x1 << 0);
 					gpio_data |= ((p[i].value & 0x1) << 0);
 				}
@@ -236,7 +240,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			if (p[i].function != CX23885_PAD_GPIO20) {
 				/* IR_TX */
 				gpio_oe |= (0x1 << 1);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_DISABLE))
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_DISABLE)
 					pin_ctrl &= ~(0x1 << 10);
 				else
 					pin_ctrl |= (0x1 << 10);
@@ -245,7 +249,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* GPIO20 */
 				gpio_oe &= ~(0x1 << 1);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_SET_VALUE)) {
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_SET_VALUE) {
 					gpio_data &= ~(0x1 << 1);
 					gpio_data |= ((p[i].value & 0x1) << 1);
 				}
@@ -263,7 +267,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* GPIO21 */
 				gpio_oe &= ~(0x1 << 2);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_SET_VALUE)) {
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_SET_VALUE) {
 					gpio_data &= ~(0x1 << 2);
 					gpio_data |= ((p[i].value & 0x1) << 2);
 				}
@@ -281,7 +285,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* GPIO22 */
 				gpio_oe &= ~(0x1 << 3);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_SET_VALUE)) {
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_SET_VALUE) {
 					gpio_data &= ~(0x1 << 3);
 					gpio_data |= ((p[i].value & 0x1) << 3);
 				}
@@ -299,7 +303,7 @@ static int cx23885_s_io_pin_config(struct v4l2_subdev *sd, size_t n,
 			} else {
 				/* GPIO23 */
 				gpio_oe &= ~(0x1 << 4);
-				if (p[i].flags & BIT(V4L2_SUBDEV_IO_PIN_SET_VALUE)) {
+				if (p[i].flags & V4L2_SUBDEV_IO_PIN_SET_VALUE) {
 					gpio_data &= ~(0x1 << 4);
 					gpio_data |= ((p[i].value & 0x1) << 4);
 				}
@@ -891,7 +895,10 @@ void cx25840_std_setup(struct i2c_client *client)
 					"Chroma sub-carrier freq = %d.%06d MHz\n",
 					fsc / 1000000, fsc % 1000000);
 
-			v4l_dbg(1, cx25840_debug, client, "hblank %i, hactive %i, vblank %i, vactive %i, vblank656 %i, src_dec %i, burst 0x%02x, luma_lpf %i, uv_lpf %i, comb 0x%02x, sc 0x%06x\n",
+			v4l_dbg(1, cx25840_debug, client, "hblank %i, hactive %i, "
+				"vblank %i, vactive %i, vblank656 %i, src_dec %i, "
+				"burst 0x%02x, luma_lpf %i, uv_lpf %i, comb 0x%02x, "
+				"sc 0x%06x\n",
 				hblank, hactive, vblank, vactive, vblank656,
 				src_decimation, burst, luma_lpf, uv_lpf, comb, sc);
 		}
@@ -1279,7 +1286,7 @@ static int set_input(struct i2c_client *client, enum cx25840_video_input vid_inp
 static int set_v4lstd(struct i2c_client *client)
 {
 	struct cx25840_state *state = to_state(i2c_get_clientdata(client));
-	u8 fmt = 0;	/* zero is autodetect */
+	u8 fmt = 0; 	/* zero is autodetect */
 	u8 pal_m = 0;
 
 	/* First tests should be against specific std */
@@ -1411,9 +1418,8 @@ static int cx25840_set_fmt(struct v4l2_subdev *sd,
 	 * height. Without that margin the cx23885 fails in this
 	 * check.
 	 */
-	if ((fmt->width == 0) || (Vlines == 0) ||
-	    (fmt->width * 16 < Hsrc) || (Hsrc < fmt->width) ||
-	    (Vlines * 8 < Vsrc) || (Vsrc + 1 < Vlines)) {
+	if ((fmt->width * 16 < Hsrc) || (Hsrc < fmt->width) ||
+			(Vlines * 8 < Vsrc) || (Vsrc + 1 < Vlines)) {
 		v4l_err(client, "%dx%d is not a valid size!\n",
 				fmt->width, fmt->height);
 		return -ERANGE;
@@ -1762,7 +1768,7 @@ static int cx25840_g_std(struct v4l2_subdev *sd, v4l2_std_id *std)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	static const v4l2_std_id stds[] = {
+	v4l2_std_id stds[] = {
 		/* 0000 */ V4L2_STD_UNKNOWN,
 
 		/* 0001 */ V4L2_STD_NTSC_M,
@@ -1776,9 +1782,9 @@ static int cx25840_g_std(struct v4l2_subdev *sd, v4l2_std_id *std)
 
 		/* 1001 */ V4L2_STD_UNKNOWN,
 		/* 1010 */ V4L2_STD_UNKNOWN,
+		/* 1001 */ V4L2_STD_UNKNOWN,
+		/* 1010 */ V4L2_STD_UNKNOWN,
 		/* 1011 */ V4L2_STD_UNKNOWN,
-		/* 1100 */ V4L2_STD_SECAM,
-		/* 1101 */ V4L2_STD_UNKNOWN,
 		/* 1110 */ V4L2_STD_UNKNOWN,
 		/* 1111 */ V4L2_STD_UNKNOWN
 	};
@@ -2081,10 +2087,10 @@ static void cx23885_dif_setup(struct i2c_client *client, u32 ifHz)
 
 	/* Assuming TV */
 	/* Calculate the PLL frequency word based on the adjusted ifHz */
-	pll_freq = div_u64((u64)ifHz * 268435456, 50000000);
-	pll_freq_word = (u32)pll_freq;
+        pll_freq = div_u64((u64)ifHz * 268435456, 50000000);
+        pll_freq_word = (u32)pll_freq;
 
-	cx25840_write4(client, DIF_PLL_FREQ_WORD,  pll_freq_word);
+        cx25840_write4(client, DIF_PLL_FREQ_WORD,  pll_freq_word);
 
 	/* Round down to the nearest 100KHz */
 	ifHz = (ifHz / 100000) * 100000;
@@ -5185,9 +5191,11 @@ static int cx25840_probe(struct i2c_client *client,
 		id = CX2310X_AV;
 	} else if ((device_id & 0xff) == (device_id >> 8)) {
 		v4l_err(client,
-			"likely a confused/unresponsive cx2388[578] A/V decoder found @ 0x%x (%s)\n",
+			"likely a confused/unresponsive cx2388[578] A/V decoder"
+			" found @ 0x%x (%s)\n",
 			client->addr << 1, client->adapter->name);
-		v4l_err(client, "A method to reset it from the cx25840 driver software is not known at this time\n");
+		v4l_err(client, "A method to reset it from the cx25840 driver"
+			" software is not known at this time\n");
 		return -ENODEV;
 	} else {
 		v4l_dbg(1, cx25840_debug, client, "cx25840 not found\n");

@@ -7,6 +7,7 @@ Function Reference
 
 .. toctree::
     :maxdepth: 1
+    :numbered:
 
     cec-func-open
     cec-func-close

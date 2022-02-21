@@ -113,9 +113,9 @@ static int hidp_send_message(struct hidp_session *session, struct socket *sock,
 		return -ENOMEM;
 	}
 
-	skb_put_u8(skb, hdr);
+	*skb_put(skb, 1) = hdr;
 	if (data && size > 0)
-		skb_put_data(skb, data, size);
+		memcpy(skb_put(skb, size), data, size);
 
 	skb_queue_tail(transmit, skb);
 	wake_up_interruptible(sk_sleep(sk));
@@ -398,9 +398,9 @@ static int hidp_raw_request(struct hid_device *hid, unsigned char reportnum,
 	}
 }
 
-static void hidp_idle_timeout(struct timer_list *t)
+static void hidp_idle_timeout(unsigned long arg)
 {
-	struct hidp_session *session = from_timer(session, t, timer);
+	struct hidp_session *session = (struct hidp_session *) arg;
 
 	/* The HIDP user-space API only contains calls to add and remove
 	 * devices. There is no way to forward events of any kind. Therefore,
@@ -734,7 +734,7 @@ static void hidp_stop(struct hid_device *hid)
 	hid->claimed = 0;
 }
 
-struct hid_ll_driver hidp_hid_driver = {
+static struct hid_ll_driver hidp_hid_driver = {
 	.parse = hidp_parse,
 	.start = hidp_start,
 	.stop = hidp_stop,
@@ -743,7 +743,6 @@ struct hid_ll_driver hidp_hid_driver = {
 	.raw_request = hidp_raw_request,
 	.output_report = hidp_output_report,
 };
-EXPORT_SYMBOL_GPL(hidp_hid_driver);
 
 /* This function sets up the hid device. It does not add it
    to the HID system. That is done in hidp_add_connection(). */
@@ -789,7 +788,7 @@ static int hidp_setup_hid(struct hidp_session *session,
 	hid->dev.parent = &session->conn->hcon->dev;
 	hid->ll_driver = &hidp_hid_driver;
 
-	/* True if device is blacklisted in drivers/hid/hid-quirks.c */
+	/* True if device is blacklisted in drivers/hid/hid-core.c */
 	if (hid_ignore(hid)) {
 		hid_destroy_device(session->hid);
 		session->hid = NULL;
@@ -944,7 +943,8 @@ static int hidp_session_new(struct hidp_session **out, const bdaddr_t *bdaddr,
 
 	/* device management */
 	INIT_WORK(&session->dev_init, hidp_session_dev_work);
-	timer_setup(&session->timer, hidp_idle_timeout, 0);
+	setup_timer(&session->timer, hidp_idle_timeout,
+		    (unsigned long)session);
 
 	/* session data */
 	mutex_init(&session->report_mutex);
@@ -1238,7 +1238,7 @@ static void hidp_session_run(struct hidp_session *session)
 	smp_mb__after_atomic();
 }
 
-static int hidp_session_wake_function(wait_queue_entry_t *wait,
+static int hidp_session_wake_function(wait_queue_t *wait,
 				      unsigned int mode,
 				      int sync, void *key)
 {

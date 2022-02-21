@@ -40,7 +40,7 @@
 #define ST33ZP24_OK					0x5A
 #define ST33ZP24_UNDEFINED_ERR				0x80
 #define ST33ZP24_BADLOCALITY				0x81
-#define ST33ZP24_TISREGISTER_UNKNOWN			0x82
+#define ST33ZP24_TISREGISTER_UKNOWN			0x82
 #define ST33ZP24_LOCALITY_NOT_ACTIVATED			0x83
 #define ST33ZP24_HASH_END_BEFORE_HASH_START		0x84
 #define ST33ZP24_BAD_COMMAND_ORDER			0x85
@@ -63,7 +63,7 @@
  * some latency byte before the answer is available (max 15).
  * We have 2048 + 1024 + 15.
  */
-#define ST33ZP24_SPI_BUFFER_SIZE (ST33ZP24_BUFSIZE + (ST33ZP24_BUFSIZE / 2) +\
+#define ST33ZP24_SPI_BUFFER_SIZE (TPM_BUFSIZE + (TPM_BUFSIZE / 2) +\
 				  MAX_SPI_LATENCY)
 
 
@@ -84,7 +84,7 @@ static int st33zp24_status_to_errno(u8 code)
 		return 0;
 	case ST33ZP24_UNDEFINED_ERR:
 	case ST33ZP24_BADLOCALITY:
-	case ST33ZP24_TISREGISTER_UNKNOWN:
+	case ST33ZP24_TISREGISTER_UKNOWN:
 	case ST33ZP24_LOCALITY_NOT_ACTIVATED:
 	case ST33ZP24_HASH_END_BEFORE_HASH_START:
 	case ST33ZP24_BAD_COMMAND_ORDER:
@@ -230,13 +230,6 @@ static const struct st33zp24_phy_ops spi_phy_ops = {
 	.recv = st33zp24_spi_recv,
 };
 
-static const struct acpi_gpio_params lpcpd_gpios = { 1, 0, false };
-
-static const struct acpi_gpio_mapping acpi_st33zp24_gpios[] = {
-	{ "lpcpd-gpios", &lpcpd_gpios, 1 },
-	{},
-};
-
 static int st33zp24_spi_acpi_request_resources(struct spi_device *spi_dev)
 {
 	struct tpm_chip *chip = spi_get_drvdata(spi_dev);
@@ -244,14 +237,10 @@ static int st33zp24_spi_acpi_request_resources(struct spi_device *spi_dev)
 	struct st33zp24_spi_phy *phy = tpm_dev->phy_id;
 	struct gpio_desc *gpiod_lpcpd;
 	struct device *dev = &spi_dev->dev;
-	int ret;
-
-	ret = devm_acpi_dev_add_driver_gpios(dev, acpi_st33zp24_gpios);
-	if (ret)
-		return ret;
 
 	/* Get LPCPD GPIO from ACPI */
-	gpiod_lpcpd = devm_gpiod_get(dev, "lpcpd", GPIOD_OUT_HIGH);
+	gpiod_lpcpd = devm_gpiod_get_index(dev, "TPM IO LPCPD", 1,
+					   GPIOD_OUT_HIGH);
 	if (IS_ERR(gpiod_lpcpd)) {
 		dev_err(dev, "Failed to retrieve lpcpd-gpios from acpi.\n");
 		phy->io_lpcpd = -1;
@@ -396,13 +385,8 @@ static int st33zp24_spi_probe(struct spi_device *dev)
 static int st33zp24_spi_remove(struct spi_device *dev)
 {
 	struct tpm_chip *chip = spi_get_drvdata(dev);
-	int ret;
 
-	ret = st33zp24_remove(chip);
-	if (ret)
-		return ret;
-
-	return 0;
+	return st33zp24_remove(chip);
 }
 
 static const struct spi_device_id st33zp24_spi_id[] = {

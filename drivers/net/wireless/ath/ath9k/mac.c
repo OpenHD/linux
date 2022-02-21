@@ -18,6 +18,12 @@
 #include "hw-ops.h"
 #include <linux/export.h>
 
+extern u8 cwmin_man;
+extern u8 cwmax_man;
+extern u8 aifs_man;
+extern u8 cck_sifs;
+extern u8 ofdm_sifs;
+
 static void ath9k_hw_set_txq_interrupts(struct ath_hw *ah,
 					struct ath9k_tx_queue_info *qi)
 {
@@ -216,7 +222,8 @@ bool ath9k_hw_set_txq_props(struct ath_hw *ah, int q,
 	if (qinfo->tqi_aifs != ATH9K_TXQ_USEDEFAULT)
 		qi->tqi_aifs = min(qinfo->tqi_aifs, 255U);
 	else
-		qi->tqi_aifs = INIT_AIFS;
+//		qi->tqi_aifs = INIT_AIFS;
+		qi->tqi_aifs = aifs_man;
 	if (qinfo->tqi_cwmin != ATH9K_TXQ_USEDEFAULT) {
 		cw = min(qinfo->tqi_cwmin, 1024U);
 		qi->tqi_cwmin = 1;
@@ -535,8 +542,7 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 
 	rs->rs_status = 0;
 	rs->rs_flags = 0;
-	rs->enc_flags = 0;
-	rs->bw = RATE_INFO_BW_20;
+	rs->flag = 0;
 
 	rs->rs_datalen = ads.ds_rxstatus1 & AR_DataLen;
 	rs->rs_tstamp = ads.AR_RcvTimestamp;
@@ -578,15 +584,15 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 	rs->rs_antenna = MS(ads.ds_rxstatus3, AR_RxAntenna);
 
 	/* directly mapped flags for ieee80211_rx_status */
-	rs->enc_flags |=
-		(ads.ds_rxstatus3 & AR_GI) ? RX_ENC_FLAG_SHORT_GI : 0;
-	rs->bw = (ads.ds_rxstatus3 & AR_2040) ? RATE_INFO_BW_40 :
-						RATE_INFO_BW_20;
+	rs->flag |=
+		(ads.ds_rxstatus3 & AR_GI) ? RX_FLAG_SHORT_GI : 0;
+	rs->flag |=
+		(ads.ds_rxstatus3 & AR_2040) ? RX_FLAG_40MHZ : 0;
 	if (AR_SREV_9280_20_OR_LATER(ah))
-		rs->enc_flags |=
+		rs->flag |=
 			(ads.ds_rxstatus3 & AR_STBC) ?
 				/* we can only Nss=1 STBC */
-				(1 << RX_ENC_FLAG_STBC_SHIFT) : 0;
+				(1 << RX_FLAG_STBC_SHIFT) : 0;
 
 	if (ads.ds_rxstatus8 & AR_PreDelimCRCErr)
 		rs->rs_flags |= ATH9K_RX_DELIM_CRC_PRE;
@@ -832,43 +838,6 @@ static void __ath9k_hw_enable_interrupts(struct ath_hw *ah)
 	}
 	ath_dbg(common, INTERRUPT, "AR_IMR 0x%x IER 0x%x\n",
 		REG_READ(ah, AR_IMR), REG_READ(ah, AR_IER));
-
-	if (ah->msi_enabled) {
-		u32 _msi_reg = 0;
-		u32 i = 0;
-		u32 msi_pend_addr_mask = AR_PCIE_MSI_HW_INT_PENDING_ADDR_MSI_64;
-
-		ath_dbg(ath9k_hw_common(ah), INTERRUPT,
-			"Enabling MSI, msi_mask=0x%X\n", ah->msi_mask);
-
-		REG_WRITE(ah, AR_INTR_PRIO_ASYNC_ENABLE, ah->msi_mask);
-		REG_WRITE(ah, AR_INTR_PRIO_ASYNC_MASK, ah->msi_mask);
-		ath_dbg(ath9k_hw_common(ah), INTERRUPT,
-			"AR_INTR_PRIO_ASYNC_ENABLE=0x%X, AR_INTR_PRIO_ASYNC_MASK=0x%X\n",
-			REG_READ(ah, AR_INTR_PRIO_ASYNC_ENABLE),
-			REG_READ(ah, AR_INTR_PRIO_ASYNC_MASK));
-
-		if (ah->msi_reg == 0)
-			ah->msi_reg = REG_READ(ah, AR_PCIE_MSI);
-
-		ath_dbg(ath9k_hw_common(ah), INTERRUPT,
-			"AR_PCIE_MSI=0x%X, ah->msi_reg = 0x%X\n",
-			AR_PCIE_MSI, ah->msi_reg);
-
-		i = 0;
-		do {
-			REG_WRITE(ah, AR_PCIE_MSI,
-				  (ah->msi_reg | AR_PCIE_MSI_ENABLE)
-				  & msi_pend_addr_mask);
-			_msi_reg = REG_READ(ah, AR_PCIE_MSI);
-			i++;
-		} while ((_msi_reg & AR_PCIE_MSI_ENABLE) == 0 && i < 200);
-
-		if (i >= 200)
-			ath_err(ath9k_hw_common(ah),
-				"%s: _msi_reg = 0x%X\n",
-				__func__, _msi_reg);
-	}
 }
 
 void ath9k_hw_resume_interrupts(struct ath_hw *ah)
@@ -915,21 +884,12 @@ void ath9k_hw_set_interrupts(struct ath_hw *ah)
 	if (!(ints & ATH9K_INT_GLOBAL))
 		ath9k_hw_disable_interrupts(ah);
 
-	if (ah->msi_enabled) {
-		ath_dbg(common, INTERRUPT, "Clearing AR_INTR_PRIO_ASYNC_ENABLE\n");
-
-		REG_WRITE(ah, AR_INTR_PRIO_ASYNC_ENABLE, 0);
-		REG_READ(ah, AR_INTR_PRIO_ASYNC_ENABLE);
-	}
-
 	ath_dbg(common, INTERRUPT, "New interrupt mask 0x%x\n", ints);
 
 	mask = ints & ATH9K_INT_COMMON;
 	mask2 = 0;
 
-	ah->msi_mask = 0;
 	if (ints & ATH9K_INT_TX) {
-		ah->msi_mask |= AR_INTR_PRIO_TX;
 		if (ah->config.tx_intr_mitigation)
 			mask |= AR_IMR_TXMINTR | AR_IMR_TXINTM;
 		else {
@@ -944,7 +904,6 @@ void ath9k_hw_set_interrupts(struct ath_hw *ah)
 			mask |= AR_IMR_TXEOL;
 	}
 	if (ints & ATH9K_INT_RX) {
-		ah->msi_mask |= AR_INTR_PRIO_RXLP | AR_INTR_PRIO_RXHP;
 		if (AR_SREV_9300_20_OR_LATER(ah)) {
 			mask |= AR_IMR_RXERR | AR_IMR_RXOK_HP;
 			if (ah->config.rx_intr_mitigation) {

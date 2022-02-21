@@ -24,6 +24,7 @@
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/workqueue.h>
+#include <linux/miscdevice.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/intel_ish.h>
 #include "ishtp-dev.h"
@@ -35,11 +36,6 @@ static const struct pci_device_id ish_pci_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, BXT_Bx_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, APL_Ax_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, SPT_Ax_DEVICE_ID)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, CNL_Ax_DEVICE_ID)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, GLK_Ax_DEVICE_ID)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, CNL_H_DEVICE_ID)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ICL_MOBILE_DEVICE_ID)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, SPT_H_DEVICE_ID)},
 	{0, }
 };
 MODULE_DEVICE_TABLE(pci, ish_pci_tbl);
@@ -51,8 +47,7 @@ MODULE_DEVICE_TABLE(pci, ish_pci_tbl);
  *
  * Callback to direct log messages to Linux trace buffers
  */
-static __printf(2, 3)
-void ish_event_tracer(struct ishtp_device *dev, const char *format, ...)
+static void ish_event_tracer(struct ishtp_device *dev, char *format, ...)
 {
 	if (trace_ishtp_dump_enabled()) {
 		va_list args;
@@ -97,13 +92,6 @@ static int ish_init(struct ishtp_device *dev)
 	return 0;
 }
 
-static const struct pci_device_id ish_invalid_pci_ids[] = {
-	/* Mehlow platform special pci ids */
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0xA309)},
-	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0xA30A)},
-	{}
-};
-
 /**
  * ish_probe() - PCI driver probe callback
  * @pdev:	pci device
@@ -118,10 +106,6 @@ static int ish_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct ishtp_device *dev;
 	struct ish_hw *hw;
 	int	ret;
-
-	/* Check for invalid platforms for ISH support */
-	if (pci_dev_present(ish_invalid_pci_ids))
-		return -ENODEV;
 
 	/* enable pci dev */
 	ret = pci_enable_device(pdev);
@@ -185,6 +169,7 @@ free_irq:
 	free_irq(pdev->irq, dev);
 free_device:
 	pci_iounmap(pdev, hw->mem_addr);
+	kfree(dev);
 release_regions:
 	pci_release_regions(pdev);
 disable_device:
@@ -214,19 +199,17 @@ static void ish_remove(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
+	kfree(ishtp_dev);
 }
 
 static struct device __maybe_unused *ish_resume_device;
-
-/* 50ms to get resume response */
-#define WAIT_FOR_RESUME_ACK_MS		50
 
 /**
  * ish_resume_handler() - Work function to complete resume
  * @work:	work struct
  *
  * The resume work function to complete resume function asynchronously.
- * There are two resume paths, one where ISH is not powered off,
+ * There are two types of platforms, one where ISH is not powered off,
  * in that case a simple resume message is enough, others we need
  * a reset sequence.
  */
@@ -234,31 +217,20 @@ static void __maybe_unused ish_resume_handler(struct work_struct *work)
 {
 	struct pci_dev *pdev = to_pci_dev(ish_resume_device);
 	struct ishtp_device *dev = pci_get_drvdata(pdev);
-	uint32_t fwsts;
 	int ret;
 
-	/* Get ISH FW status */
-	fwsts = IPC_GET_ISH_FWSTS(dev->ops->get_fw_status(dev));
+	ishtp_send_resume(dev);
+
+	/* 50 ms to get resume response */
+	if (dev->resume_flag)
+		ret = wait_event_interruptible_timeout(dev->resume_wait,
+						       !dev->resume_flag,
+						       msecs_to_jiffies(50));
 
 	/*
-	 * If currently, in ISH FW, sensor app is loaded or beyond that,
-	 * it means ISH isn't powered off, in this case, send a resume message.
-	 */
-	if (fwsts >= FWSTS_SENSOR_APP_LOADED) {
-		ishtp_send_resume(dev);
-
-		/* Waiting to get resume response */
-		if (dev->resume_flag)
-			ret = wait_event_interruptible_timeout(dev->resume_wait,
-				!dev->resume_flag,
-				msecs_to_jiffies(WAIT_FOR_RESUME_ACK_MS));
-	}
-
-	/*
-	 * If in ISH FW, sensor app isn't loaded yet, or no resume response.
-	 * That means this platform is not S0ix compatible, or something is
-	 * wrong with ISH FW. So on resume, full reboot of ISH processor will
-	 * happen, so need to go through init sequence again.
+	 * If no resume response. This platform  is not S0ix compatible
+	 * So on resume full reboot of ISH processor will happen, so
+	 * need to go through init sequence again
 	 */
 	if (dev->resume_flag)
 		ish_init(dev);

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/fault-inject.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
@@ -14,7 +13,7 @@ static struct {
 	.cache_filter = false,
 };
 
-bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+bool should_failslab(struct kmem_cache *s, gfp_t gfpflags)
 {
 	/* No fault-injection for bootstrap cache */
 	if (unlikely(s == kmem_cache))
@@ -42,7 +41,7 @@ __setup("failslab=", setup_failslab);
 static int __init failslab_debugfs_init(void)
 {
 	struct dentry *dir;
-	umode_t mode = S_IFREG | 0600;
+	umode_t mode = S_IFREG | S_IRUSR | S_IWUSR;
 
 	dir = fault_create_debugfs_attr("failslab", NULL, &failslab.attr);
 	if (IS_ERR(dir))

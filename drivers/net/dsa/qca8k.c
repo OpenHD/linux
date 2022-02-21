@@ -1,15 +1,24 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2009 Felix Fietkau <nbd@nbd.name>
  * Copyright (C) 2011-2012 Gabor Juhos <juhosg@openwrt.org>
  * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016 John Crispin <john@phrozen.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
 #include <linux/phy.h>
 #include <linux/netdevice.h>
 #include <net/dsa.h>
+#include <net/switchdev.h>
 #include <linux/of_net.h>
 #include <linux/of_platform.h>
 #include <linux/if_bridge.h>
@@ -242,7 +251,7 @@ static const struct regmap_range qca8k_readable_ranges[] = {
 
 };
 
-static const struct regmap_access_table qca8k_readable_table = {
+static struct regmap_access_table qca8k_readable_table = {
 	.yes_ranges = qca8k_readable_ranges,
 	.n_yes_ranges = ARRAY_SIZE(qca8k_readable_ranges),
 };
@@ -480,7 +489,7 @@ qca8k_port_set_status(struct qca8k_priv *priv, int port, int enable)
 	u32 mask = QCA8K_PORT_STATUS_TXMAC | QCA8K_PORT_STATUS_RXMAC;
 
 	/* Port 0 and 6 have no internal PHY */
-	if (port > 0 && port < 6)
+	if ((port > 0) && (port < 6))
 		mask |= QCA8K_PORT_STATUS_LINK_AUTO;
 
 	if (enable)
@@ -511,7 +520,7 @@ qca8k_setup(struct dsa_switch *ds)
 		pr_warn("regmap initialization failed");
 
 	/* Initialize CPU port pad mode (xMII type, delays...) */
-	phy_mode = of_get_phy_mode(ds->ports[QCA8K_CPU_PORT].dn);
+	phy_mode = of_get_phy_mode(ds->ports[ds->dst->cpu_port].dn);
 	if (phy_mode < 0) {
 		pr_err("Can't find phy-mode for master device\n");
 		return phy_mode;
@@ -544,7 +553,7 @@ qca8k_setup(struct dsa_switch *ds)
 
 	/* Disable MAC by default on all user ports */
 	for (i = 1; i < QCA8K_NUM_PORTS; i++)
-		if (dsa_is_user_port(ds, i))
+		if (ds->enabled_port_mask & BIT(i))
 			qca8k_port_set_status(priv, i, 0);
 
 	/* Forward all unknown frames to CPU port for Linux processing */
@@ -555,15 +564,16 @@ qca8k_setup(struct dsa_switch *ds)
 		    BIT(0) << QCA8K_GLOBAL_FW_CTRL1_UC_DP_S);
 
 	/* Setup connection between CPU port & user ports */
-	for (i = 0; i < QCA8K_NUM_PORTS; i++) {
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		/* CPU port gets connected to all user ports of the switch */
 		if (dsa_is_cpu_port(ds, i)) {
 			qca8k_rmw(priv, QCA8K_PORT_LOOKUP_CTRL(QCA8K_CPU_PORT),
-				  QCA8K_PORT_LOOKUP_MEMBER, dsa_user_ports(ds));
+				  QCA8K_PORT_LOOKUP_MEMBER,
+				  ds->enabled_port_mask);
 		}
 
 		/* Invividual user ports get connected to CPU port only */
-		if (dsa_is_user_port(ds, i)) {
+		if (ds->enabled_port_mask & BIT(i)) {
 			int shift = 16 * (i % 2);
 
 			qca8k_rmw(priv, QCA8K_PORT_LOOKUP_CTRL(i),
@@ -633,12 +643,9 @@ qca8k_adjust_link(struct dsa_switch *ds, int port, struct phy_device *phy)
 }
 
 static void
-qca8k_get_strings(struct dsa_switch *ds, int port, u32 stringset, uint8_t *data)
+qca8k_get_strings(struct dsa_switch *ds, int port, uint8_t *data)
 {
 	int i;
-
-	if (stringset != ETH_SS_STATS)
-		return;
 
 	for (i = 0; i < ARRAY_SIZE(ar8327_mib); i++)
 		strncpy(data + i * ETH_GSTRING_LEN, ar8327_mib[i].name,
@@ -667,16 +674,13 @@ qca8k_get_ethtool_stats(struct dsa_switch *ds, int port,
 }
 
 static int
-qca8k_get_sset_count(struct dsa_switch *ds, int port, int sset)
+qca8k_get_sset_count(struct dsa_switch *ds)
 {
-	if (sset != ETH_SS_STATS)
-		return 0;
-
 	return ARRAY_SIZE(ar8327_mib);
 }
 
-static int
-qca8k_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *eee)
+static void
+qca8k_eee_enable_set(struct dsa_switch *ds, int port, bool enable)
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	u32 lpi_en = QCA8K_REG_EEE_CTRL_LPI_EN(port);
@@ -684,21 +688,73 @@ qca8k_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *eee)
 
 	mutex_lock(&priv->reg_mutex);
 	reg = qca8k_read(priv, QCA8K_REG_EEE_CTRL);
-	if (eee->eee_enabled)
+	if (enable)
 		reg |= lpi_en;
 	else
 		reg &= ~lpi_en;
 	qca8k_write(priv, QCA8K_REG_EEE_CTRL, reg);
 	mutex_unlock(&priv->reg_mutex);
+}
+
+static int
+qca8k_eee_init(struct dsa_switch *ds, int port,
+	       struct phy_device *phy)
+{
+	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
+	struct ethtool_eee *p = &priv->port_sts[port].eee;
+	int ret;
+
+	p->supported = (SUPPORTED_1000baseT_Full | SUPPORTED_100baseT_Full);
+
+	ret = phy_init_eee(phy, 0);
+	if (ret)
+		return ret;
+
+	qca8k_eee_enable_set(ds, port, true);
 
 	return 0;
 }
 
 static int
-qca8k_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+qca8k_set_eee(struct dsa_switch *ds, int port,
+	      struct phy_device *phydev,
+	      struct ethtool_eee *e)
 {
-	/* Nothing to do on the port's MAC */
-	return 0;
+	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
+	struct ethtool_eee *p = &priv->port_sts[port].eee;
+	int ret = 0;
+
+	p->eee_enabled = e->eee_enabled;
+
+	if (e->eee_enabled) {
+		p->eee_enabled = qca8k_eee_init(ds, port, phydev);
+		if (!p->eee_enabled)
+			ret = -EOPNOTSUPP;
+	}
+	qca8k_eee_enable_set(ds, port, p->eee_enabled);
+
+	return ret;
+}
+
+static int
+qca8k_get_eee(struct dsa_switch *ds, int port,
+	      struct ethtool_eee *e)
+{
+	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
+	struct ethtool_eee *p = &priv->port_sts[port].eee;
+	struct net_device *netdev = ds->ports[port].netdev;
+	int ret;
+
+	ret = phy_ethtool_get_eee(netdev->phydev, p);
+	if (!ret)
+		e->eee_active =
+			!!(p->supported & p->advertised & p->lp_advertised);
+	else
+		e->eee_active = 0;
+
+	e->eee_enabled = p->eee_enabled;
+
+	return ret;
 }
 
 static void
@@ -731,14 +787,17 @@ qca8k_port_stp_state_set(struct dsa_switch *ds, int port, u8 state)
 }
 
 static int
-qca8k_port_bridge_join(struct dsa_switch *ds, int port, struct net_device *br)
+qca8k_port_bridge_join(struct dsa_switch *ds, int port,
+		       struct net_device *bridge)
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	int port_mask = BIT(QCA8K_CPU_PORT);
 	int i;
 
+	priv->port_sts[port].bridge_dev = bridge;
+
 	for (i = 1; i < QCA8K_NUM_PORTS; i++) {
-		if (dsa_to_port(ds, i)->bridge_dev != br)
+		if (priv->port_sts[i].bridge_dev != bridge)
 			continue;
 		/* Add this port to the portvlan mask of the other ports
 		 * in the bridge
@@ -757,13 +816,14 @@ qca8k_port_bridge_join(struct dsa_switch *ds, int port, struct net_device *br)
 }
 
 static void
-qca8k_port_bridge_leave(struct dsa_switch *ds, int port, struct net_device *br)
+qca8k_port_bridge_leave(struct dsa_switch *ds, int port)
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	int i;
 
 	for (i = 1; i < QCA8K_NUM_PORTS; i++) {
-		if (dsa_to_port(ds, i)->bridge_dev != br)
+		if (priv->port_sts[i].bridge_dev !=
+		    priv->port_sts[port].bridge_dev)
 			continue;
 		/* Remove this port to the portvlan mask of the other ports
 		 * in the bridge
@@ -772,7 +832,7 @@ qca8k_port_bridge_leave(struct dsa_switch *ds, int port, struct net_device *br)
 				QCA8K_PORT_LOOKUP_CTRL(i),
 				BIT(port));
 	}
-
+	priv->port_sts[port].bridge_dev = NULL;
 	/* Set the cpu port to be the only one in the portvlan mask of
 	 * this port
 	 */
@@ -815,44 +875,69 @@ qca8k_port_fdb_insert(struct qca8k_priv *priv, const u8 *addr,
 }
 
 static int
+qca8k_port_fdb_prepare(struct dsa_switch *ds, int port,
+		       const struct switchdev_obj_port_fdb *fdb,
+		       struct switchdev_trans *trans)
+{
+	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
+
+	/* The FDB table for static and auto learned entries is the same. We
+	 * need to reserve an entry with no port_mask set to make sure that
+	 * when port_fdb_add is called an entry is still available. Otherwise
+	 * the last free entry might have been used up by auto learning
+	 */
+	return qca8k_port_fdb_insert(priv, fdb->addr, 0, fdb->vid);
+}
+
+static void
 qca8k_port_fdb_add(struct dsa_switch *ds, int port,
-		   const unsigned char *addr, u16 vid)
+		   const struct switchdev_obj_port_fdb *fdb,
+		   struct switchdev_trans *trans)
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	u16 port_mask = BIT(port);
 
-	return qca8k_port_fdb_insert(priv, addr, port_mask, vid);
+	/* Update the FDB entry adding the port_mask */
+	qca8k_port_fdb_insert(priv, fdb->addr, port_mask, fdb->vid);
 }
 
 static int
 qca8k_port_fdb_del(struct dsa_switch *ds, int port,
-		   const unsigned char *addr, u16 vid)
+		   const struct switchdev_obj_port_fdb *fdb)
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	u16 port_mask = BIT(port);
+	u16 vid = fdb->vid;
 
 	if (!vid)
 		vid = 1;
 
-	return qca8k_fdb_del(priv, addr, port_mask, vid);
+	return qca8k_fdb_del(priv, fdb->addr, port_mask, vid);
 }
 
 static int
 qca8k_port_fdb_dump(struct dsa_switch *ds, int port,
-		    dsa_fdb_dump_cb_t *cb, void *data)
+		    struct switchdev_obj_port_fdb *fdb,
+		    int (*cb)(struct switchdev_obj *obj))
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 	struct qca8k_fdb _fdb = { 0 };
 	int cnt = QCA8K_NUM_FDB_RECORDS;
-	bool is_static;
 	int ret = 0;
 
 	mutex_lock(&priv->reg_mutex);
 	while (cnt-- && !qca8k_fdb_next(priv, &_fdb, port)) {
 		if (!_fdb.aging)
 			break;
-		is_static = (_fdb.aging == QCA8K_ATU_STATUS_STATIC);
-		ret = cb(_fdb.mac, _fdb.vid, is_static, data);
+
+		ether_addr_copy(fdb->addr, _fdb.mac);
+		fdb->vid = _fdb.vid;
+		if (_fdb.aging == QCA8K_ATU_STATUS_STATIC)
+			fdb->ndm_state = NUD_NOARP;
+		else
+			fdb->ndm_state = NUD_REACHABLE;
+
+		ret = cb(&fdb->obj);
 		if (ret)
 			break;
 	}
@@ -862,25 +947,26 @@ qca8k_port_fdb_dump(struct dsa_switch *ds, int port,
 }
 
 static enum dsa_tag_protocol
-qca8k_get_tag_protocol(struct dsa_switch *ds, int port)
+qca8k_get_tag_protocol(struct dsa_switch *ds)
 {
 	return DSA_TAG_PROTO_QCA;
 }
 
-static const struct dsa_switch_ops qca8k_switch_ops = {
+static struct dsa_switch_ops qca8k_switch_ops = {
 	.get_tag_protocol	= qca8k_get_tag_protocol,
 	.setup			= qca8k_setup,
 	.adjust_link            = qca8k_adjust_link,
 	.get_strings		= qca8k_get_strings,
 	.get_ethtool_stats	= qca8k_get_ethtool_stats,
 	.get_sset_count		= qca8k_get_sset_count,
-	.get_mac_eee		= qca8k_get_mac_eee,
-	.set_mac_eee		= qca8k_set_mac_eee,
+	.get_eee		= qca8k_get_eee,
+	.set_eee		= qca8k_set_eee,
 	.port_enable		= qca8k_port_enable,
 	.port_disable		= qca8k_port_disable,
 	.port_stp_state_set	= qca8k_port_stp_state_set,
 	.port_bridge_join	= qca8k_port_bridge_join,
 	.port_bridge_leave	= qca8k_port_bridge_leave,
+	.port_fdb_prepare	= qca8k_port_fdb_prepare,
 	.port_fdb_add		= qca8k_port_fdb_add,
 	.port_fdb_del		= qca8k_port_fdb_del,
 	.port_fdb_dump		= qca8k_port_fdb_dump,
@@ -909,16 +995,17 @@ qca8k_sw_probe(struct mdio_device *mdiodev)
 	if (id != QCA8K_ID_QCA8337)
 		return -ENODEV;
 
-	priv->ds = dsa_switch_alloc(&mdiodev->dev, QCA8K_NUM_PORTS);
+	priv->ds = devm_kzalloc(&mdiodev->dev, sizeof(*priv->ds), GFP_KERNEL);
 	if (!priv->ds)
 		return -ENOMEM;
 
 	priv->ds->priv = priv;
+	priv->ds->dev = &mdiodev->dev;
 	priv->ds->ops = &qca8k_switch_ops;
 	mutex_init(&priv->reg_mutex);
 	dev_set_drvdata(&mdiodev->dev, priv);
 
-	return dsa_register_switch(priv->ds);
+	return dsa_register_switch(priv->ds, priv->ds->dev->of_node);
 }
 
 static void

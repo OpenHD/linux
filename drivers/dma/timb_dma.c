@@ -422,7 +422,7 @@ static int td_alloc_chan_resources(struct dma_chan *chan)
 				break;
 			else {
 				dev_err(chan2dev(chan),
-					"Couldn't allocate any descriptors\n");
+					"Couldnt allocate any descriptors\n");
 				return -ENOMEM;
 			}
 		}

@@ -179,8 +179,6 @@ static unsigned int pxad_drcmr(unsigned int line)
 	return 0x1000 + line * 4;
 }
 
-bool pxad_filter_fn(struct dma_chan *chan, void *param);
-
 /*
  * Debug fs
  */
@@ -415,6 +413,15 @@ static inline void pxad_init_debugfs(struct pxad_device *pdev) {}
 static inline void pxad_cleanup_debugfs(struct pxad_device *pdev) {}
 #endif
 
+/*
+ * In the transition phase where legacy pxa handling is done at the same time as
+ * mmp_dma, the DMA physical channel split between the 2 DMA providers is done
+ * through legacy_reserved. Legacy code reserves DMA channels by settings
+ * corresponding bits in legacy_reserved.
+ */
+static u32 legacy_reserved;
+static u32 legacy_unavailable;
+
 static struct pxad_phy *lookup_phy(struct pxad_chan *pchan)
 {
 	int prio, i;
@@ -435,10 +442,14 @@ static struct pxad_phy *lookup_phy(struct pxad_chan *pchan)
 		for (i = 0; i < pdev->nr_chans; i++) {
 			if (prio != (i & 0xf) >> 2)
 				continue;
+			if ((i < 32) && (legacy_reserved & BIT(i)))
+				continue;
 			phy = &pdev->phys[i];
 			if (!phy->vchan) {
 				phy->vchan = pchan;
 				found = phy;
+				if (i < 32)
+					legacy_unavailable |= BIT(i);
 				goto out_unlock;
 			}
 		}
@@ -458,6 +469,7 @@ static void pxad_free_phy(struct pxad_chan *chan)
 	struct pxad_device *pdev = to_pxad_dev(chan->vc.chan.device);
 	unsigned long flags;
 	u32 reg;
+	int i;
 
 	dev_dbg(&chan->vc.chan.dev->device,
 		"%s(): freeing\n", __func__);
@@ -471,6 +483,9 @@ static void pxad_free_phy(struct pxad_chan *chan)
 	}
 
 	spin_lock_irqsave(&pdev->phy_lock, flags);
+	for (i = 0; i < 32; i++)
+		if (chan->phy == &pdev->phys[i])
+			legacy_unavailable &= ~BIT(i);
 	chan->phy->vchan = NULL;
 	chan->phy = NULL;
 	spin_unlock_irqrestore(&pdev->phy_lock, flags);
@@ -724,6 +739,8 @@ static irqreturn_t pxad_int_handler(int irq, void *dev_id)
 		i = __ffs(dint);
 		dint &= (dint - 1);
 		phy = &pdev->phys[i];
+		if ((i < 32) && (legacy_reserved & BIT(i)))
+			continue;
 		if (pxad_chan_handler(irq, phy) == IRQ_HANDLED)
 			ret = IRQ_HANDLED;
 	}
@@ -762,8 +779,6 @@ static void pxad_free_chan_resources(struct dma_chan *dchan)
 	dma_pool_destroy(chan->desc_pool);
 	chan->desc_pool = NULL;
 
-	chan->drcmr = U32_MAX;
-	chan->prio = PXAD_PRIO_LOWEST;
 }
 
 static void pxad_free_desc(struct virt_dma_desc *vd)
@@ -1388,9 +1403,6 @@ static int pxad_init_dmadev(struct platform_device *op,
 		c = devm_kzalloc(&op->dev, sizeof(*c), GFP_KERNEL);
 		if (!c)
 			return -ENOMEM;
-
-		c->drcmr = U32_MAX;
-		c->prio = PXAD_PRIO_LOWEST;
 		c->vc.desc_free = pxad_free_desc;
 		vchan_init(&c->vc, &pdev->slave);
 		init_waitqueue_head(&c->wq_state);
@@ -1403,10 +1415,9 @@ static int pxad_probe(struct platform_device *op)
 {
 	struct pxad_device *pdev;
 	const struct of_device_id *of_id;
-	const struct dma_slave_map *slave_map = NULL;
 	struct mmp_dma_platdata *pdata = dev_get_platdata(&op->dev);
 	struct resource *iores;
-	int ret, dma_channels = 0, nb_requestors = 0, slave_map_cnt = 0;
+	int ret, dma_channels = 0, nb_requestors = 0;
 	const enum dma_slave_buswidth widths =
 		DMA_SLAVE_BUSWIDTH_1_BYTE   | DMA_SLAVE_BUSWIDTH_2_BYTES |
 		DMA_SLAVE_BUSWIDTH_4_BYTES;
@@ -1437,8 +1448,6 @@ static int pxad_probe(struct platform_device *op)
 	} else if (pdata && pdata->dma_channels) {
 		dma_channels = pdata->dma_channels;
 		nb_requestors = pdata->nb_requestors;
-		slave_map = pdata->slave_map;
-		slave_map_cnt = pdata->slave_map_cnt;
 	} else {
 		dma_channels = 32;	/* default 32 channel */
 	}
@@ -1450,9 +1459,6 @@ static int pxad_probe(struct platform_device *op)
 	pdev->slave.device_prep_dma_memcpy = pxad_prep_memcpy;
 	pdev->slave.device_prep_slave_sg = pxad_prep_slave_sg;
 	pdev->slave.device_prep_dma_cyclic = pxad_prep_dma_cyclic;
-	pdev->slave.filter.map = slave_map;
-	pdev->slave.filter.mapcnt = slave_map_cnt;
-	pdev->slave.filter.fn = pxad_filter_fn;
 
 	pdev->slave.copy_align = PDMA_ALIGNMENT;
 	pdev->slave.src_addr_widths = widths;
@@ -1515,6 +1521,15 @@ bool pxad_filter_fn(struct dma_chan *chan, void *param)
 	return true;
 }
 EXPORT_SYMBOL_GPL(pxad_filter_fn);
+
+int pxad_toggle_reserved_channel(int legacy_channel)
+{
+	if (legacy_unavailable & (BIT(legacy_channel)))
+		return -EBUSY;
+	legacy_reserved ^= BIT(legacy_channel);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(pxad_toggle_reserved_channel);
 
 module_platform_driver(pxad_driver);
 

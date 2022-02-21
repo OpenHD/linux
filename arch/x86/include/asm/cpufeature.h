@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_CPUFEATURE_H
 #define _ASM_X86_CPUFEATURE_H
 
@@ -22,8 +21,8 @@ enum cpuid_leafs
 	CPUID_LNX_3,
 	CPUID_7_0_EBX,
 	CPUID_D_1_EAX,
-	CPUID_LNX_4,
-	CPUID_DUMMY,
+	CPUID_F_0_EDX,
+	CPUID_F_1_EDX,
 	CPUID_8000_0008_EBX,
 	CPUID_6_EAX,
 	CPUID_8000_000A_EDX,
@@ -129,10 +128,11 @@ extern const char * const x86_bug_flags[NBUGINTS*32];
 #define boot_cpu_has(bit)	cpu_has(&boot_cpu_data, bit)
 
 #define set_cpu_cap(c, bit)	set_bit(bit, (unsigned long *)((c)->x86_capability))
-
-extern void setup_clear_cpu_cap(unsigned int bit);
-extern void clear_cpu_cap(struct cpuinfo_x86 *c, unsigned int bit);
-
+#define clear_cpu_cap(c, bit)	clear_bit(bit, (unsigned long *)((c)->x86_capability))
+#define setup_clear_cpu_cap(bit) do { \
+	clear_cpu_cap(&boot_cpu_data, bit);	\
+	set_bit(bit, (unsigned long *)cpu_caps_cleared); \
+} while (0)
 #define setup_force_cpu_cap(bit) do { \
 	set_cpu_cap(&boot_cpu_data, bit);	\
 	set_bit(bit, (unsigned long *)cpu_caps_set);	\
@@ -140,20 +140,7 @@ extern void clear_cpu_cap(struct cpuinfo_x86 *c, unsigned int bit);
 
 #define setup_force_cpu_bug(bit) setup_force_cpu_cap(bit)
 
-#if defined(__clang__) && !defined(CONFIG_CC_HAS_ASM_GOTO)
-
-/*
- * Workaround for the sake of BPF compilation which utilizes kernel
- * headers, but clang does not support ASM GOTO and fails the build.
- */
-#ifndef __BPF_TRACING__
-#warning "Compiler lacks ASM_GOTO support. Add -D __BPF_TRACING__ to your compiler arguments"
-#endif
-
-#define static_cpu_has(bit)            boot_cpu_has(bit)
-
-#else
-
+#if defined(CC_HAVE_ASM_GOTO) && defined(CONFIG_X86_FAST_FEATURE_TESTS)
 /*
  * Static testing of CPU features.  Used the same as boot_cpu_has().
  * These will statically patch the target code for additional
@@ -161,46 +148,45 @@ extern void clear_cpu_cap(struct cpuinfo_x86 *c, unsigned int bit);
  */
 static __always_inline __pure bool _static_cpu_has(u16 bit)
 {
-	asm_volatile_goto("1: jmp 6f\n"
-		 "2:\n"
-		 ".skip -(((5f-4f) - (2b-1b)) > 0) * "
-			 "((5f-4f) - (2b-1b)),0x90\n"
-		 "3:\n"
-		 ".section .altinstructions,\"a\"\n"
-		 " .long 1b - .\n"		/* src offset */
-		 " .long 4f - .\n"		/* repl offset */
-		 " .word %P[always]\n"		/* always replace */
-		 " .byte 3b - 1b\n"		/* src len */
-		 " .byte 5f - 4f\n"		/* repl len */
-		 " .byte 3b - 2b\n"		/* pad len */
-		 ".previous\n"
-		 ".section .altinstr_replacement,\"ax\"\n"
-		 "4: jmp %l[t_no]\n"
-		 "5:\n"
-		 ".previous\n"
-		 ".section .altinstructions,\"a\"\n"
-		 " .long 1b - .\n"		/* src offset */
-		 " .long 0\n"			/* no replacement */
-		 " .word %P[feature]\n"		/* feature bit */
-		 " .byte 3b - 1b\n"		/* src len */
-		 " .byte 0\n"			/* repl len */
-		 " .byte 0\n"			/* pad len */
-		 ".previous\n"
-		 ".section .altinstr_aux,\"ax\"\n"
-		 "6:\n"
-		 " testb %[bitnum],%[cap_byte]\n"
-		 " jnz %l[t_yes]\n"
-		 " jmp %l[t_no]\n"
-		 ".previous\n"
-		 : : [feature]  "i" (bit),
-		     [always]   "i" (X86_FEATURE_ALWAYS),
-		     [bitnum]   "i" (1 << (bit & 7)),
-		     [cap_byte] "m" (((const char *)boot_cpu_data.x86_capability)[bit >> 3])
-		 : : t_yes, t_no);
-t_yes:
-	return true;
-t_no:
-	return false;
+		asm_volatile_goto("1: jmp 6f\n"
+			 "2:\n"
+			 ".skip -(((5f-4f) - (2b-1b)) > 0) * "
+			         "((5f-4f) - (2b-1b)),0x90\n"
+			 "3:\n"
+			 ".section .altinstructions,\"a\"\n"
+			 " .long 1b - .\n"		/* src offset */
+			 " .long 4f - .\n"		/* repl offset */
+			 " .word %P1\n"			/* always replace */
+			 " .byte 3b - 1b\n"		/* src len */
+			 " .byte 5f - 4f\n"		/* repl len */
+			 " .byte 3b - 2b\n"		/* pad len */
+			 ".previous\n"
+			 ".section .altinstr_replacement,\"ax\"\n"
+			 "4: jmp %l[t_no]\n"
+			 "5:\n"
+			 ".previous\n"
+			 ".section .altinstructions,\"a\"\n"
+			 " .long 1b - .\n"		/* src offset */
+			 " .long 0\n"			/* no replacement */
+			 " .word %P0\n"			/* feature bit */
+			 " .byte 3b - 1b\n"		/* src len */
+			 " .byte 0\n"			/* repl len */
+			 " .byte 0\n"			/* pad len */
+			 ".previous\n"
+			 ".section .altinstr_aux,\"ax\"\n"
+			 "6:\n"
+			 " testb %[bitnum],%[cap_byte]\n"
+			 " jnz %l[t_yes]\n"
+			 " jmp %l[t_no]\n"
+			 ".previous\n"
+			 : : "i" (bit), "i" (X86_FEATURE_ALWAYS),
+			     [bitnum] "i" (1 << (bit & 7)),
+			     [cap_byte] "m" (((const char *)boot_cpu_data.x86_capability)[bit >> 3])
+			 : : t_yes, t_no);
+	t_yes:
+		return true;
+	t_no:
+		return false;
 }
 
 #define static_cpu_has(bit)					\
@@ -209,6 +195,12 @@ t_no:
 		boot_cpu_has(bit) :				\
 		_static_cpu_has(bit)				\
 )
+#else
+/*
+ * Fall back to dynamic for gcc versions which don't support asm goto. Should be
+ * a minority now anyway.
+ */
+#define static_cpu_has(bit)		boot_cpu_has(bit)
 #endif
 
 #define cpu_has_bug(c, bit)		cpu_has(c, (bit))
@@ -217,7 +209,6 @@ t_no:
 
 #define static_cpu_has_bug(bit)		static_cpu_has((bit))
 #define boot_cpu_has_bug(bit)		cpu_has_bug(&boot_cpu_data, (bit))
-#define boot_cpu_set_bug(bit)		set_cpu_cap(&boot_cpu_data, (bit))
 
 #define MAX_CPU_FEATURES		(NCAPINTS * 32)
 #define cpu_have_feature		boot_cpu_has

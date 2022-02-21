@@ -1,12 +1,26 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * vivid-vid-common.h - common video support functions.
  *
  * Copyright 2014 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *
+ * This program is free software; you may redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2 of the License.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #ifndef _VIVID_VID_COMMON_H_
 #define _VIVID_VID_COMMON_H_
+
+#include "vivid-trace.h"
 
 typedef int (*fmtfunc)(struct file *file, void *priv, struct v4l2_format *f);
 
@@ -20,7 +34,7 @@ int fmt_sp2mp_func(struct file *file, void *priv,
 
 extern const struct v4l2_dv_timings_cap vivid_dv_timings_cap;
 
-const struct vivid_fmt *vivid_get_format(struct vivid_dev *dev, u32 pixelformat);
+struct vivid_fmt *vivid_get_format(struct vivid_dev *dev, u32 pixelformat);
 
 bool vivid_vid_can_loop(struct vivid_dev *dev);
 void vivid_send_source_change(struct vivid_dev *dev, unsigned type);

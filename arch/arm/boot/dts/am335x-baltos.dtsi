@@ -249,13 +249,13 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 		interrupt-parent = <&gpio1>;
-		interrupts = <28 IRQ_TYPE_EDGE_RISING>;
+		interrupts = <28 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&tps65910_pins>;
 	};
 
 	at24@50 {
-		compatible = "atmel,24c02";
+		compatible = "at24,24c02";
 		pagesize = <8>;
 		reg = <0x50>;
 	};
@@ -364,16 +364,11 @@
 };
 
 &davinci_mdio {
-	status = "okay";
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&davinci_mdio_default>;
 	pinctrl-1 = <&davinci_mdio_sleep>;
 
-	phy1: ethernet-phy@1 {
-		reg = <7>;
-		eee-broken-100tx;
-		eee-broken-1000t;
-	};
+	status = "okay";
 };
 
 &mmc1 {
@@ -396,7 +391,7 @@
 		compatible = "ti,wl1835";
 		reg = <2>;
 		interrupt-parent = <&gpio3>;
-		interrupts = <7 IRQ_TYPE_EDGE_RISING>;
+		interrupts = <7 IRQ_TYPE_LEVEL_HIGH>;
 	};
 };
 
@@ -409,9 +404,5 @@
 };
 
 &gpio0 {
-	ti,no-reset-on-init;
-};
-
-&gpio3 {
 	ti,no-reset-on-init;
 };

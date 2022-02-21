@@ -19,7 +19,6 @@
 #include <linux/seq_file.h>
 #include <linux/cryptouser.h>
 #include <net/netlink.h>
-#include <linux/compiler.h>
 
 #include "internal.h"
 
@@ -85,7 +84,7 @@ EXPORT_SYMBOL_GPL(crypto_shash_setkey);
 static inline unsigned int shash_align_buffer_size(unsigned len,
 						   unsigned long mask)
 {
-	typedef u8 __aligned_largest u8_aligned;
+	typedef u8 __attribute__ ((aligned)) u8_aligned;
 	return len + (mask & ~(__alignof__(u8_aligned) - 1));
 }
 
@@ -98,7 +97,7 @@ static int shash_update_unaligned(struct shash_desc *desc, const u8 *data,
 	unsigned int unaligned_len = alignmask + 1 -
 				     ((unsigned long)data & alignmask);
 	u8 ubuf[shash_align_buffer_size(unaligned_len, alignmask)]
-		__aligned_largest;
+		__attribute__ ((aligned));
 	u8 *buf = PTR_ALIGN(&ubuf[0], alignmask + 1);
 	int err;
 
@@ -134,7 +133,7 @@ static int shash_final_unaligned(struct shash_desc *desc, u8 *out)
 	struct shash_alg *shash = crypto_shash_alg(tfm);
 	unsigned int ds = crypto_shash_digestsize(tfm);
 	u8 ubuf[shash_align_buffer_size(ds, alignmask)]
-		__aligned_largest;
+		__attribute__ ((aligned));
 	u8 *buf = PTR_ALIGN(&ubuf[0], alignmask + 1);
 	int err;
 
@@ -302,7 +301,7 @@ int shash_ahash_digest(struct ahash_request *req, struct shash_desc *desc)
 
 	if (nbytes &&
 	    (sg = req->src, offset = sg->offset,
-	     nbytes < min(sg->length, ((unsigned int)(PAGE_SIZE)) - offset))) {
+	     nbytes < min(sg->length, ((size_t)(PAGE_SIZE)) - offset))) {
 		void *data;
 
 		data = kmap_atomic(sg_page(sg));
@@ -432,7 +431,7 @@ static int crypto_shash_report(struct sk_buff *skb, struct crypto_alg *alg)
 #endif
 
 static void crypto_shash_show(struct seq_file *m, struct crypto_alg *alg)
-	__maybe_unused;
+	__attribute__ ((unused));
 static void crypto_shash_show(struct seq_file *m, struct crypto_alg *alg)
 {
 	struct shash_alg *salg = __crypto_shash_alg(alg);

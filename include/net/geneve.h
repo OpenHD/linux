@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_GENEVE_H
 #define __NET_GENEVE_H  1
 

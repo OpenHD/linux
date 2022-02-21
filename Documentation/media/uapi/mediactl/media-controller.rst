@@ -8,9 +8,7 @@
 Part IV - Media Controller API
 ##############################
 
-.. only:: html
-
-   .. class:: toc-title
+.. class:: toc-title
 
         Table of Contents
 

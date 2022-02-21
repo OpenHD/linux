@@ -1,8 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * FireWire Serial driver
  *
  * Copyright (C) 2012 Peter Hurley <peter@hurleysoftware.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -37,7 +46,7 @@ module_param_named(loop, create_loop_dev, bool, 0644);
 /*
  * Threshold below which the tty is woken for writing
  * - should be equal to WAKEUP_CHARS in drivers/tty/n_tty.c because
- *   even if the writer is woken, n_tty_poll() won't set EPOLLOUT until
+ *   even if the writer is woken, n_tty_poll() won't set POLLOUT until
  *   our fifo is below this level
  */
 #define WAKEUP_CHARS             256
@@ -206,6 +215,13 @@ static void fwtty_log_tx_error(struct fwtty_port *port, int rcode)
 	default:
 		fwtty_err_ratelimited(port, "failed tx: %d\n", rcode);
 	}
+}
+
+static void fwtty_txn_constructor(void *this)
+{
+	struct fwtty_transaction *txn = this;
+
+	init_timer(&txn->fw_txn.split_timeout_timer);
 }
 
 static void fwtty_common_callback(struct fw_card *card, int rcode,
@@ -1506,6 +1522,11 @@ static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static int fwtty_proc_open(struct inode *inode, struct file *fp)
+{
+	return single_open(fp, fwtty_proc_show, NULL);
+}
+
 static int fwtty_stats_open(struct inode *inode, struct file *fp)
 {
 	return single_open(fp, fwtty_debugfs_stats_show, inode->i_private);
@@ -1530,6 +1551,14 @@ static const struct file_operations fwtty_peers_fops = {
 	.read =		seq_read,
 	.llseek =	seq_lseek,
 	.release =	single_release,
+};
+
+static const struct file_operations fwtty_proc_fops = {
+	.owner =        THIS_MODULE,
+	.open =         fwtty_proc_open,
+	.read =         seq_read,
+	.llseek =       seq_lseek,
+	.release =      single_release,
 };
 
 static const struct tty_port_operations fwtty_port_ops = {
@@ -1557,7 +1586,7 @@ static const struct tty_operations fwtty_ops = {
 	.tiocmget =		fwtty_tiocmget,
 	.tiocmset =		fwtty_tiocmset,
 	.get_icount =		fwtty_get_icount,
-	.proc_show =		fwtty_proc_show,
+	.proc_fops =		&fwtty_proc_fops,
 };
 
 static const struct tty_operations fwloop_ops = {
@@ -1635,6 +1664,12 @@ static inline void fill_plug_rsp_ok(struct fwserial_mgmt_pkt *pkt,
 static inline void fill_plug_rsp_nack(struct fwserial_mgmt_pkt *pkt)
 {
 	pkt->hdr.code = cpu_to_be16(FWSC_VIRT_CABLE_PLUG_RSP | FWSC_RSP_NACK);
+	pkt->hdr.len = cpu_to_be16(mgmt_pkt_expected_len(pkt->hdr.code));
+}
+
+static inline void fill_unplug_req(struct fwserial_mgmt_pkt *pkt)
+{
+	pkt->hdr.code = cpu_to_be16(FWSC_VIRT_CABLE_UNPLUG);
 	pkt->hdr.len = cpu_to_be16(mgmt_pkt_expected_len(pkt->hdr.code));
 }
 
@@ -1777,9 +1812,9 @@ static void fwserial_release_port(struct fwtty_port *port, bool reset)
 		(*port->fwcon_ops->notify)(FWCON_NOTIFY_DETACH, port->con_data);
 }
 
-static void fwserial_plug_timeout(struct timer_list *t)
+static void fwserial_plug_timeout(unsigned long data)
 {
-	struct fwtty_peer *peer = from_timer(peer, t, timer);
+	struct fwtty_peer *peer = (struct fwtty_peer *)data;
 	struct fwtty_port *port;
 
 	spin_lock_bh(&peer->lock);
@@ -1831,6 +1866,7 @@ static int fwserial_connect_peer(struct fwtty_peer *peer)
 
 	fill_plug_req(pkt, peer->port);
 
+	setup_timer(&peer->timer, fwserial_plug_timeout, (unsigned long)peer);
 	mod_timer(&peer->timer, jiffies + VIRT_CABLE_PLUG_TIMEOUT);
 	spin_unlock_bh(&peer->lock);
 
@@ -2068,7 +2104,7 @@ static int fwserial_add_peer(struct fw_serial *serial, struct fw_unit *unit)
 	spin_lock_init(&peer->lock);
 	peer->port = NULL;
 
-	timer_setup(&peer->timer, fwserial_plug_timeout, 0);
+	init_timer(&peer->timer);
 	INIT_WORK(&peer->work, fwserial_peer_workfn);
 	INIT_DELAYED_WORK(&peer->connect, fwserial_auto_connect);
 
@@ -2833,7 +2869,7 @@ static int __init fwserial_init(void)
 
 	fwtty_txn_cache = kmem_cache_create("fwtty_txn_cache",
 					    sizeof(struct fwtty_transaction),
-					    0, 0, NULL);
+					    0, 0, fwtty_txn_constructor);
 	if (!fwtty_txn_cache) {
 		err = -ENOMEM;
 		goto unregister_loop;

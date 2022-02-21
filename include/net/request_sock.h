@@ -1,7 +1,7 @@
 /*
  * NET		Generic infrastructure for Network protocols.
  *
- *		Definitions for request_sock
+ *		Definitions for request_sock 
  *
  * Authors:	Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  *
@@ -19,7 +19,6 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/bug.h>
-#include <linux/refcount.h>
 
 #include <net/sock.h>
 
@@ -30,7 +29,7 @@ struct proto;
 
 struct request_sock_ops {
 	int		family;
-	unsigned int	obj_size;
+	int		obj_size;
 	struct kmem_cache	*slab;
 	char		*slab_name;
 	int		(*rtx_syn_ack)(const struct sock *sk,
@@ -90,7 +89,7 @@ reqsk_alloc(const struct request_sock_ops *ops, struct sock *sk_listener,
 		return NULL;
 	req->rsk_listener = NULL;
 	if (attach_listener) {
-		if (unlikely(!refcount_inc_not_zero(&sk_listener->sk_refcnt))) {
+		if (unlikely(!atomic_inc_not_zero(&sk_listener->sk_refcnt))) {
 			kmem_cache_free(ops->slab, req);
 			return NULL;
 		}
@@ -101,7 +100,7 @@ reqsk_alloc(const struct request_sock_ops *ops, struct sock *sk_listener,
 	sk_node_init(&req_to_sk(req)->sk_node);
 	sk_tx_queue_clear(req_to_sk(req));
 	req->saved_syn = NULL;
-	refcount_set(&req->rsk_refcnt, 0);
+	atomic_set(&req->rsk_refcnt, 0);
 
 	return req;
 }
@@ -109,7 +108,7 @@ reqsk_alloc(const struct request_sock_ops *ops, struct sock *sk_listener,
 static inline void reqsk_free(struct request_sock *req)
 {
 	/* temporary debugging */
-	WARN_ON_ONCE(refcount_read(&req->rsk_refcnt) != 0);
+	WARN_ON_ONCE(atomic_read(&req->rsk_refcnt) != 0);
 
 	req->rsk_ops->destructor(req);
 	if (req->rsk_listener)
@@ -120,9 +119,11 @@ static inline void reqsk_free(struct request_sock *req)
 
 static inline void reqsk_put(struct request_sock *req)
 {
-	if (refcount_dec_and_test(&req->rsk_refcnt))
+	if (atomic_dec_and_test(&req->rsk_refcnt))
 		reqsk_free(req);
 }
+
+extern int sysctl_max_syn_backlog;
 
 /*
  * For a TCP Fast Open listener -
@@ -150,8 +151,6 @@ struct fastopen_queue {
 	spinlock_t	lock;
 	int		qlen;		/* # of pending (TCP_SYN_RECV) reqs */
 	int		max_qlen;	/* != 0 iff TFO is currently enabled */
-
-	struct tcp_fastopen_context __rcu *ctx; /* cipher context for cookie */
 };
 
 /** struct request_sock_queue - queue of request_socks
@@ -183,7 +182,7 @@ void reqsk_fastopen_remove(struct sock *sk, struct request_sock *req,
 
 static inline bool reqsk_queue_empty(const struct request_sock_queue *queue)
 {
-	return READ_ONCE(queue->rskq_accept_head) == NULL;
+	return queue->rskq_accept_head == NULL;
 }
 
 static inline struct request_sock *reqsk_queue_remove(struct request_sock_queue *queue,
@@ -195,7 +194,7 @@ static inline struct request_sock *reqsk_queue_remove(struct request_sock_queue 
 	req = queue->rskq_accept_head;
 	if (req) {
 		sk_acceptq_removed(parent);
-		WRITE_ONCE(queue->rskq_accept_head, req->dl_next);
+		queue->rskq_accept_head = req->dl_next;
 		if (queue->rskq_accept_head == NULL)
 			queue->rskq_accept_tail = NULL;
 	}

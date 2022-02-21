@@ -1,10 +1,21 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Xilinx 'Clocking Wizard' driver
  *
  *  Copyright (C) 2013 - 2014 Xilinx
  *
  *  Sören Brinkmann <soren.brinkmann@xilinx.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License v2 as published by
+ * the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/platform_device.h>
@@ -57,7 +68,7 @@ struct clk_wzrd {
 	struct clk *axi_clk;
 	struct clk *clks_internal[wzrd_clk_int_max];
 	struct clk *clkout[WZRD_NUM_OUTPUTS];
-	unsigned int speed_grade;
+	int speed_grade;
 	bool suspended;
 };
 

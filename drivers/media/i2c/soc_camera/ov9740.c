@@ -673,7 +673,19 @@ static int ov9740_s_fmt(struct v4l2_subdev *sd,
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov9740_priv *priv = to_ov9740(sd);
+	enum v4l2_colorspace cspace;
+	u32 code = mf->code;
 	int ret;
+
+	ov9740_res_roundup(&mf->width, &mf->height);
+
+	switch (code) {
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+		cspace = V4L2_COLORSPACE_SRGB;
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	ret = ov9740_reg_write_array(client, ov9740_defaults,
 				     ARRAY_SIZE(ov9740_defaults));
@@ -684,7 +696,11 @@ static int ov9740_s_fmt(struct v4l2_subdev *sd,
 	if (ret < 0)
 		return ret;
 
-	priv->current_mf = *mf;
+	mf->code	= code;
+	mf->colorspace	= cspace;
+
+	memcpy(&priv->current_mf, mf, sizeof(struct v4l2_mbus_framefmt));
+
 	return ret;
 }
 
@@ -865,7 +881,8 @@ static int ov9740_video_probe(struct i2c_client *client)
 		goto done;
 	}
 
-	dev_info(&client->dev, "ov9740 Model ID 0x%04x, Revision 0x%02x, Manufacturer 0x%02x, SMIA Version 0x%02x\n",
+	dev_info(&client->dev, "ov9740 Model ID 0x%04x, Revision 0x%02x, "
+		 "Manufacturer 0x%02x, SMIA Version 0x%02x\n",
 		 priv->model, priv->revision, priv->manid, priv->smiaver);
 
 	ret = v4l2_ctrl_handler_setup(&priv->hdl);
@@ -891,12 +908,12 @@ static int ov9740_g_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops ov9740_video_ops = {
+static struct v4l2_subdev_video_ops ov9740_video_ops = {
 	.s_stream	= ov9740_s_stream,
 	.g_mbus_config	= ov9740_g_mbus_config,
 };
 
-static const struct v4l2_subdev_core_ops ov9740_core_ops = {
+static struct v4l2_subdev_core_ops ov9740_core_ops = {
 	.s_power		= ov9740_s_power,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register		= ov9740_get_register,
@@ -910,7 +927,7 @@ static const struct v4l2_subdev_pad_ops ov9740_pad_ops = {
 	.set_fmt	= ov9740_set_fmt,
 };
 
-static const struct v4l2_subdev_ops ov9740_subdev_ops = {
+static struct v4l2_subdev_ops ov9740_subdev_ops = {
 	.core	= &ov9740_core_ops,
 	.video	= &ov9740_video_ops,
 	.pad	= &ov9740_pad_ops,
@@ -935,9 +952,11 @@ static int ov9740_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
+	priv = devm_kzalloc(&client->dev, sizeof(struct ov9740_priv), GFP_KERNEL);
+	if (!priv) {
+		dev_err(&client->dev, "Failed to allocate private data!\n");
 		return -ENOMEM;
+	}
 
 	v4l2_i2c_subdev_init(&priv->subdev, client, &ov9740_subdev_ops);
 	v4l2_ctrl_handler_init(&priv->hdl, 13);

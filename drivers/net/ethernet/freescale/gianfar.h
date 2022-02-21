@@ -40,7 +40,7 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/module.h>
 #include <linux/crc32.h>
 #include <linux/workqueue.h>
@@ -1371,5 +1371,8 @@ struct filer_table {
 	u32 index;
 	struct gfar_filer_entry fe[MAX_FILER_CACHE_IDX + 20];
 };
+
+/* The gianfar_ptp module will set this variable */
+extern int gfar_phc_index;
 
 #endif /* __GIANFAR_H */

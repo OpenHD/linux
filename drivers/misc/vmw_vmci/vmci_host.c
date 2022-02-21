@@ -24,7 +24,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/init.h>
@@ -166,11 +165,11 @@ static int vmci_host_close(struct inode *inode, struct file *filp)
  * This is used to wake up the VMX when a VMCI call arrives, or
  * to wake up select() or poll() at the next clock tick.
  */
-static __poll_t vmci_host_poll(struct file *filp, poll_table *wait)
+static unsigned int vmci_host_poll(struct file *filp, poll_table *wait)
 {
 	struct vmci_host_dev *vmci_host_dev = filp->private_data;
 	struct vmci_ctx *context = vmci_host_dev->context;
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 
 	if (vmci_host_dev->ct_type == VMCIOBJ_CONTEXT) {
 		/* Check for VMCI calls to this VM context. */
@@ -182,7 +181,7 @@ static __poll_t vmci_host_poll(struct file *filp, poll_table *wait)
 		if (context->pending_datagrams > 0 ||
 		    vmci_handle_arr_get_size(
 				context->pending_doorbell_array) > 0) {
-			mask = EPOLLIN;
+			mask = POLLIN;
 		}
 		spin_unlock(&context->lock);
 	}

@@ -62,8 +62,7 @@ int soc_camera_client_g_rect(struct v4l2_subdev *sd, struct v4l2_rect *rect)
 EXPORT_SYMBOL(soc_camera_client_g_rect);
 
 /* Client crop has changed, update our sub-rectangle to remain within the area */
-static void move_and_crop_subrect(struct v4l2_rect *rect,
-				  struct v4l2_rect *subrect)
+static void update_subrect(struct v4l2_rect *rect, struct v4l2_rect *subrect)
 {
 	if (rect->width < subrect->width)
 		subrect->width = rect->width;
@@ -73,14 +72,14 @@ static void move_and_crop_subrect(struct v4l2_rect *rect,
 
 	if (rect->left > subrect->left)
 		subrect->left = rect->left;
-	else if (rect->left + rect->width <
+	else if (rect->left + rect->width >
 		 subrect->left + subrect->width)
 		subrect->left = rect->left + rect->width -
 			subrect->width;
 
 	if (rect->top > subrect->top)
 		subrect->top = rect->top;
-	else if (rect->top + rect->height <
+	else if (rect->top + rect->height >
 		 subrect->top + subrect->height)
 		subrect->top = rect->top + rect->height -
 			subrect->height;
@@ -217,7 +216,7 @@ int soc_camera_client_s_selection(struct v4l2_subdev *sd,
 
 	if (!ret) {
 		*target_rect = *cam_rect;
-		move_and_crop_subrect(target_rect, subrect);
+		update_subrect(target_rect, subrect);
 	}
 
 	return ret;
@@ -300,23 +299,22 @@ update_cache:
 	if (host_1to1)
 		*subrect = *rect;
 	else
-		move_and_crop_subrect(rect, subrect);
+		update_subrect(rect, subrect);
 
 	return 0;
 }
 
 /**
- * soc_camera_client_scale
- * @icd:		soc-camera device
- * @rect:		camera cropping window
- * @subrect:		part of rect, sent to the user
- * @mf:			in- / output camera output window
- * @width:		on input: max host input width;
- *			on output: user width, mapped back to input
- * @height:		on input: max host input height;
- *			on output: user height, mapped back to input
- * @host_can_scale:	host can scale this pixel format
- * @shift:		shift, used for scaling
+ * @icd		- soc-camera device
+ * @rect	- camera cropping window
+ * @subrect	- part of rect, sent to the user
+ * @mf		- in- / output camera output window
+ * @width	- on input: max host input width
+ *		  on output: user width, mapped back to input
+ * @height	- on input: max host input height
+ *		  on output: user height, mapped back to input
+ * @host_can_scale - host can scale this pixel format
+ * @shift	- shift, used for scaling
  */
 int soc_camera_client_scale(struct soc_camera_device *icd,
 			struct v4l2_rect *rect, struct v4l2_rect *subrect,

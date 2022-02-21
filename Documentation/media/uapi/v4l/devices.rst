@@ -25,4 +25,3 @@ Interfaces
     dev-touch
     dev-event
     dev-subdev
-    dev-meta

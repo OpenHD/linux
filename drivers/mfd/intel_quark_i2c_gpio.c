@@ -58,34 +58,19 @@ struct intel_quark_mfd {
 	struct clk_lookup	*i2c_clk_lookup;
 };
 
-static const struct dmi_system_id dmi_platform_info[] = {
+struct i2c_mode_info {
+	const char *name;
+	unsigned int i2c_scl_freq;
+};
+
+static const struct i2c_mode_info platform_i2c_mode_info[] = {
 	{
-		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "Galileo"),
-		},
-		.driver_data = (void *)100000,
+		.name = "Galileo",
+		.i2c_scl_freq = 100000,
 	},
 	{
-		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "GalileoGen2"),
-		},
-		.driver_data = (void *)400000,
-	},
-	{
-		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "SIMATIC IOT2000"),
-			DMI_EXACT_MATCH(DMI_BOARD_ASSET_TAG,
-					"6ES7647-0AA00-0YA2"),
-		},
-		.driver_data = (void *)400000,
-	},
-	{
-		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "SIMATIC IOT2000"),
-			DMI_EXACT_MATCH(DMI_BOARD_ASSET_TAG,
-					"6ES7647-0AA00-1YA2"),
-		},
-		.driver_data = (void *)400000,
+		.name = "GalileoGen2",
+		.i2c_scl_freq = 400000,
 	},
 	{}
 };
@@ -175,7 +160,8 @@ static void intel_quark_unregister_i2c_clk(struct device *dev)
 
 static int intel_quark_i2c_setup(struct pci_dev *pdev, struct mfd_cell *cell)
 {
-	const struct dmi_system_id *dmi_id;
+	const char *board_name = dmi_get_system_info(DMI_BOARD_NAME);
+	const struct i2c_mode_info *info;
 	struct dw_i2c_platform_data *pdata;
 	struct resource *res = (struct resource *)cell->resources;
 	struct device *dev = &pdev->dev;
@@ -195,9 +181,14 @@ static int intel_quark_i2c_setup(struct pci_dev *pdev, struct mfd_cell *cell)
 	/* Normal mode by default */
 	pdata->i2c_scl_freq = 100000;
 
-	dmi_id = dmi_first_match(dmi_platform_info);
-	if (dmi_id)
-		pdata->i2c_scl_freq = (uintptr_t)dmi_id->driver_data;
+	if (board_name) {
+		for (info = platform_i2c_mode_info; info->name; info++) {
+			if (!strcmp(board_name, info->name)) {
+				pdata->i2c_scl_freq = info->i2c_scl_freq;
+				break;
+			}
+		}
+	}
 
 	cell->platform_data = pdata;
 	cell->pdata_size = sizeof(*pdata);
@@ -233,8 +224,7 @@ static int intel_quark_gpio_setup(struct pci_dev *pdev, struct mfd_cell *cell)
 	pdata->properties->idx		= 0;
 	pdata->properties->ngpio	= INTEL_QUARK_MFD_NGPIO;
 	pdata->properties->gpio_base	= INTEL_QUARK_MFD_GPIO_BASE;
-	pdata->properties->irq[0]	= pdev->irq;
-	pdata->properties->has_irq	= true;
+	pdata->properties->irq		= pdev->irq;
 	pdata->properties->irq_shared	= true;
 
 	cell->platform_data = pdata;

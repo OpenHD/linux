@@ -16,7 +16,6 @@
 #include <linux/slab.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
-#include <linux/iversion.h>
 #include "fat.h"
 
 /*
@@ -292,6 +291,7 @@ static int fat_parse_long(struct inode *dir, loff_t *pos,
 		}
 	}
 parse_long:
+	slots = 0;
 	ds = (struct msdos_dir_slot *)*de;
 	id = ds->id;
 	if (!(id & 0x40))
@@ -1056,7 +1056,7 @@ int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo)
 	brelse(bh);
 	if (err)
 		return err;
-	inode_inc_iversion(dir);
+	dir->i_version++;
 
 	if (nr_slots) {
 		/*
@@ -1133,7 +1133,7 @@ error:
 	return err;
 }
 
-int fat_alloc_new_dir(struct inode *dir, struct timespec64 *ts)
+int fat_alloc_new_dir(struct inode *dir, struct timespec *ts)
 {
 	struct super_block *sb = dir->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);

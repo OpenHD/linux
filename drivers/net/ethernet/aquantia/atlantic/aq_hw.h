@@ -77,6 +77,8 @@ struct aq_stats_s {
 #define AQ_HW_IRQ_MSI     2U
 #define AQ_HW_IRQ_MSIX    3U
 
+#define AQ_HW_SERVICE_IRQS   1U
+
 #define AQ_HW_POWER_STATE_D0   0U
 #define AQ_HW_POWER_STATE_D3   3U
 
@@ -105,9 +107,24 @@ struct aq_stats_s {
 
 #define AQ_HW_MULTICAST_ADDRESS_MAX     32U
 
+enum {
+	AQ_HW_LOOPBACK_DMA_SYS,
+	AQ_HW_LOOPBACK_PKT_SYS,
+	AQ_HW_LOOPBACK_DMA_NET,
+	AQ_HW_LOOPBACK_PHYINT_SYS,
+	AQ_HW_LOOPBACK_PHYEXT_SYS,
+};
+
+#define AQ_HW_LOOPBACK_MASK	(BIT(AQ_HW_LOOPBACK_DMA_SYS) |\
+				 BIT(AQ_HW_LOOPBACK_PKT_SYS) |\
+				 BIT(AQ_HW_LOOPBACK_DMA_NET) |\
+				 BIT(AQ_HW_LOOPBACK_PHYINT_SYS) |\
+				 BIT(AQ_HW_LOOPBACK_PHYEXT_SYS))
+
 struct aq_hw_s {
 	atomic_t flags;
 	u8 rbl_enabled:1;
+	u8 fast_start_enabled:1;
 	struct aq_nic_cfg_s *aq_nic_cfg;
 	const struct aq_fw_ops *aq_fw_ops;
 	void __iomem *mmio;
@@ -204,7 +221,10 @@ struct aq_hw_ops {
 
 	int (*hw_get_fw_version)(struct aq_hw_s *self, u32 *fw_version);
 
-	int (*hw_set_power)(struct aq_hw_s *self, unsigned int power_state);
+	int (*hw_set_loopback)(struct aq_hw_s *self, u32 mode, bool enable);
+
+	int (*hw_set_fc)(struct aq_hw_s *self, u32 fc, u32 tc);
+
 };
 
 struct aq_fw_ops {
@@ -227,7 +247,23 @@ struct aq_fw_ops {
 
 	int (*update_stats)(struct aq_hw_s *self);
 
+	int (*set_power)(struct aq_hw_s *self, unsigned int power_state,
+			u8 *mac);
+
+	int (*get_temp)(struct aq_hw_s *self, int *temp);
+
+	int (*get_cable_len)(struct aq_hw_s *self, int *cable_len);
+
+	int (*set_eee_rate)(struct aq_hw_s *self, u32 speed);
+
+	int (*get_eee_rate)(struct aq_hw_s *self, u32 *rate,
+			u32 *supported_rates);
+
 	int (*set_flow_control)(struct aq_hw_s *self);
+
+	u32 (*get_flow_control)(struct aq_hw_s *self, u32 *fcmode);
+
+	int (*set_phyloopback)(struct aq_hw_s *self, u32 mode, bool enable);
 };
 
 #endif /* AQ_HW_H */

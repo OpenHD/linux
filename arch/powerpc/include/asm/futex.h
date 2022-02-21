@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_FUTEX_H
 #define _ASM_POWERPC_FUTEX_H
 
@@ -8,7 +7,7 @@
 #include <linux/uaccess.h>
 #include <asm/errno.h>
 #include <asm/synch.h>
-#include <asm/asm-405.h>
+#include <asm/asm-compat.h>
 
 #define __futex_atomic_op(insn, ret, oldval, uaddr, oparg) \
   __asm__ __volatile ( \
@@ -24,8 +23,10 @@
 "4:	li	%1,%3\n" \
 	"b	3b\n" \
 	".previous\n" \
-	EX_TABLE(1b, 4b) \
-	EX_TABLE(2b, 4b) \
+	".section __ex_table,\"a\"\n" \
+	".align 3\n" \
+	PPC_LONG "1b,4b,2b,4b\n" \
+	".previous" \
 	: "=&r" (oldval), "=&r" (ret) \
 	: "b" (uaddr), "i" (-EFAULT), "r" (oparg) \
 	: "cr0", "memory")
@@ -35,6 +36,7 @@ static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 {
 	int oldval = 0, ret;
 
+	allow_write_to_user(uaddr, sizeof(*uaddr));
 	pagefault_disable();
 
 	switch (op) {
@@ -61,6 +63,7 @@ static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 
 	*oval = oldval;
 
+	prevent_write_to_user(uaddr, sizeof(*uaddr));
 	return ret;
 }
 
@@ -74,6 +77,7 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
 
+	allow_write_to_user(uaddr, sizeof(*uaddr));
         __asm__ __volatile__ (
         PPC_ATOMIC_ENTRY_BARRIER
 "1:     lwarx   %1,0,%3         # futex_atomic_cmpxchg_inatomic\n\
@@ -86,14 +90,17 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 "3:	.section .fixup,\"ax\"\n\
 4:	li	%0,%6\n\
 	b	3b\n\
-	.previous\n"
-	EX_TABLE(1b, 4b)
-	EX_TABLE(2b, 4b)
+	.previous\n\
+	.section __ex_table,\"a\"\n\
+	.align 3\n\
+	" PPC_LONG "1b,4b,2b,4b\n\
+	.previous" \
         : "+r" (ret), "=&r" (prev), "+m" (*uaddr)
         : "r" (uaddr), "r" (oldval), "r" (newval), "i" (-EFAULT)
         : "cc", "memory");
 
 	*uval = prev;
+	prevent_write_to_user(uaddr, sizeof(*uaddr));
         return ret;
 }
 

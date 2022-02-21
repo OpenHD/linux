@@ -72,8 +72,10 @@ struct fsl_tcon *fsl_tcon_init(struct device *dev)
 		return NULL;
 
 	tcon = devm_kzalloc(dev, sizeof(*tcon), GFP_KERNEL);
-	if (!tcon)
+	if (!tcon) {
+		ret = -ENOMEM;
 		goto err_node_put;
+	}
 
 	ret = fsl_tcon_init_regmap(dev, tcon, np);
 	if (ret) {

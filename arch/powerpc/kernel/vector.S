@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <asm/processor.h>
 #include <asm/ppc_asm.h>
 #include <asm/reg.h>
@@ -8,7 +7,6 @@
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include <asm/export.h>
-#include <asm/asm-compat.h>
 
 /*
  * Load state from memory into VMX registers including VSCR.

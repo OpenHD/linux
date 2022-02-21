@@ -1,3 +1,4 @@
+// TODO some minor issues
 /*
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -19,18 +20,16 @@
 #include <linux/perf_event.h>
 #include <linux/ptrace.h>
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
-#include <linux/tracehook.h>
-#include <linux/uaccess.h>
 
 #include <asm/coprocessor.h>
 #include <asm/elf.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/ptrace.h>
+#include <asm/uaccess.h>
 
 
 void user_enable_single_step(struct task_struct *child)
@@ -52,7 +51,7 @@ void ptrace_disable(struct task_struct *child)
 	/* Nothing to do.. */
 }
 
-static int ptrace_getregs(struct task_struct *child, void __user *uregs)
+int ptrace_getregs(struct task_struct *child, void __user *uregs)
 {
 	struct pt_regs *regs = task_pt_regs(child);
 	xtensa_gregset_t __user *gregset = uregs;
@@ -73,12 +72,12 @@ static int ptrace_getregs(struct task_struct *child, void __user *uregs)
 
 	for (i = 0; i < XCHAL_NUM_AREGS; i++)
 		__put_user(regs->areg[i],
-			   gregset->a + ((wb * 4 + i) % XCHAL_NUM_AREGS));
+				gregset->a + ((wb * 4 + i) % XCHAL_NUM_AREGS));
 
 	return 0;
 }
 
-static int ptrace_setregs(struct task_struct *child, void __user *uregs)
+int ptrace_setregs(struct task_struct *child, void __user *uregs)
 {
 	struct pt_regs *regs = task_pt_regs(child);
 	xtensa_gregset_t *gregset = uregs;
@@ -107,7 +106,7 @@ static int ptrace_setregs(struct task_struct *child, void __user *uregs)
 		unsigned long rotws, wmask;
 
 		rotws = (((ws | (ws << WSBITS)) >> wb) &
-			 ((1 << WSBITS) - 1)) & ~1;
+				((1 << WSBITS) - 1)) & ~1;
 		wmask = ((rotws ? WSBITS + 1 - ffs(rotws) : 0) << 4) |
 			(rotws & 0xF) | 1;
 		regs->windowbase = wb;
@@ -115,49 +114,24 @@ static int ptrace_setregs(struct task_struct *child, void __user *uregs)
 		regs->wmask = wmask;
 	}
 
-	if (wb != 0 && __copy_from_user(regs->areg + XCHAL_NUM_AREGS - wb * 4,
-					gregset->a, wb * 16))
+	if (wb != 0 &&  __copy_from_user(regs->areg + XCHAL_NUM_AREGS - wb * 4,
+				gregset->a, wb * 16))
 		return -EFAULT;
 
 	if (__copy_from_user(regs->areg, gregset->a + wb * 4,
-			     (WSBITS - wb) * 16))
+				(WSBITS - wb) * 16))
 		return -EFAULT;
 
 	return 0;
 }
 
 
-#if XTENSA_HAVE_COPROCESSORS
-#define CP_OFFSETS(cp) \
-	{ \
-		.elf_xtregs_offset = offsetof(elf_xtregs_t, cp), \
-		.ti_offset = offsetof(struct thread_info, xtregs_cp.cp), \
-		.sz = sizeof(xtregs_ ## cp ## _t), \
-	}
-
-static const struct {
-	size_t elf_xtregs_offset;
-	size_t ti_offset;
-	size_t sz;
-} cp_offsets[] = {
-	CP_OFFSETS(cp0),
-	CP_OFFSETS(cp1),
-	CP_OFFSETS(cp2),
-	CP_OFFSETS(cp3),
-	CP_OFFSETS(cp4),
-	CP_OFFSETS(cp5),
-	CP_OFFSETS(cp6),
-	CP_OFFSETS(cp7),
-};
-#endif
-
-static int ptrace_getxregs(struct task_struct *child, void __user *uregs)
+int ptrace_getxregs(struct task_struct *child, void __user *uregs)
 {
 	struct pt_regs *regs = task_pt_regs(child);
 	struct thread_info *ti = task_thread_info(child);
 	elf_xtregs_t __user *xtregs = uregs;
 	int ret = 0;
-	int i __maybe_unused;
 
 	if (!access_ok(VERIFY_WRITE, uregs, sizeof(elf_xtregs_t)))
 		return -EIO;
@@ -165,13 +139,8 @@ static int ptrace_getxregs(struct task_struct *child, void __user *uregs)
 #if XTENSA_HAVE_COPROCESSORS
 	/* Flush all coprocessor registers to memory. */
 	coprocessor_flush_all(ti);
-
-	for (i = 0; i < ARRAY_SIZE(cp_offsets); ++i)
-		ret |= __copy_to_user((char __user *)xtregs +
-				      cp_offsets[i].elf_xtregs_offset,
-				      (const char *)ti +
-				      cp_offsets[i].ti_offset,
-				      cp_offsets[i].sz);
+	ret |= __copy_to_user(&xtregs->cp0, &ti->xtregs_cp,
+			      sizeof(xtregs_coprocessor_t));
 #endif
 	ret |= __copy_to_user(&xtregs->opt, &regs->xtregs_opt,
 			      sizeof(xtregs->opt));
@@ -181,13 +150,12 @@ static int ptrace_getxregs(struct task_struct *child, void __user *uregs)
 	return ret ? -EFAULT : 0;
 }
 
-static int ptrace_setxregs(struct task_struct *child, void __user *uregs)
+int ptrace_setxregs(struct task_struct *child, void __user *uregs)
 {
 	struct thread_info *ti = task_thread_info(child);
 	struct pt_regs *regs = task_pt_regs(child);
 	elf_xtregs_t *xtregs = uregs;
 	int ret = 0;
-	int i __maybe_unused;
 
 	if (!access_ok(VERIFY_READ, uregs, sizeof(elf_xtregs_t)))
 		return -EFAULT;
@@ -197,11 +165,8 @@ static int ptrace_setxregs(struct task_struct *child, void __user *uregs)
 	coprocessor_flush_all(ti);
 	coprocessor_release_all(ti);
 
-	for (i = 0; i < ARRAY_SIZE(cp_offsets); ++i)
-		ret |= __copy_from_user((char *)ti + cp_offsets[i].ti_offset,
-					(const char __user *)xtregs +
-					cp_offsets[i].elf_xtregs_offset,
-					cp_offsets[i].sz);
+	ret |= __copy_from_user(&ti->xtregs_cp, &xtregs->cp0,
+				sizeof(xtregs_coprocessor_t));
 #endif
 	ret |= __copy_from_user(&regs->xtregs_opt, &xtregs->opt,
 				sizeof(xtregs->opt));
@@ -211,8 +176,7 @@ static int ptrace_setxregs(struct task_struct *child, void __user *uregs)
 	return ret ? -EFAULT : 0;
 }
 
-static int ptrace_peekusr(struct task_struct *child, long regno,
-			  long __user *ret)
+int ptrace_peekusr(struct task_struct *child, long regno, long __user *ret)
 {
 	struct pt_regs *regs;
 	unsigned long tmp;
@@ -221,87 +185,86 @@ static int ptrace_peekusr(struct task_struct *child, long regno,
 	tmp = 0;  /* Default return value. */
 
 	switch(regno) {
-	case REG_AR_BASE ... REG_AR_BASE + XCHAL_NUM_AREGS - 1:
-		tmp = regs->areg[regno - REG_AR_BASE];
-		break;
 
-	case REG_A_BASE ... REG_A_BASE + 15:
-		tmp = regs->areg[regno - REG_A_BASE];
-		break;
+		case REG_AR_BASE ... REG_AR_BASE + XCHAL_NUM_AREGS - 1:
+			tmp = regs->areg[regno - REG_AR_BASE];
+			break;
 
-	case REG_PC:
-		tmp = regs->pc;
-		break;
+		case REG_A_BASE ... REG_A_BASE + 15:
+			tmp = regs->areg[regno - REG_A_BASE];
+			break;
 
-	case REG_PS:
-		/* Note: PS.EXCM is not set while user task is running;
-		 * its being set in regs is for exception handling
-		 * convenience.
-		 */
-		tmp = (regs->ps & ~(1 << PS_EXCM_BIT));
-		break;
+		case REG_PC:
+			tmp = regs->pc;
+			break;
 
-	case REG_WB:
-		break;		/* tmp = 0 */
+		case REG_PS:
+			/* Note:  PS.EXCM is not set while user task is running;
+			 * its being set in regs is for exception handling
+			 * convenience.  */
+			tmp = (regs->ps & ~(1 << PS_EXCM_BIT));
+			break;
 
-	case REG_WS:
+		case REG_WB:
+			break;		/* tmp = 0 */
+
+		case REG_WS:
 		{
 			unsigned long wb = regs->windowbase;
 			unsigned long ws = regs->windowstart;
-			tmp = ((ws >> wb) | (ws << (WSBITS - wb))) &
-				((1 << WSBITS) - 1);
+			tmp = ((ws>>wb) | (ws<<(WSBITS-wb))) & ((1<<WSBITS)-1);
 			break;
 		}
-	case REG_LBEG:
-		tmp = regs->lbeg;
-		break;
+		case REG_LBEG:
+			tmp = regs->lbeg;
+			break;
 
-	case REG_LEND:
-		tmp = regs->lend;
-		break;
+		case REG_LEND:
+			tmp = regs->lend;
+			break;
 
-	case REG_LCOUNT:
-		tmp = regs->lcount;
-		break;
+		case REG_LCOUNT:
+			tmp = regs->lcount;
+			break;
 
-	case REG_SAR:
-		tmp = regs->sar;
-		break;
+		case REG_SAR:
+			tmp = regs->sar;
+			break;
 
-	case SYSCALL_NR:
-		tmp = regs->syscall;
-		break;
+		case SYSCALL_NR:
+			tmp = regs->syscall;
+			break;
 
-	default:
-		return -EIO;
+		default:
+			return -EIO;
 	}
 	return put_user(tmp, ret);
 }
 
-static int ptrace_pokeusr(struct task_struct *child, long regno, long val)
+int ptrace_pokeusr(struct task_struct *child, long regno, long val)
 {
 	struct pt_regs *regs;
 	regs = task_pt_regs(child);
 
 	switch (regno) {
-	case REG_AR_BASE ... REG_AR_BASE + XCHAL_NUM_AREGS - 1:
-		regs->areg[regno - REG_AR_BASE] = val;
-		break;
+		case REG_AR_BASE ... REG_AR_BASE + XCHAL_NUM_AREGS - 1:
+			regs->areg[regno - REG_AR_BASE] = val;
+			break;
 
-	case REG_A_BASE ... REG_A_BASE + 15:
-		regs->areg[regno - REG_A_BASE] = val;
-		break;
+		case REG_A_BASE ... REG_A_BASE + 15:
+			regs->areg[regno - REG_A_BASE] = val;
+			break;
 
-	case REG_PC:
-		regs->pc = val;
-		break;
+		case REG_PC:
+			regs->pc = val;
+			break;
 
-	case SYSCALL_NR:
-		regs->syscall = val;
-		break;
+		case SYSCALL_NR:
+			regs->syscall = val;
+			break;
 
-	default:
-		return -EIO;
+		default:
+			return -EIO;
 	}
 	return 0;
 }
@@ -312,6 +275,7 @@ static void ptrace_hbptriggered(struct perf_event *bp,
 				struct pt_regs *regs)
 {
 	int i;
+	siginfo_t info;
 	struct arch_hw_breakpoint *bkpt = counter_arch_bp(bp);
 
 	if (bp->attr.bp_type & HW_BREAKPOINT_X) {
@@ -326,7 +290,12 @@ static void ptrace_hbptriggered(struct perf_event *bp,
 		i = (i << 1) | 1;
 	}
 
-	force_sig_ptrace_errno_trap(i, (void __user *)bkpt->address);
+	info.si_signo = SIGTRAP;
+	info.si_errno = i;
+	info.si_code = TRAP_HWBKPT;
+	info.si_addr = (void __user *)bkpt->address;
+
+	force_sig_info(SIGTRAP, &info, current);
 }
 
 static struct perf_event *ptrace_hbp_create(struct task_struct *tsk, int type)
@@ -497,21 +466,39 @@ long arch_ptrace(struct task_struct *child, long request,
 	return ret;
 }
 
-unsigned long do_syscall_trace_enter(struct pt_regs *regs)
+void do_syscall_trace(void)
 {
-	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(regs))
-		return -1;
+	/*
+	 * The 0x80 provides a way for the tracing parent to distinguish
+	 * between a syscall stop and SIGTRAP delivery
+	 */
+	ptrace_notify(SIGTRAP|((current->ptrace & PT_TRACESYSGOOD) ? 0x80 : 0));
 
-	return regs->areg[2];
+	/*
+	 * this isn't the same as continuing with a signal, but it will do
+	 * for normal use.  strace only continues with a signal if the
+	 * stopping signal is not SIGTRAP.  -brl
+	 */
+	if (current->exit_code) {
+		send_sig(current->exit_code, current, 1);
+		current->exit_code = 0;
+	}
+}
+
+void do_syscall_trace_enter(struct pt_regs *regs)
+{
+	if (test_thread_flag(TIF_SYSCALL_TRACE)
+			&& (current->ptrace & PT_PTRACED))
+		do_syscall_trace();
+
+#if 0
+	audit_syscall_entry(...);
+#endif
 }
 
 void do_syscall_trace_leave(struct pt_regs *regs)
 {
-	int step;
-
-	step = test_thread_flag(TIF_SINGLESTEP);
-
-	if (step || test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, step);
+	if ((test_thread_flag(TIF_SYSCALL_TRACE))
+			&& (current->ptrace & PT_PTRACED))
+		do_syscall_trace();
 }

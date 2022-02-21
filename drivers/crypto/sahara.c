@@ -202,6 +202,7 @@ struct sahara_dev {
 	struct completion	dma_completion;
 
 	struct sahara_ctx	*ctx;
+	spinlock_t		lock;
 	struct crypto_queue	queue;
 	unsigned long		flags;
 
@@ -389,7 +390,7 @@ static void sahara_decode_status(struct sahara_dev *dev, unsigned int status)
 	if (status & SAHARA_STATUS_MODE_BATCH)
 		dev_dbg(dev->device, "	- Batch Mode.\n");
 	else if (status & SAHARA_STATUS_MODE_DEDICATED)
-		dev_dbg(dev->device, "	- Dedicated Mode.\n");
+		dev_dbg(dev->device, "	- Decidated Mode.\n");
 	else if (status & SAHARA_STATUS_MODE_DEBUG)
 		dev_dbg(dev->device, "	- Debug Mode.\n");
 
@@ -542,10 +543,10 @@ static int sahara_hw_descriptor_create(struct sahara_dev *dev)
 
 unmap_out:
 	dma_unmap_sg(dev->device, dev->out_sg, dev->nb_out_sg,
-		DMA_FROM_DEVICE);
+		DMA_TO_DEVICE);
 unmap_in:
 	dma_unmap_sg(dev->device, dev->in_sg, dev->nb_in_sg,
-		DMA_TO_DEVICE);
+		DMA_FROM_DEVICE);
 
 	return -EINVAL;
 }
@@ -593,9 +594,9 @@ static int sahara_aes_process(struct ablkcipher_request *req)
 	}
 
 	dma_unmap_sg(dev->device, dev->out_sg, dev->nb_out_sg,
-		DMA_FROM_DEVICE);
-	dma_unmap_sg(dev->device, dev->in_sg, dev->nb_in_sg,
 		DMA_TO_DEVICE);
+	dma_unmap_sg(dev->device, dev->in_sg, dev->nb_in_sg,
+		DMA_FROM_DEVICE);
 
 	return 0;
 }
@@ -1253,7 +1254,8 @@ static struct ahash_alg sha_v3_algs[] = {
 		.cra_name		= "sha1",
 		.cra_driver_name	= "sahara-sha1",
 		.cra_priority		= 300,
-		.cra_flags		= CRYPTO_ALG_ASYNC |
+		.cra_flags		= CRYPTO_ALG_TYPE_AHASH |
+						CRYPTO_ALG_ASYNC |
 						CRYPTO_ALG_NEED_FALLBACK,
 		.cra_blocksize		= SHA1_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct sahara_ctx),
@@ -1279,7 +1281,8 @@ static struct ahash_alg sha_v4_algs[] = {
 		.cra_name		= "sha256",
 		.cra_driver_name	= "sahara-sha256",
 		.cra_priority		= 300,
-		.cra_flags		= CRYPTO_ALG_ASYNC |
+		.cra_flags		= CRYPTO_ALG_TYPE_AHASH |
+						CRYPTO_ALG_ASYNC |
 						CRYPTO_ALG_NEED_FALLBACK,
 		.cra_blocksize		= SHA256_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct sahara_ctx),
@@ -1373,13 +1376,13 @@ static void sahara_unregister_algs(struct sahara_dev *dev)
 			crypto_unregister_ahash(&sha_v4_algs[i]);
 }
 
-static const struct platform_device_id sahara_platform_ids[] = {
+static struct platform_device_id sahara_platform_ids[] = {
 	{ .name = "sahara-imx27" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(platform, sahara_platform_ids);
 
-static const struct of_device_id sahara_dt_ids[] = {
+static struct of_device_id sahara_dt_ids[] = {
 	{ .compatible = "fsl,imx53-sahara" },
 	{ .compatible = "fsl,imx27-sahara" },
 	{ /* sentinel */ }
@@ -1395,9 +1398,11 @@ static int sahara_probe(struct platform_device *pdev)
 	int err;
 	int i;
 
-	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);
-	if (!dev)
+	dev = devm_kzalloc(&pdev->dev, sizeof(struct sahara_dev), GFP_KERNEL);
+	if (dev == NULL) {
+		dev_err(&pdev->dev, "unable to alloc data struct.\n");
 		return -ENOMEM;
+	}
 
 	dev->device = &pdev->dev;
 	platform_set_drvdata(pdev, dev);
@@ -1482,6 +1487,7 @@ static int sahara_probe(struct platform_device *pdev)
 
 	crypto_init_queue(&dev->queue, SAHARA_QUEUE_LENGTH);
 
+	spin_lock_init(&dev->lock);
 	mutex_init(&dev->queue_mutex);
 
 	dev_ptr = dev;

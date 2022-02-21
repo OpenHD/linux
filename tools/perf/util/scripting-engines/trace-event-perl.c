@@ -19,7 +19,6 @@
  *
  */
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,9 +27,7 @@
 #include <linux/bitmap.h>
 #include <linux/time64.h>
 
-#include <stdbool.h>
-/* perl needs the following define, right after including stdbool.h */
-#define HAS_BOOL
+#include "../util.h"
 #include <EXTERN.h>
 #include <perl.h>
 
@@ -220,7 +217,6 @@ static void define_event_symbols(struct event_format *event,
 				       cur_field_name);
 		break;
 	case PRINT_HEX:
-	case PRINT_HEX_STR:
 		define_event_symbols(event, ev_name, args->hex.field);
 		define_event_symbols(event, ev_name, args->hex.size);
 		break;
@@ -313,10 +309,10 @@ static SV *perl_process_callchain(struct perf_sample *sample,
 		if (node->map) {
 			struct map *map = node->map;
 			const char *dsoname = "[unknown]";
-			if (map && map->dso) {
+			if (map && map->dso && (map->dso->name || map->dso->long_name)) {
 				if (symbol_conf.show_kernel_path && map->dso->long_name)
 					dsoname = map->dso->long_name;
-				else
+				else if (map->dso->name)
 					dsoname = map->dso->name;
 			}
 			if (!hv_stores(elem, "dso", newSVpv(dsoname,0))) {
@@ -354,10 +350,8 @@ static void perl_process_tracepoint(struct perf_sample *sample,
 	if (evsel->attr.type != PERF_TYPE_TRACEPOINT)
 		return;
 
-	if (!event) {
-		pr_debug("ug! no event found for type %" PRIu64, (u64)evsel->attr.config);
-		return;
-	}
+	if (!event)
+		die("ug! no event found for type %" PRIu64, (u64)evsel->attr.config);
 
 	pid = raw_field_value(event, "common_pid", data);
 
@@ -535,7 +529,7 @@ static int perl_stop_script(void)
 	return 0;
 }
 
-static int perl_generate_script(struct tep_handle *pevent, const char *outfile)
+static int perl_generate_script(struct pevent *pevent, const char *outfile)
 {
 	struct event_format *event = NULL;
 	struct format_field *f;

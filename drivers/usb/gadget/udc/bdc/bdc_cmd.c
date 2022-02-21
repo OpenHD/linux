@@ -1,10 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * bdc_cmd.c - BRCM BDC USB3.0 device controller
  *
  * Copyright (C) 2014 Broadcom Corporation
  *
  * Author: Ashwini Pahuja
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ *
  */
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
@@ -177,7 +182,7 @@ int bdc_config_ep(struct bdc *bdc, struct bdc_ep *ep)
 					usb_endpoint_xfer_int(desc)) {
 			param2 |= si;
 
-			mbs = usb_endpoint_maxp_mult(desc);
+			mbs = (usb_endpoint_maxp(desc) & 0x1800) >> 11;
 			param2 |= mbs << MB_SHIFT;
 		}
 		break;

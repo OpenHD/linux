@@ -1,8 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Greybus operations
  *
  * Copyright 2015-2016 Google Inc.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/string.h>
@@ -19,9 +20,10 @@ static ssize_t manager_sysfs_add_store(
 
 	int num = sscanf(buf,
 			"name=%" GB_AUDIO_MANAGER_MODULE_NAME_LEN_SSCANF "s "
-			"vid=%d pid=%d intf_id=%d i/p devices=0x%X o/p devices=0x%X",
-			desc.name, &desc.vid, &desc.pid, &desc.intf_id,
-			&desc.ip_devices, &desc.op_devices);
+			"slot=%d vid=%d pid=%d cport=%d i/p devices=0x%X"
+			"o/p devices=0x%X",
+			desc.name, &desc.slot, &desc.vid, &desc.pid,
+			&desc.cport, &desc.ip_devices, &desc.op_devices);
 
 	if (num != 7)
 		return -EINVAL;
@@ -42,7 +44,7 @@ static ssize_t manager_sysfs_remove_store(
 {
 	int id;
 
-	int num = kstrtoint(buf, 10, &id);
+	int num = sscanf(buf, "%d", &id);
 
 	if (num != 1)
 		return -EINVAL;
@@ -63,17 +65,16 @@ static ssize_t manager_sysfs_dump_store(
 {
 	int id;
 
-	int num = kstrtoint(buf, 10, &id);
+	int num = sscanf(buf, "%d", &id);
 
 	if (num == 1) {
 		num = gb_audio_manager_dump_module(id);
 		if (num)
 			return num;
-	} else if (!strncmp("all", buf, 3)) {
+	} else if (!strncmp("all", buf, 3))
 		gb_audio_manager_dump_all();
-	} else {
+	else
 		return -EINVAL;
-	}
 
 	return count;
 }

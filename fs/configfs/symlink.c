@@ -138,7 +138,7 @@ int configfs_symlink(struct inode *dir, struct dentry *dentry, const char *symna
 	struct configfs_dirent *sd;
 	struct config_item *parent_item;
 	struct config_item *target_item = NULL;
-	const struct config_item_type *type;
+	struct config_item_type *type;
 
 	sd = dentry->d_parent->d_fsdata;
 	/*
@@ -217,7 +217,7 @@ int configfs_unlink(struct inode *dir, struct dentry *dentry)
 	struct configfs_dirent *sd = dentry->d_fsdata;
 	struct configfs_symlink *sl;
 	struct config_item *parent_item;
-	const struct config_item_type *type;
+	struct config_item_type *type;
 	int ret;
 
 	ret = -EPERM;  /* What lack-of-symlink returns */
@@ -335,6 +335,7 @@ static const char *configfs_get_link(struct dentry *dentry,
 
 const struct inode_operations configfs_symlink_inode_operations = {
 	.get_link = configfs_get_link,
+	.readlink = generic_readlink,
 	.setattr = configfs_setattr,
 };
 

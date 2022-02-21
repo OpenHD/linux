@@ -113,8 +113,10 @@ static void virtio_gpu_get_capsets(struct virtio_gpu_device *vgdev,
 					 vgdev->capsets[i].id > 0, 5 * HZ);
 		if (ret == 0) {
 			DRM_ERROR("timed out waiting for cap set %d\n", i);
+			spin_lock(&vgdev->display_info_lock);
 			kfree(vgdev->capsets);
 			vgdev->capsets = NULL;
+			spin_unlock(&vgdev->display_info_lock);
 			return;
 		}
 		DRM_INFO("cap set %d: id %d, max-version %d, max-size %d\n",
@@ -138,7 +140,7 @@ int virtio_gpu_driver_load(struct drm_device *dev, unsigned long flags)
 	u32 num_scanouts, num_capsets;
 	int ret;
 
-	if (!virtio_has_feature(dev_to_virtio(dev->dev), VIRTIO_F_VERSION_1))
+	if (!virtio_has_feature(dev->virtdev, VIRTIO_F_VERSION_1))
 		return -ENODEV;
 
 	vgdev = kzalloc(sizeof(struct virtio_gpu_device), GFP_KERNEL);
@@ -147,7 +149,7 @@ int virtio_gpu_driver_load(struct drm_device *dev, unsigned long flags)
 
 	vgdev->ddev = dev;
 	dev->dev_private = vgdev;
-	vgdev->vdev = dev_to_virtio(dev->dev);
+	vgdev->vdev = dev->virtdev;
 	vgdev->dev = dev->dev;
 
 	spin_lock_init(&vgdev->display_info_lock);
@@ -159,23 +161,20 @@ int virtio_gpu_driver_load(struct drm_device *dev, unsigned long flags)
 	virtio_gpu_init_vq(&vgdev->ctrlq, virtio_gpu_dequeue_ctrl_func);
 	virtio_gpu_init_vq(&vgdev->cursorq, virtio_gpu_dequeue_cursor_func);
 
-	vgdev->fence_drv.context = dma_fence_context_alloc(1);
+	vgdev->fence_drv.context = fence_context_alloc(1);
 	spin_lock_init(&vgdev->fence_drv.lock);
 	INIT_LIST_HEAD(&vgdev->fence_drv.fences);
 	INIT_LIST_HEAD(&vgdev->cap_cache);
 	INIT_WORK(&vgdev->config_changed_work,
 		  virtio_gpu_config_changed_work_func);
 
-#ifdef __LITTLE_ENDIAN
 	if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_VIRGL))
 		vgdev->has_virgl_3d = true;
 	DRM_INFO("virgl 3d acceleration %s\n",
-		 vgdev->has_virgl_3d ? "enabled" : "not supported by host");
-#else
-	DRM_INFO("virgl 3d acceleration not supported by guest\n");
-#endif
+		 vgdev->has_virgl_3d ? "enabled" : "not available");
 
-	ret = virtio_find_vqs(vgdev->vdev, 2, vqs, callbacks, names, NULL);
+	ret = vgdev->vdev->config->find_vqs(vgdev->vdev, 2, vqs,
+					    callbacks, names);
 	if (ret) {
 		DRM_ERROR("failed to find virt queues\n");
 		goto err_vqs;
@@ -249,7 +248,7 @@ static void virtio_gpu_cleanup_cap_cache(struct virtio_gpu_device *vgdev)
 	}
 }
 
-void virtio_gpu_driver_unload(struct drm_device *dev)
+int virtio_gpu_driver_unload(struct drm_device *dev)
 {
 	struct virtio_gpu_device *vgdev = dev->dev_private;
 
@@ -265,6 +264,7 @@ void virtio_gpu_driver_unload(struct drm_device *dev)
 	virtio_gpu_cleanup_cap_cache(vgdev);
 	kfree(vgdev->capsets);
 	kfree(vgdev);
+	return 0;
 }
 
 int virtio_gpu_driver_open(struct drm_device *dev, struct drm_file *file)
@@ -272,18 +272,20 @@ int virtio_gpu_driver_open(struct drm_device *dev, struct drm_file *file)
 	struct virtio_gpu_device *vgdev = dev->dev_private;
 	struct virtio_gpu_fpriv *vfpriv;
 	uint32_t id;
-	char dbgname[TASK_COMM_LEN];
+	char dbgname[64], tmpname[TASK_COMM_LEN];
 
 	/* can't create contexts without 3d renderer */
 	if (!vgdev->has_virgl_3d)
 		return 0;
 
+	get_task_comm(tmpname, current);
+	snprintf(dbgname, sizeof(dbgname), "%s", tmpname);
+	dbgname[63] = 0;
 	/* allocate a virt GPU context for this opener */
 	vfpriv = kzalloc(sizeof(*vfpriv), GFP_KERNEL);
 	if (!vfpriv)
 		return -ENOMEM;
 
-	get_task_comm(dbgname, current);
 	virtio_gpu_context_create(vgdev, strlen(dbgname), dbgname, &id);
 
 	vfpriv->ctx_id = id;

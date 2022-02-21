@@ -672,7 +672,7 @@ int snd_seq_event_port_attach(int client,
 	/* Set up the port */
 	memset(&portinfo, 0, sizeof(portinfo));
 	portinfo.addr.client = client;
-	strlcpy(portinfo.name, portname ? portname : "Unnamed port",
+	strlcpy(portinfo.name, portname ? portname : "Unamed port",
 		sizeof(portinfo.name));
 
 	portinfo.capability = cap;
@@ -691,6 +691,7 @@ int snd_seq_event_port_attach(int client,
 
 	return ret;
 }
+
 EXPORT_SYMBOL(snd_seq_event_port_attach);
 
 /*
@@ -711,4 +712,5 @@ int snd_seq_event_port_detach(int client, int port)
 
 	return err;
 }
+
 EXPORT_SYMBOL(snd_seq_event_port_detach);

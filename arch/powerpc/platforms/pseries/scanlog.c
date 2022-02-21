@@ -27,7 +27,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/rtas.h>
 #include <asm/prom.h>
 
@@ -179,7 +179,7 @@ static int __init scanlog_init(void)
 	if (!scanlog_buffer)
 		goto err;
 
-	ent = proc_create("powerpc/rtas/scan-log-dump", 0400, NULL,
+	ent = proc_create("powerpc/rtas/scan-log-dump", S_IRUSR, NULL,
 			  &scanlog_fops);
 	if (!ent)
 		goto err;

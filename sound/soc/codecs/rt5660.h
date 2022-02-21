@@ -810,9 +810,6 @@
 /* General Control 1 (0xfa) */
 #define RT5660_PWR_VREF_HP			(0x1 << 11)
 #define RT5660_PWR_VREF_HP_SFT			11
-#define RT5660_AUTO_DIS_AMP			(0x1 << 6)
-#define RT5660_MCLK_DET				(0x1 << 5)
-#define RT5660_POW_CLKDET			(0x1 << 1)
 #define RT5660_DIG_GATE_CTRL			(0x1)
 #define RT5660_DIG_GATE_CTRL_SFT		0
 
@@ -831,7 +828,7 @@ enum {
 };
 
 struct rt5660_priv {
-	struct snd_soc_component *component;
+	struct snd_soc_codec *codec;
 	struct rt5660_platform_data pdata;
 	struct regmap *regmap;
 	struct clk *mclk;

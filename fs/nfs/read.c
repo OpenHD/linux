@@ -25,7 +25,6 @@
 #include "iostat.h"
 #include "fscache.h"
 #include "pnfs.h"
-#include "nfstrace.h"
 
 #define NFSDBG_FACILITY		NFSDBG_PAGECACHE
 
@@ -36,11 +35,7 @@ static struct kmem_cache *nfs_rdata_cachep;
 
 static struct nfs_pgio_header *nfs_readhdr_alloc(void)
 {
-	struct nfs_pgio_header *p = kmem_cache_zalloc(nfs_rdata_cachep, GFP_KERNEL);
-
-	if (p)
-		p->rw_mode = FMODE_READ;
-	return p;
+	return kmem_cache_zalloc(nfs_rdata_cachep, GFP_KERNEL);
 }
 
 static void nfs_readhdr_free(struct nfs_pgio_header *rhdr)
@@ -201,11 +196,10 @@ static void nfs_initiate_read(struct nfs_pgio_header *hdr,
 
 	task_setup_data->flags |= swap_flags;
 	rpc_ops->read_setup(hdr, msg);
-	trace_nfs_initiate_read(inode, hdr->io_start, hdr->good_bytes);
 }
 
 static void
-nfs_async_read_error(struct list_head *head, int error)
+nfs_async_read_error(struct list_head *head)
 {
 	struct nfs_page	*req;
 
@@ -234,8 +228,6 @@ static int nfs_readpage_done(struct rpc_task *task,
 		return status;
 
 	nfs_add_stats(inode, NFSIOS_SERVERREADBYTES, hdr->res.count);
-	trace_nfs_readpage_done(inode, task->tk_status,
-				hdr->args.offset, hdr->res.eof);
 
 	if (task->tk_status == -ESTALE) {
 		set_bit(NFS_INO_STALE, &NFS_I(inode)->flags);
@@ -354,7 +346,7 @@ struct nfs_readdesc {
 };
 
 static int
-readpage_async_filler(void *data, struct page *page)
+readpage_async_filler(struct file *data, struct page *page)
 {
 	struct nfs_readdesc *desc = (struct nfs_readdesc *)data;
 	struct nfs_page *new;
@@ -459,6 +451,7 @@ void nfs_destroy_readpagecache(void)
 }
 
 static const struct nfs_rw_ops nfs_rw_read_ops = {
+	.rw_mode		= FMODE_READ,
 	.rw_alloc_header	= nfs_readhdr_alloc,
 	.rw_free_header		= nfs_readhdr_free,
 	.rw_done		= nfs_readpage_done,

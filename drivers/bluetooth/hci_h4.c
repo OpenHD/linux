@@ -132,7 +132,7 @@ static int h4_recv(struct hci_uart *hu, const void *data, int count)
 				 h4_recv_pkts, ARRAY_SIZE(h4_recv_pkts));
 	if (IS_ERR(h4->rx_skb)) {
 		int err = PTR_ERR(h4->rx_skb);
-		bt_dev_err(hu->hdev, "Frame reassembly failed (%d)", err);
+		BT_ERR("%s: Frame reassembly failed (%d)", hu->hdev->name, err);
 		h4->rx_skb = NULL;
 		return err;
 	}
@@ -171,23 +171,8 @@ struct sk_buff *h4_recv_buf(struct hci_dev *hdev, struct sk_buff *skb,
 			    const unsigned char *buffer, int count,
 			    const struct h4_recv_pkt *pkts, int pkts_count)
 {
-	struct hci_uart *hu = hci_get_drvdata(hdev);
-	u8 alignment = hu->alignment ? hu->alignment : 1;
-
-	/* Check for error from previous call */
-	if (IS_ERR(skb))
-		skb = NULL;
-
 	while (count) {
 		int i, len;
-
-		/* remove padding bytes from buffer */
-		for (; hu->padding && count > 0; hu->padding--) {
-			count--;
-			buffer++;
-		}
-		if (!count)
-			break;
 
 		if (!skb) {
 			for (i = 0; i < pkts_count; i++) {
@@ -213,7 +198,7 @@ struct sk_buff *h4_recv_buf(struct hci_dev *hdev, struct sk_buff *skb,
 		}
 
 		len = min_t(uint, hci_skb_expect(skb) - skb->len, count);
-		skb_put_data(skb, buffer, len);
+		memcpy(skb_put(skb, len), buffer, len);
 
 		count -= len;
 		buffer += len;
@@ -268,17 +253,11 @@ struct sk_buff *h4_recv_buf(struct hci_dev *hdev, struct sk_buff *skb,
 			}
 
 			if (!dlen) {
-				hu->padding = (skb->len - 1) % alignment;
-				hu->padding = (alignment - hu->padding) % alignment;
-
 				/* No more data, complete frame */
 				(&pkts[i])->recv(hdev, skb);
 				skb = NULL;
 			}
 		} else {
-			hu->padding = (skb->len - 1) % alignment;
-			hu->padding = (alignment - hu->padding) % alignment;
-
 			/* Complete frame */
 			(&pkts[i])->recv(hdev, skb);
 			skb = NULL;

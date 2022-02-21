@@ -25,7 +25,7 @@
 #include <linux/firmware.h>
 #include "zd1201.h"
 
-static const struct usb_device_id zd1201_table[] = {
+static struct usb_device_id zd1201_table[] = {
 	{USB_DEVICE(0x0586, 0x3400)}, /* Peabird Wireless USB Adapter */
 	{USB_DEVICE(0x0ace, 0x1201)}, /* ZyDAS ZD1201 Wireless USB Adapter */
 	{USB_DEVICE(0x050d, 0x6051)}, /* Belkin F5D6051 usb  adapter */
@@ -230,7 +230,8 @@ static void zd1201_usbrx(struct urb *urb)
 	/* Info frame */
 	if (type == ZD1201_PACKET_INQUIRE) {
 		int i = 0;
-		unsigned short infotype, copylen;
+		unsigned short infotype, framelen, copylen;
+		framelen = le16_to_cpu(*(__le16*)&data[4]);
 		infotype = le16_to_cpu(*(__le16*)&data[6]);
 
 		if (infotype == ZD1201_INF_LINKSTATUS) {
@@ -325,13 +326,13 @@ static void zd1201_usbrx(struct urb *urb)
 			if (!(skb = dev_alloc_skb(datalen+24)))
 				goto resubmit;
 			
-			skb_put_data(skb, &data[datalen - 16], 2);
-			skb_put_data(skb, &data[datalen - 2], 2);
-			skb_put_data(skb, &data[datalen - 14], 6);
-			skb_put_data(skb, &data[datalen - 22], 6);
-			skb_put_data(skb, &data[datalen - 8], 6);
-			skb_put_data(skb, &data[datalen - 24], 2);
-			skb_put_data(skb, data, len);
+			memcpy(skb_put(skb, 2), &data[datalen-16], 2);
+			memcpy(skb_put(skb, 2), &data[datalen-2], 2);
+			memcpy(skb_put(skb, 6), &data[datalen-14], 6);
+			memcpy(skb_put(skb, 6), &data[datalen-22], 6);
+			memcpy(skb_put(skb, 6), &data[datalen-8], 6);
+			memcpy(skb_put(skb, 2), &data[datalen-24], 2);
+			memcpy(skb_put(skb, len), data, len);
 			skb->protocol = eth_type_trans(skb, zd->dev);
 			zd->dev->stats.rx_packets++;
 			zd->dev->stats.rx_bytes += skb->len;
@@ -358,9 +359,9 @@ static void zd1201_usbrx(struct urb *urb)
 				frag->skb = skb;
 				frag->seq = seq & IEEE80211_SCTL_SEQ;
 				skb_reserve(skb, 2);
-				skb_put_data(skb, &data[datalen - 14], 12);
-				skb_put_data(skb, &data[6], 2);
-				skb_put_data(skb, data + 8, len);
+				memcpy(skb_put(skb, 12), &data[datalen-14], 12);
+				memcpy(skb_put(skb, 2), &data[6], 2);
+				memcpy(skb_put(skb, len), data+8, len);
 				hlist_add_head(&frag->fnode, &zd->fraglist);
 				goto resubmit;
 			}
@@ -384,9 +385,9 @@ static void zd1201_usbrx(struct urb *urb)
 			if (!skb)
 				goto resubmit;
 			skb_reserve(skb, 2);
-			skb_put_data(skb, &data[datalen - 14], 12);
-			skb_put_data(skb, &data[6], 2);
-			skb_put_data(skb, data + 8, len);
+			memcpy(skb_put(skb, 12), &data[datalen-14], 12);
+			memcpy(skb_put(skb, 2), &data[6], 2);
+			memcpy(skb_put(skb, len), data+8, len);
 		}
 		skb->protocol = eth_type_trans(skb, zd->dev);
 		zd->dev->stats.rx_packets++;
@@ -1723,6 +1724,7 @@ static const struct net_device_ops zd1201_netdev_ops = {
 	.ndo_tx_timeout		= zd1201_tx_timeout,
 	.ndo_set_rx_mode	= zd1201_set_multicast,
 	.ndo_set_mac_address	= zd1201_set_mac_address,
+	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 

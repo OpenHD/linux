@@ -268,18 +268,16 @@ static volatile u32 good_2byte_insns[256 / 32] = {
 
 static bool is_prefix_bad(struct insn *insn)
 {
+	insn_byte_t p;
 	int i;
 
-	for (i = 0; i < insn->prefixes.nbytes; i++) {
-		insn_attr_t attr;
-
-		attr = inat_get_opcode_attribute(insn->prefixes.bytes[i]);
-		switch (attr) {
-		case INAT_MAKE_PREFIX(INAT_PFX_ES):
-		case INAT_MAKE_PREFIX(INAT_PFX_CS):
-		case INAT_MAKE_PREFIX(INAT_PFX_DS):
-		case INAT_MAKE_PREFIX(INAT_PFX_SS):
-		case INAT_MAKE_PREFIX(INAT_PFX_LOCK):
+	for_each_insn_prefix(insn, i, p) {
+		switch (p) {
+		case 0x26:	/* INAT_PFX_ES   */
+		case 0x2E:	/* INAT_PFX_CS   */
+		case 0x36:	/* INAT_PFX_DS   */
+		case 0x3E:	/* INAT_PFX_SS   */
+		case 0xF0:	/* INAT_PFX_LOCK */
 			return true;
 		}
 	}
@@ -535,11 +533,11 @@ static int default_pre_xol_op(struct arch_uprobe *auprobe, struct pt_regs *regs)
 	return 0;
 }
 
-static int emulate_push_stack(struct pt_regs *regs, unsigned long val)
+static int push_ret_address(struct pt_regs *regs, unsigned long ip)
 {
 	unsigned long new_sp = regs->sp - sizeof_long(regs);
 
-	if (copy_to_user((void __user *)new_sp, &val, sizeof_long(regs)))
+	if (copy_to_user((void __user *)new_sp, &ip, sizeof_long(regs)))
 		return -EFAULT;
 
 	regs->sp = new_sp;
@@ -573,7 +571,7 @@ static int default_post_xol_op(struct arch_uprobe *auprobe, struct pt_regs *regs
 		regs->ip += correction;
 	} else if (auprobe->defparam.fixups & UPROBE_FIX_CALL) {
 		regs->sp += sizeof_long(regs); /* Pop incorrect return address */
-		if (emulate_push_stack(regs, utask->vaddr + auprobe->defparam.ilen))
+		if (push_ret_address(regs, utask->vaddr + auprobe->defparam.ilen))
 			return -ERESTART;
 	}
 	/* popf; tell the caller to not touch TF */
@@ -662,23 +660,13 @@ static bool branch_emulate_op(struct arch_uprobe *auprobe, struct pt_regs *regs)
 		 *
 		 * But there is corner case, see the comment in ->post_xol().
 		 */
-		if (emulate_push_stack(regs, new_ip))
+		if (push_ret_address(regs, new_ip))
 			return false;
 	} else if (!check_jmp_cond(auprobe, regs)) {
 		offs = 0;
 	}
 
 	regs->ip = new_ip + offs;
-	return true;
-}
-
-static bool push_emulate_op(struct arch_uprobe *auprobe, struct pt_regs *regs)
-{
-	unsigned long *src_ptr = (void *)regs + auprobe->push.reg_offset;
-
-	if (emulate_push_stack(regs, *src_ptr))
-		return false;
-	regs->ip += auprobe->push.ilen;
 	return true;
 }
 
@@ -720,14 +708,11 @@ static const struct uprobe_xol_ops branch_xol_ops = {
 	.post_xol = branch_post_xol_op,
 };
 
-static const struct uprobe_xol_ops push_xol_ops = {
-	.emulate  = push_emulate_op,
-};
-
 /* Returns -ENOSYS if branch_xol_ops doesn't handle this insn */
 static int branch_setup_xol_ops(struct arch_uprobe *auprobe, struct insn *insn)
 {
 	u8 opc1 = OPCODE1(insn);
+	insn_byte_t p;
 	int i;
 
 	switch (opc1) {
@@ -758,8 +743,8 @@ static int branch_setup_xol_ops(struct arch_uprobe *auprobe, struct insn *insn)
 	 * Intel and AMD behavior differ in 64-bit mode: Intel ignores 66 prefix.
 	 * No one uses these insns, reject any branch insns with such prefix.
 	 */
-	for (i = 0; i < insn->prefixes.nbytes; i++) {
-		if (insn->prefixes.bytes[i] == 0x66)
+	for_each_insn_prefix(insn, i, p) {
+		if (p == 0x66)
 			return -ENOTSUPP;
 	}
 
@@ -768,87 +753,6 @@ static int branch_setup_xol_ops(struct arch_uprobe *auprobe, struct insn *insn)
 	auprobe->branch.offs = insn->immediate.value;
 
 	auprobe->ops = &branch_xol_ops;
-	return 0;
-}
-
-/* Returns -ENOSYS if push_xol_ops doesn't handle this insn */
-static int push_setup_xol_ops(struct arch_uprobe *auprobe, struct insn *insn)
-{
-	u8 opc1 = OPCODE1(insn), reg_offset = 0;
-
-	if (opc1 < 0x50 || opc1 > 0x57)
-		return -ENOSYS;
-
-	if (insn->length > 2)
-		return -ENOSYS;
-	if (insn->length == 2) {
-		/* only support rex_prefix 0x41 (x64 only) */
-#ifdef CONFIG_X86_64
-		if (insn->rex_prefix.nbytes != 1 ||
-		    insn->rex_prefix.bytes[0] != 0x41)
-			return -ENOSYS;
-
-		switch (opc1) {
-		case 0x50:
-			reg_offset = offsetof(struct pt_regs, r8);
-			break;
-		case 0x51:
-			reg_offset = offsetof(struct pt_regs, r9);
-			break;
-		case 0x52:
-			reg_offset = offsetof(struct pt_regs, r10);
-			break;
-		case 0x53:
-			reg_offset = offsetof(struct pt_regs, r11);
-			break;
-		case 0x54:
-			reg_offset = offsetof(struct pt_regs, r12);
-			break;
-		case 0x55:
-			reg_offset = offsetof(struct pt_regs, r13);
-			break;
-		case 0x56:
-			reg_offset = offsetof(struct pt_regs, r14);
-			break;
-		case 0x57:
-			reg_offset = offsetof(struct pt_regs, r15);
-			break;
-		}
-#else
-		return -ENOSYS;
-#endif
-	} else {
-		switch (opc1) {
-		case 0x50:
-			reg_offset = offsetof(struct pt_regs, ax);
-			break;
-		case 0x51:
-			reg_offset = offsetof(struct pt_regs, cx);
-			break;
-		case 0x52:
-			reg_offset = offsetof(struct pt_regs, dx);
-			break;
-		case 0x53:
-			reg_offset = offsetof(struct pt_regs, bx);
-			break;
-		case 0x54:
-			reg_offset = offsetof(struct pt_regs, sp);
-			break;
-		case 0x55:
-			reg_offset = offsetof(struct pt_regs, bp);
-			break;
-		case 0x56:
-			reg_offset = offsetof(struct pt_regs, si);
-			break;
-		case 0x57:
-			reg_offset = offsetof(struct pt_regs, di);
-			break;
-		}
-	}
-
-	auprobe->push.reg_offset = reg_offset;
-	auprobe->push.ilen = insn->length;
-	auprobe->ops = &push_xol_ops;
 	return 0;
 }
 
@@ -870,10 +774,6 @@ int arch_uprobe_analyze_insn(struct arch_uprobe *auprobe, struct mm_struct *mm, 
 		return ret;
 
 	ret = branch_setup_xol_ops(auprobe, &insn);
-	if (ret != -ENOSYS)
-		return ret;
-
-	ret = push_setup_xol_ops(auprobe, &insn);
 	if (ret != -ENOSYS)
 		return ret;
 
@@ -1086,8 +986,8 @@ arch_uretprobe_hijack_return_addr(unsigned long trampoline_vaddr, struct pt_regs
 		return orig_ret_vaddr;
 
 	if (nleft != rasize) {
-		pr_err("return address clobbered: pid=%d, %%sp=%#lx, %%ip=%#lx\n",
-		       current->pid, regs->sp, regs->ip);
+		pr_err("uprobe: return address clobbered: pid=%d, %%sp=%#lx, "
+			"%%ip=%#lx\n", current->pid, regs->sp, regs->ip);
 
 		force_sig(SIGSEGV, current);
 	}

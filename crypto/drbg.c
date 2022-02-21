@@ -261,7 +261,8 @@ static int drbg_fini_sym_kernel(struct drbg_state *drbg);
 static int drbg_kcapi_sym_ctr(struct drbg_state *drbg,
 			      u8 *inbuf, u32 inbuflen,
 			      u8 *outbuf, u32 outlen);
-#define DRBG_OUTSCRATCHLEN 256
+#define DRBG_CTR_NULL_LEN 128
+#define DRBG_OUTSCRATCHLEN DRBG_CTR_NULL_LEN
 
 /* BCC function for CTR DRBG as defined in 10.4.3 */
 static int drbg_ctr_bcc(struct drbg_state *drbg,
@@ -554,7 +555,8 @@ static int drbg_ctr_generate(struct drbg_state *drbg,
 	}
 
 	/* 10.2.1.5.2 step 4.1 */
-	ret = drbg_kcapi_sym_ctr(drbg, NULL, 0, buf, len);
+	ret = drbg_kcapi_sym_ctr(drbg, drbg->ctr_null_value, DRBG_CTR_NULL_LEN,
+				 buf, len);
 	if (ret)
 		return ret;
 
@@ -1617,10 +1619,16 @@ static int drbg_kcapi_hash(struct drbg_state *drbg, unsigned char *outval,
 {
 	struct sdesc *sdesc = (struct sdesc *)drbg->priv_data;
 	struct drbg_string *input = NULL;
+	int ret;
 
 	crypto_shash_init(&sdesc->shash);
-	list_for_each_entry(input, in, list)
-		crypto_shash_update(&sdesc->shash, input->buf, input->len);
+	list_for_each_entry(input, in, list) {
+		ret = crypto_shash_update(&sdesc->shash, input->buf,
+				input->len);
+		if (ret)
+			pr_info("DRBG:crypto_shash_update failed: %d\n", ret);
+			return ret;
+	}
 	return crypto_shash_final(&sdesc->shash, outval);
 }
 #endif /* (CONFIG_CRYPTO_DRBG_HASH || CONFIG_CRYPTO_DRBG_HMAC) */
@@ -1642,10 +1650,23 @@ static int drbg_fini_sym_kernel(struct drbg_state *drbg)
 		skcipher_request_free(drbg->ctr_req);
 	drbg->ctr_req = NULL;
 
+	kfree(drbg->ctr_null_value_buf);
+	drbg->ctr_null_value = NULL;
+
 	kfree(drbg->outscratchpadbuf);
 	drbg->outscratchpadbuf = NULL;
 
 	return 0;
+}
+
+static void drbg_skcipher_cb(struct crypto_async_request *req, int error)
+{
+	struct drbg_state *drbg = req->data;
+
+	if (error == -EINPROGRESS)
+		return;
+	drbg->ctr_async_err = error;
+	complete(&drbg->ctr_completion);
 }
 
 static int drbg_init_sym_kernel(struct drbg_state *drbg)
@@ -1678,7 +1699,7 @@ static int drbg_init_sym_kernel(struct drbg_state *drbg)
 		return PTR_ERR(sk_tfm);
 	}
 	drbg->ctr_handle = sk_tfm;
-	crypto_init_wait(&drbg->ctr_wait);
+	init_completion(&drbg->ctr_completion);
 
 	req = skcipher_request_alloc(sk_tfm, GFP_KERNEL);
 	if (!req) {
@@ -1687,11 +1708,19 @@ static int drbg_init_sym_kernel(struct drbg_state *drbg)
 		return -ENOMEM;
 	}
 	drbg->ctr_req = req;
-	skcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG |
-						CRYPTO_TFM_REQ_MAY_SLEEP,
-					crypto_req_done, &drbg->ctr_wait);
+	skcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+					drbg_skcipher_cb, drbg);
 
 	alignmask = crypto_skcipher_alignmask(sk_tfm);
+	drbg->ctr_null_value_buf = kzalloc(DRBG_CTR_NULL_LEN + alignmask,
+					   GFP_KERNEL);
+	if (!drbg->ctr_null_value_buf) {
+		drbg_fini_sym_kernel(drbg);
+		return -ENOMEM;
+	}
+	drbg->ctr_null_value = (u8 *)PTR_ALIGN(drbg->ctr_null_value_buf,
+					       alignmask + 1);
+
 	drbg->outscratchpadbuf = kmalloc(DRBG_OUTSCRATCHLEN + alignmask,
 					 GFP_KERNEL);
 	if (!drbg->outscratchpadbuf) {
@@ -1700,9 +1729,6 @@ static int drbg_init_sym_kernel(struct drbg_state *drbg)
 	}
 	drbg->outscratchpad = (u8 *)PTR_ALIGN(drbg->outscratchpadbuf,
 					      alignmask + 1);
-
-	sg_init_table(&drbg->sg_in, 1);
-	sg_init_one(&drbg->sg_out, drbg->outscratchpad, DRBG_OUTSCRATCHLEN);
 
 	return alignmask;
 }
@@ -1732,42 +1758,43 @@ static int drbg_kcapi_sym_ctr(struct drbg_state *drbg,
 			      u8 *inbuf, u32 inlen,
 			      u8 *outbuf, u32 outlen)
 {
-	struct scatterlist *sg_in = &drbg->sg_in, *sg_out = &drbg->sg_out;
-	u32 scratchpad_use = min_t(u32, outlen, DRBG_OUTSCRATCHLEN);
+	struct scatterlist sg_in;
 	int ret;
 
-	if (inbuf) {
-		/* Use caller-provided input buffer */
-		sg_set_buf(sg_in, inbuf, inlen);
-	} else {
-		/* Use scratchpad for in-place operation */
-		inlen = scratchpad_use;
-		memset(drbg->outscratchpad, 0, scratchpad_use);
-		sg_set_buf(sg_in, drbg->outscratchpad, scratchpad_use);
-	}
+	sg_init_one(&sg_in, inbuf, inlen);
 
 	while (outlen) {
 		u32 cryptlen = min3(inlen, outlen, (u32)DRBG_OUTSCRATCHLEN);
+		struct scatterlist sg_out;
 
 		/* Output buffer may not be valid for SGL, use scratchpad */
-		skcipher_request_set_crypt(drbg->ctr_req, sg_in, sg_out,
+		sg_init_one(&sg_out, drbg->outscratchpad, cryptlen);
+		skcipher_request_set_crypt(drbg->ctr_req, &sg_in, &sg_out,
 					   cryptlen, drbg->V);
-		ret = crypto_wait_req(crypto_skcipher_encrypt(drbg->ctr_req),
-					&drbg->ctr_wait);
-		if (ret)
+		ret = crypto_skcipher_encrypt(drbg->ctr_req);
+		switch (ret) {
+		case 0:
+			break;
+		case -EINPROGRESS:
+		case -EBUSY:
+			wait_for_completion(&drbg->ctr_completion);
+			if (!drbg->ctr_async_err) {
+				reinit_completion(&drbg->ctr_completion);
+				break;
+			}
+		default:
 			goto out;
-
-		crypto_init_wait(&drbg->ctr_wait);
+		}
+		init_completion(&drbg->ctr_completion);
 
 		memcpy(outbuf, drbg->outscratchpad, cryptlen);
-		memzero_explicit(drbg->outscratchpad, cryptlen);
 
 		outlen -= cryptlen;
-		outbuf += cryptlen;
 	}
 	ret = 0;
 
 out:
+	memzero_explicit(drbg->outscratchpad, DRBG_OUTSCRATCHLEN);
 	return ret;
 }
 #endif /* CONFIG_CRYPTO_DRBG_CTR */

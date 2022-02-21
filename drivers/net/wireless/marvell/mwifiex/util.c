@@ -146,6 +146,21 @@ int mwifiex_init_fw_complete(struct mwifiex_adapter *adapter)
 }
 
 /*
+ * Firmware shutdown complete callback handler.
+ *
+ * This function sets the hardware status to not ready and wakes up
+ * the function waiting on the init wait queue for the firmware
+ * shutdown to complete.
+ */
+int mwifiex_shutdown_fw_complete(struct mwifiex_adapter *adapter)
+{
+	adapter->hw_status = MWIFIEX_HW_STATUS_NOT_READY;
+	adapter->init_wait_q_woken = true;
+	wake_up_interruptible(&adapter->init_wait_q);
+	return 0;
+}
+
+/*
  * This function sends init/shutdown command
  * to firmware.
  */
@@ -197,11 +212,9 @@ int mwifiex_get_debug_info(struct mwifiex_private *priv,
 		info->is_deep_sleep = adapter->is_deep_sleep;
 		info->pm_wakeup_card_req = adapter->pm_wakeup_card_req;
 		info->pm_wakeup_fw_try = adapter->pm_wakeup_fw_try;
-		info->is_hs_configured = test_bit(MWIFIEX_IS_HS_CONFIGURED,
-						  &adapter->work_flags);
+		info->is_hs_configured = adapter->is_hs_configured;
 		info->hs_activated = adapter->hs_activated;
-		info->is_cmd_timedout = test_bit(MWIFIEX_IS_CMD_TIMEDOUT,
-						 &adapter->work_flags);
+		info->is_cmd_timedout = adapter->is_cmd_timedout;
 		info->num_cmd_host_to_card_failure
 				= adapter->dbg.num_cmd_host_to_card_failure;
 		info->num_cmd_sleep_cfm_host_to_card_failure
@@ -276,13 +289,13 @@ int mwifiex_debug_info_to_buffer(struct mwifiex_private *priv, char *buf,
 				val = *((u8 *)addr);
 				break;
 			case 2:
-				val = get_unaligned((u16 *)addr);
+				val = *((u16 *)addr);
 				break;
 			case 4:
-				val = get_unaligned((u32 *)addr);
+				val = *((u32 *)addr);
 				break;
 			case 8:
-				val = get_unaligned((long long *)addr);
+				val = *((long long *)addr);
 				break;
 			default:
 				val = -1;
@@ -759,10 +772,3 @@ void *mwifiex_alloc_dma_align_buf(int rx_len, gfp_t flags)
 	return skb;
 }
 EXPORT_SYMBOL_GPL(mwifiex_alloc_dma_align_buf);
-
-void mwifiex_fw_dump_event(struct mwifiex_private *priv)
-{
-	mwifiex_send_cmd(priv, HostCmd_CMD_FW_DUMP_EVENT, HostCmd_ACT_GEN_SET,
-			 0, NULL, true);
-}
-EXPORT_SYMBOL_GPL(mwifiex_fw_dump_event);

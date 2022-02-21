@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef __UAPI_TC_CONNMARK_H
 #define __UAPI_TC_CONNMARK_H
 

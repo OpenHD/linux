@@ -17,7 +17,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
@@ -331,19 +331,14 @@ static irqreturn_t pch_gpio_handler(int irq, void *dev_id)
 	return ret;
 }
 
-static int pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
-				       unsigned int irq_start,
-				       unsigned int num)
+static void pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
+				unsigned int irq_start, unsigned int num)
 {
 	struct irq_chip_generic *gc;
 	struct irq_chip_type *ct;
-	int rv;
 
-	gc = devm_irq_alloc_generic_chip(chip->dev, "pch_gpio", 1, irq_start,
-					 chip->base, handle_simple_irq);
-	if (!gc)
-		return -ENOMEM;
-
+	gc = irq_alloc_generic_chip("pch_gpio", 1, irq_start, chip->base,
+				    handle_simple_irq);
 	gc->private = chip;
 	ct = gc->chip_types;
 
@@ -352,11 +347,8 @@ static int pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
 	ct->chip.irq_unmask = pch_irq_unmask;
 	ct->chip.irq_set_type = pch_irq_type;
 
-	rv = devm_irq_setup_generic_chip(chip->dev, gc, IRQ_MSK(num),
-					 IRQ_GC_INIT_MASK_CACHE,
-					 IRQ_NOREQUEST | IRQ_NOPROBE, 0);
-
-	return rv;
+	irq_setup_generic_chip(gc, IRQ_MSK(num), IRQ_GC_INIT_MASK_CACHE,
+			       IRQ_NOREQUEST | IRQ_NOPROBE, 0);
 }
 
 static int pch_gpio_probe(struct pci_dev *pdev,
@@ -411,8 +403,7 @@ static int pch_gpio_probe(struct pci_dev *pdev,
 		goto err_gpiochip_add;
 	}
 
-	irq_base = devm_irq_alloc_descs(&pdev->dev, -1, 0,
-					gpio_pins[chip->ioh], NUMA_NO_NODE);
+	irq_base = irq_alloc_descs(-1, 0, gpio_pins[chip->ioh], NUMA_NO_NODE);
 	if (irq_base < 0) {
 		dev_warn(&pdev->dev, "PCH gpio: Failed to get IRQ base num\n");
 		chip->irq_base = -1;
@@ -425,23 +416,21 @@ static int pch_gpio_probe(struct pci_dev *pdev,
 	iowrite32(msk, &chip->reg->imask);
 	iowrite32(msk, &chip->reg->ien);
 
-	ret = devm_request_irq(&pdev->dev, pdev->irq, pch_gpio_handler,
-			       IRQF_SHARED, KBUILD_MODNAME, chip);
+	ret = request_irq(pdev->irq, pch_gpio_handler,
+			  IRQF_SHARED, KBUILD_MODNAME, chip);
 	if (ret != 0) {
 		dev_err(&pdev->dev,
 			"%s request_irq failed\n", __func__);
 		goto err_request_irq;
 	}
 
-	ret = pch_gpio_alloc_generic_chip(chip, irq_base,
-					  gpio_pins[chip->ioh]);
-	if (ret)
-		goto err_request_irq;
+	pch_gpio_alloc_generic_chip(chip, irq_base, gpio_pins[chip->ioh]);
 
 end:
 	return 0;
 
 err_request_irq:
+	irq_free_descs(irq_base, gpio_pins[chip->ioh]);
 	gpiochip_remove(&chip->gpio);
 
 err_gpiochip_add:
@@ -462,6 +451,12 @@ err_pci_enable:
 static void pch_gpio_remove(struct pci_dev *pdev)
 {
 	struct pch_gpio *chip = pci_get_drvdata(pdev);
+
+	if (chip->irq_base != -1) {
+		free_irq(pdev->irq, chip);
+
+		irq_free_descs(chip->irq_base, gpio_pins[chip->ioh]);
+	}
 
 	gpiochip_remove(&chip->gpio);
 	pci_iounmap(pdev, chip->base);

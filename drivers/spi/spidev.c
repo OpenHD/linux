@@ -99,6 +99,7 @@ MODULE_PARM_DESC(bufsiz, "data bytes in biggest supported SPI message");
 static ssize_t
 spidev_sync(struct spidev_data *spidev, struct spi_message *message)
 {
+	DECLARE_COMPLETION_ONSTACK(done);
 	int status;
 	struct spi_device *spi;
 
@@ -253,6 +254,10 @@ static int spidev_message(struct spidev_data *spidev,
 				goto done;
 			}
 			k_tmp->rx_buf = rx_buf;
+			if (!access_ok(VERIFY_WRITE, (u8 __user *)
+						(uintptr_t) u_tmp->rx_buf,
+						u_tmp->len))
+				goto done;
 			rx_buf += k_tmp->len;
 		}
 		if (u_tmp->tx_buf) {
@@ -298,16 +303,23 @@ static int spidev_message(struct spidev_data *spidev,
 
 	/* copy any rx data out of bounce buffer */
 	rx_buf = spidev->rx_buffer;
-	for (n = n_xfers, u_tmp = u_xfers; n; n--, u_tmp++) {
+	total = 0;
+	u_tmp = u_xfers;
+	k_tmp = k_xfers;
+	for (n = n_xfers; n; n--) {
 		if (u_tmp->rx_buf) {
-			if (copy_to_user((u8 __user *)
+			if (__copy_to_user((u8 __user *)
 					(uintptr_t) u_tmp->rx_buf, rx_buf,
-					u_tmp->len)) {
+					k_tmp->len)) {
 				status = -EFAULT;
 				goto done;
 			}
-			rx_buf += u_tmp->len;
+			u_tmp->len = k_tmp->len;
+			rx_buf += k_tmp->len;
 		}
+		total += k_tmp->len;
+		u_tmp++;
+		k_tmp++;
 	}
 	status = total;
 
@@ -320,6 +332,7 @@ static struct spi_ioc_transfer *
 spidev_get_ioc_message(unsigned int cmd, struct spi_ioc_transfer __user *u_ioc,
 		unsigned *n_ioc)
 {
+	struct spi_ioc_transfer	*ioc;
 	u32	tmp;
 
 	/* Check type, command number and direction */
@@ -336,12 +349,20 @@ spidev_get_ioc_message(unsigned int cmd, struct spi_ioc_transfer __user *u_ioc,
 		return NULL;
 
 	/* copy into scratch area */
-	return memdup_user(u_ioc, tmp);
+	ioc = kmalloc(tmp, GFP_KERNEL);
+	if (!ioc)
+		return ERR_PTR(-ENOMEM);
+	if (__copy_from_user(ioc, u_ioc, tmp)) {
+		kfree(ioc);
+		return ERR_PTR(-EFAULT);
+	}
+	return ioc;
 }
 
 static long
 spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
+	int			err = 0;
 	int			retval = 0;
 	struct spidev_data	*spidev;
 	struct spi_device	*spi;
@@ -352,6 +373,19 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	/* Check type and command number */
 	if (_IOC_TYPE(cmd) != SPI_IOC_MAGIC)
 		return -ENOTTY;
+
+	/* Check access direction once here; don't repeat below.
+	 * IOC_DIR is from the user perspective, while access_ok is
+	 * from the kernel perspective; so they look reversed.
+	 */
+	if (_IOC_DIR(cmd) & _IOC_READ)
+		err = !access_ok(VERIFY_WRITE,
+				(void __user *)arg, _IOC_SIZE(cmd));
+	if (err == 0 && _IOC_DIR(cmd) & _IOC_WRITE)
+		err = !access_ok(VERIFY_READ,
+				(void __user *)arg, _IOC_SIZE(cmd));
+	if (err)
+		return -EFAULT;
 
 	/* guard against device removal before, or while,
 	 * we issue this ioctl.
@@ -375,31 +409,31 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	/* read requests */
 	case SPI_IOC_RD_MODE:
-		retval = put_user(spi->mode & SPI_MODE_MASK,
+		retval = __put_user(spi->mode & SPI_MODE_MASK,
 					(__u8 __user *)arg);
 		break;
 	case SPI_IOC_RD_MODE32:
-		retval = put_user(spi->mode & SPI_MODE_MASK,
+		retval = __put_user(spi->mode & SPI_MODE_MASK,
 					(__u32 __user *)arg);
 		break;
 	case SPI_IOC_RD_LSB_FIRST:
-		retval = put_user((spi->mode & SPI_LSB_FIRST) ?  1 : 0,
+		retval = __put_user((spi->mode & SPI_LSB_FIRST) ?  1 : 0,
 					(__u8 __user *)arg);
 		break;
 	case SPI_IOC_RD_BITS_PER_WORD:
-		retval = put_user(spi->bits_per_word, (__u8 __user *)arg);
+		retval = __put_user(spi->bits_per_word, (__u8 __user *)arg);
 		break;
 	case SPI_IOC_RD_MAX_SPEED_HZ:
-		retval = put_user(spidev->speed_hz, (__u32 __user *)arg);
+		retval = __put_user(spidev->speed_hz, (__u32 __user *)arg);
 		break;
 
 	/* write requests */
 	case SPI_IOC_WR_MODE:
 	case SPI_IOC_WR_MODE32:
 		if (cmd == SPI_IOC_WR_MODE)
-			retval = get_user(tmp, (u8 __user *)arg);
+			retval = __get_user(tmp, (u8 __user *)arg);
 		else
-			retval = get_user(tmp, (u32 __user *)arg);
+			retval = __get_user(tmp, (u32 __user *)arg);
 		if (retval == 0) {
 			u32	save = spi->mode;
 
@@ -418,7 +452,7 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case SPI_IOC_WR_LSB_FIRST:
-		retval = get_user(tmp, (__u8 __user *)arg);
+		retval = __get_user(tmp, (__u8 __user *)arg);
 		if (retval == 0) {
 			u32	save = spi->mode;
 
@@ -435,7 +469,7 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case SPI_IOC_WR_BITS_PER_WORD:
-		retval = get_user(tmp, (__u8 __user *)arg);
+		retval = __get_user(tmp, (__u8 __user *)arg);
 		if (retval == 0) {
 			u8	save = spi->bits_per_word;
 
@@ -448,7 +482,7 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case SPI_IOC_WR_MAX_SPEED_HZ:
-		retval = get_user(tmp, (__u32 __user *)arg);
+		retval = __get_user(tmp, (__u32 __user *)arg);
 		if (retval == 0) {
 			u32	save = spi->max_speed_hz;
 
@@ -498,6 +532,8 @@ spidev_compat_ioc_message(struct file *filp, unsigned int cmd,
 	struct spi_ioc_transfer		*ioc;
 
 	u_ioc = (struct spi_ioc_transfer __user *) compat_ptr(arg);
+	if (!access_ok(VERIFY_READ, u_ioc, _IOC_SIZE(cmd)))
+		return -EFAULT;
 
 	/* guard against device removal before, or while,
 	 * we issue this ioctl.
@@ -607,15 +643,20 @@ err_find_dev:
 static int spidev_release(struct inode *inode, struct file *filp)
 {
 	struct spidev_data	*spidev;
+	int			dofree;
 
 	mutex_lock(&device_list_lock);
 	spidev = filp->private_data;
 	filp->private_data = NULL;
 
+	spin_lock_irq(&spidev->spi_lock);
+	/* ... after we unbound from the underlying device? */
+	dofree = (spidev->spi == NULL);
+	spin_unlock_irq(&spidev->spi_lock);
+
 	/* last close? */
 	spidev->users--;
 	if (!spidev->users) {
-		int		dofree;
 
 		kfree(spidev->tx_buffer);
 		spidev->tx_buffer = NULL;
@@ -623,19 +664,14 @@ static int spidev_release(struct inode *inode, struct file *filp)
 		kfree(spidev->rx_buffer);
 		spidev->rx_buffer = NULL;
 
-		spin_lock_irq(&spidev->spi_lock);
-		if (spidev->spi)
-			spidev->speed_hz = spidev->spi->max_speed_hz;
-
-		/* ... after we unbound from the underlying device? */
-		dofree = (spidev->spi == NULL);
-		spin_unlock_irq(&spidev->spi_lock);
-
 		if (dofree)
 			kfree(spidev);
+		else
+			spidev->speed_hz = spidev->spi->max_speed_hz;
 	}
 #ifdef CONFIG_SPI_SLAVE
-	spi_slave_abort(spidev->spi);
+	if (!dofree)
+		spi_slave_abort(spidev->spi);
 #endif
 	mutex_unlock(&device_list_lock);
 
@@ -670,8 +706,7 @@ static struct class *spidev_class;
 static const struct of_device_id spidev_dt_ids[] = {
 	{ .compatible = "rohm,dh2228fv" },
 	{ .compatible = "lineartechnology,ltc2488" },
-	{ .compatible = "ge,achc" },
-	{ .compatible = "semtech,sx1301" },
+	{ .compatible = "tegra-spidev" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, spidev_dt_ids);
@@ -727,7 +762,6 @@ static int spidev_probe(struct spi_device *spi)
 	 * compatible string, it is a Linux implementation thing
 	 * rather than a description of the hardware.
 	 */
-	if (0) /* Disable the warning - this feature is too useful */
 	WARN(spi->dev.of_node &&
 	     of_device_is_compatible(spi->dev.of_node, "spidev"),
 	     "%pOF: buggy DT: spidev listed directly in DT\n", spi->dev.of_node);
@@ -783,13 +817,13 @@ static int spidev_remove(struct spi_device *spi)
 {
 	struct spidev_data	*spidev = spi_get_drvdata(spi);
 
+	/* prevent new opens */
+	mutex_lock(&device_list_lock);
 	/* make sure ops on existing fds can abort cleanly */
 	spin_lock_irq(&spidev->spi_lock);
 	spidev->spi = NULL;
 	spin_unlock_irq(&spidev->spi_lock);
 
-	/* prevent new opens */
-	mutex_lock(&device_list_lock);
 	list_del(&spidev->device_entry);
 	device_destroy(spidev_class, spidev->devt);
 	clear_bit(MINOR(spidev->devt), minors);

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Convert integer string representation to an integer.
  * If an integer doesn't fit into specified type, -E is returned.
@@ -18,7 +17,7 @@
 #include <linux/math64.h>
 #include <linux/export.h>
 #include <linux/types.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include "kstrtox.h"
 
 const char *_parse_integer_fixup_radix(const char *s, unsigned int *base)
@@ -52,15 +51,13 @@ unsigned int _parse_integer(const char *s, unsigned int base, unsigned long long
 
 	res = 0;
 	rv = 0;
-	while (1) {
-		unsigned int c = *s;
-		unsigned int lc = c | 0x20; /* don't tolower() this line */
+	while (*s) {
 		unsigned int val;
 
-		if ('0' <= c && c <= '9')
-			val = c - '0';
-		else if ('a' <= lc && lc <= 'f')
-			val = lc - 'a' + 10;
+		if ('0' <= *s && *s <= '9')
+			val = *s - '0';
+		else if ('a' <= _tolower(*s) && _tolower(*s) <= 'f')
+			val = _tolower(*s) - 'a' + 10;
 		else
 			break;
 

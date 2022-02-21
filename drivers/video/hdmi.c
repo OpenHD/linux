@@ -36,6 +36,9 @@ static u8 hdmi_infoframe_checksum(u8 *ptr, size_t size)
 	u8 csum = 0;
 	size_t i;
 
+	if (size <= 0)
+		return csum;
+
 	/* compute checksum */
 	for (i = 0; i < size; i++)
 		csum += ptr[i];
@@ -92,9 +95,6 @@ ssize_t hdmi_avi_infoframe_pack(struct hdmi_avi_infoframe *frame, void *buffer,
 
 	if (size < length)
 		return -ENOSPC;
-
-	if (frame->picture_aspect > HDMI_PICTURE_ASPECT_16_9)
-		return -EINVAL;
 
 	memset(buffer, 0, size);
 
@@ -171,8 +171,8 @@ int hdmi_spd_infoframe_init(struct hdmi_spd_infoframe *frame,
 	frame->version = 1;
 	frame->length = HDMI_SPD_INFOFRAME_SIZE;
 
-	strncpy(frame->vendor, vendor, sizeof(frame->vendor));
-	strncpy(frame->product, product, sizeof(frame->product));
+	strlcpy(frame->vendor, vendor, sizeof(frame->vendor));
+	strlcpy(frame->product, product, sizeof(frame->product));
 
 	return 0;
 }
@@ -541,10 +541,6 @@ hdmi_picture_aspect_get_name(enum hdmi_picture_aspect picture_aspect)
 		return "4:3";
 	case HDMI_PICTURE_ASPECT_16_9:
 		return "16:9";
-	case HDMI_PICTURE_ASPECT_64_27:
-		return "64:27";
-	case HDMI_PICTURE_ASPECT_256_135:
-		return "256:135";
 	case HDMI_PICTURE_ASPECT_RESERVED:
 		return "Reserved";
 	}
@@ -592,10 +588,10 @@ hdmi_extended_colorimetry_get_name(enum hdmi_extended_colorimetry ext_col)
 		return "xvYCC 709";
 	case HDMI_EXTENDED_COLORIMETRY_S_YCC_601:
 		return "sYCC 601";
-	case HDMI_EXTENDED_COLORIMETRY_OPYCC_601:
-		return "opYCC 601";
-	case HDMI_EXTENDED_COLORIMETRY_OPRGB:
-		return "opRGB";
+	case HDMI_EXTENDED_COLORIMETRY_ADOBE_YCC_601:
+		return "Adobe YCC 601";
+	case HDMI_EXTENDED_COLORIMETRY_ADOBE_RGB:
+		return "Adobe RGB";
 	case HDMI_EXTENDED_COLORIMETRY_BT2020_CONST_LUM:
 		return "BT.2020 Constant Luminance";
 	case HDMI_EXTENDED_COLORIMETRY_BT2020:

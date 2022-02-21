@@ -89,6 +89,7 @@ struct ib_rmpp_segment {
 };
 
 struct ib_mad_agent_private {
+	struct list_head agent_list;
 	struct ib_mad_agent agent;
 	struct ib_mad_reg_req *reg_req;
 	struct ib_mad_qp_info *qp_info;
@@ -104,10 +105,7 @@ struct ib_mad_agent_private {
 	struct list_head rmpp_list;
 
 	atomic_t refcount;
-	union {
-		struct completion comp;
-		struct rcu_head rcu;
-	};
+	struct completion comp;
 };
 
 struct ib_mad_snoop_private {
@@ -205,6 +203,7 @@ struct ib_mad_port_private {
 
 	spinlock_t reg_lock;
 	struct ib_mad_mgmt_version_table version[MAX_MGMT_VERSION];
+	struct list_head agent_list;
 	struct workqueue_struct *wq;
 	struct ib_mad_qp_info qp_info[IB_MAD_QPS_CORE];
 };

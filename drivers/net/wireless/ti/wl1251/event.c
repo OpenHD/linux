@@ -84,7 +84,7 @@ static int wl1251_event_ps_report(struct wl1251 *wl,
 		break;
 	}
 
-	return 0;
+	return ret;
 }
 
 static void wl1251_event_mbox_dump(struct event_mailbox *mbox)
@@ -150,7 +150,7 @@ static int wl1251_event_process(struct wl1251 *wl, struct event_mailbox *mbox)
 				     "ROAMING_TRIGGER_LOW_RSSI_EVENT");
 			ieee80211_cqm_rssi_notify(wl->vif,
 				NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW,
-				0, GFP_KERNEL);
+				GFP_KERNEL);
 		}
 
 		if (vector & ROAMING_TRIGGER_REGAINED_RSSI_EVENT_ID) {
@@ -158,7 +158,7 @@ static int wl1251_event_process(struct wl1251 *wl, struct event_mailbox *mbox)
 				     "ROAMING_TRIGGER_REGAINED_RSSI_EVENT");
 			ieee80211_cqm_rssi_notify(wl->vif,
 				NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
-				0, GFP_KERNEL);
+				GFP_KERNEL);
 		}
 	}
 

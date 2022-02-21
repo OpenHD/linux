@@ -391,9 +391,7 @@ static int spdif_probe(struct platform_device *pdev)
 		ret = -ENOENT;
 		goto err0;
 	}
-	ret = clk_prepare_enable(spdif->pclk);
-	if (ret)
-		goto err0;
+	clk_prepare_enable(spdif->pclk);
 
 	spdif->sclk = devm_clk_get(&pdev->dev, "sclk_spdif");
 	if (IS_ERR(spdif->sclk)) {
@@ -401,9 +399,7 @@ static int spdif_probe(struct platform_device *pdev)
 		ret = -ENOENT;
 		goto err1;
 	}
-	ret = clk_prepare_enable(spdif->sclk);
-	if (ret)
-		goto err1;
+	clk_prepare_enable(spdif->sclk);
 
 	/* Request S/PDIF Register's memory region */
 	if (!request_mem_region(mem_res->start,

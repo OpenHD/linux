@@ -55,7 +55,7 @@
 #include <linux/nsproxy.h>
 #include <linux/rcupdate.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "nfs4_fs.h"
 #include "callback.h"
@@ -531,32 +531,39 @@ static void nfs_show_mountd_netid(struct seq_file *m, struct nfs_server *nfss,
 				  int showdefaults)
 {
 	struct sockaddr *sap = (struct sockaddr *) &nfss->mountd_address;
-	char *proto = NULL;
 
+	seq_printf(m, ",mountproto=");
 	switch (sap->sa_family) {
 	case AF_INET:
 		switch (nfss->mountd_protocol) {
 		case IPPROTO_UDP:
-			proto = RPCBIND_NETID_UDP;
+			seq_printf(m, RPCBIND_NETID_UDP);
 			break;
 		case IPPROTO_TCP:
-			proto = RPCBIND_NETID_TCP;
+			seq_printf(m, RPCBIND_NETID_TCP);
 			break;
+		default:
+			if (showdefaults)
+				seq_printf(m, "auto");
 		}
 		break;
 	case AF_INET6:
 		switch (nfss->mountd_protocol) {
 		case IPPROTO_UDP:
-			proto = RPCBIND_NETID_UDP6;
+			seq_printf(m, RPCBIND_NETID_UDP6);
 			break;
 		case IPPROTO_TCP:
-			proto = RPCBIND_NETID_TCP6;
+			seq_printf(m, RPCBIND_NETID_TCP6);
 			break;
+		default:
+			if (showdefaults)
+				seq_printf(m, "auto");
 		}
 		break;
+	default:
+		if (showdefaults)
+			seq_printf(m, "auto");
 	}
-	if (proto || showdefaults)
-		seq_printf(m, ",mountproto=%s", proto ?: "auto");
 }
 
 static void nfs_show_mountd_options(struct seq_file *m, struct nfs_server *nfss,
@@ -812,10 +819,10 @@ int nfs_show_stats(struct seq_file *m, struct dentry *root)
 	 * Display all mount option settings
 	 */
 	seq_printf(m, "\n\topts:\t");
-	seq_puts(m, sb_rdonly(root->d_sb) ? "ro" : "rw");
-	seq_puts(m, root->d_sb->s_flags & SB_SYNCHRONOUS ? ",sync" : "");
-	seq_puts(m, root->d_sb->s_flags & SB_NOATIME ? ",noatime" : "");
-	seq_puts(m, root->d_sb->s_flags & SB_NODIRATIME ? ",nodiratime" : "");
+	seq_puts(m, root->d_sb->s_flags & MS_RDONLY ? "ro" : "rw");
+	seq_puts(m, root->d_sb->s_flags & MS_SYNCHRONOUS ? ",sync" : "");
+	seq_puts(m, root->d_sb->s_flags & MS_NOATIME ? ",noatime" : "");
+	seq_puts(m, root->d_sb->s_flags & MS_NODIRATIME ? ",nodiratime" : "");
 	nfs_show_mount_options(m, nfss, 1);
 
 	seq_printf(m, "\n\tage:\t%lu", (jiffies - nfss->mount_time) / HZ);
@@ -879,12 +886,12 @@ int nfs_show_stats(struct seq_file *m, struct dentry *root)
 	if (nfss->options & NFS_OPTION_FSCACHE) {
 		seq_printf(m, "\n\tfsc:\t");
 		for (i = 0; i < __NFSIOS_FSCACHEMAX; i++)
-			seq_printf(m, "%Lu ", totals.fscache[i]);
+			seq_printf(m, "%Lu ", totals.bytes[i]);
 	}
 #endif
 	seq_printf(m, "\n");
 
-	rpc_clnt_show_stats(m, nfss->client);
+	rpc_print_iostats(m, nfss->client);
 
 	return 0;
 }
@@ -1456,21 +1463,18 @@ static int nfs_parse_mount_options(char *raw,
 			switch (token) {
 			case Opt_xprt_udp6:
 				protofamily = AF_INET6;
-				/* fall through */
 			case Opt_xprt_udp:
 				mnt->flags &= ~NFS_MOUNT_TCP;
 				mnt->nfs_server.protocol = XPRT_TRANSPORT_UDP;
 				break;
 			case Opt_xprt_tcp6:
 				protofamily = AF_INET6;
-				/* fall through */
 			case Opt_xprt_tcp:
 				mnt->flags |= NFS_MOUNT_TCP;
 				mnt->nfs_server.protocol = XPRT_TRANSPORT_TCP;
 				break;
 			case Opt_xprt_rdma6:
 				protofamily = AF_INET6;
-				/* fall through */
 			case Opt_xprt_rdma:
 				/* vector side protocols to TCP */
 				mnt->flags |= NFS_MOUNT_TCP;
@@ -1497,13 +1501,11 @@ static int nfs_parse_mount_options(char *raw,
 			switch (token) {
 			case Opt_xprt_udp6:
 				mountfamily = AF_INET6;
-				/* fall through */
 			case Opt_xprt_udp:
 				mnt->mount_server.protocol = XPRT_TRANSPORT_UDP;
 				break;
 			case Opt_xprt_tcp6:
 				mountfamily = AF_INET6;
-				/* fall through */
 			case Opt_xprt_tcp:
 				mnt->mount_server.protocol = XPRT_TRANSPORT_TCP;
 				break;
@@ -1696,8 +1698,8 @@ static int nfs_verify_authflavors(struct nfs_parsed_mount_data *args,
 			rpc_authflavor_t *server_authlist, unsigned int count)
 {
 	rpc_authflavor_t flavor = RPC_AUTH_MAXFLAVOR;
-	bool found_auth_null = false;
 	unsigned int i;
+	int use_auth_null = false;
 
 	/*
 	 * If the sec= mount option is used, the specified flavor or AUTH_NULL
@@ -1706,10 +1708,6 @@ static int nfs_verify_authflavors(struct nfs_parsed_mount_data *args,
 	 * AUTH_NULL has a special meaning when it's in the server list - it
 	 * means that the server will ignore the rpc creds, so any flavor
 	 * can be used but still use the sec= that was specified.
-	 *
-	 * Note also that the MNT procedure in MNTv1 does not return a list
-	 * of supported security flavors. In this case, nfs_mount() fabricates
-	 * a security flavor list containing just AUTH_NULL.
 	 */
 	for (i = 0; i < count; i++) {
 		flavor = server_authlist[i];
@@ -1718,11 +1716,11 @@ static int nfs_verify_authflavors(struct nfs_parsed_mount_data *args,
 			goto out;
 
 		if (flavor == RPC_AUTH_NULL)
-			found_auth_null = true;
+			use_auth_null = true;
 	}
 
-	if (found_auth_null) {
-		flavor = args->auth_info.flavors[0];
+	if (use_auth_null) {
+		flavor = RPC_AUTH_NULL;
 		goto out;
 	}
 
@@ -1998,9 +1996,9 @@ static int nfs23_validate_mount_data(void *options,
 	args->version = NFS_DEFAULT_VERSION;
 	switch (data->version) {
 	case 1:
-		data->namlen = 0; /* fall through */
+		data->namlen = 0;
 	case 2:
-		data->bsize = 0; /* fall through */
+		data->bsize = 0;
 	case 3:
 		if (data->flags & NFS_MOUNT_VER3)
 			goto out_no_v3;
@@ -2008,14 +2006,11 @@ static int nfs23_validate_mount_data(void *options,
 		memcpy(data->root.data, data->old_root.data, NFS2_FHSIZE);
 		/* Turn off security negotiation */
 		extra_flags |= NFS_MOUNT_SECFLAVOUR;
-		/* fall through */
 	case 4:
 		if (data->flags & NFS_MOUNT_SECFLAVOUR)
 			goto out_no_sec;
-		/* fall through */
 	case 5:
 		memset(data->context, 0, sizeof(data->context));
-		/* fall through */
 	case 6:
 		if (data->flags & NFS_MOUNT_VER3) {
 			if (data->root.size > NFS3_FHSIZE || data->root.size == 0)
@@ -2239,7 +2234,6 @@ nfs_compare_remount_data(struct nfs_server *nfss,
 	    data->acdirmin != nfss->acdirmin / HZ ||
 	    data->acdirmax != nfss->acdirmax / HZ ||
 	    data->timeo != (10U * nfss->client->cl_timeout->to_initval / HZ) ||
-	    (data->options & NFS_OPTION_FSCACHE) != (nfss->options & NFS_OPTION_FSCACHE) ||
 	    data->nfs_server.port != nfss->port ||
 	    data->nfs_server.addrlen != nfss->nfs_client->cl_addrlen ||
 	    !rpc_cmp_addr((struct sockaddr *)&data->nfs_server.address,
@@ -2303,11 +2297,11 @@ nfs_remount(struct super_block *sb, int *flags, char *raw_data)
 	/*
 	 * noac is a special case. It implies -o sync, but that's not
 	 * necessarily reflected in the mtab options. do_remount_sb
-	 * will clear SB_SYNCHRONOUS if -o sync wasn't specified in the
+	 * will clear MS_SYNCHRONOUS if -o sync wasn't specified in the
 	 * remount options, so we have to explicitly reset it.
 	 */
 	if (data->flags & NFS_MOUNT_NOAC)
-		*flags |= SB_SYNCHRONOUS;
+		*flags |= MS_SYNCHRONOUS;
 
 	/* compare new mount options with old ones */
 	error = nfs_compare_remount_data(nfss, data);
@@ -2320,7 +2314,7 @@ EXPORT_SYMBOL_GPL(nfs_remount);
 /*
  * Initialise the common bits of the superblock
  */
-static void nfs_initialise_sb(struct super_block *sb)
+inline void nfs_initialise_sb(struct super_block *sb)
 {
 	struct nfs_server *server = NFS_SB(sb);
 
@@ -2333,6 +2327,8 @@ static void nfs_initialise_sb(struct super_block *sb)
 	if (sb->s_blocksize == 0)
 		sb->s_blocksize = nfs_block_bits(server->wsize,
 						 &sb->s_blocksize_bits);
+
+	sb->s_bdi = &server->backing_dev_info;
 
 	nfs_super_set_maxbytes(sb, server->maxfilesize);
 }
@@ -2356,9 +2352,8 @@ void nfs_fill_super(struct super_block *sb, struct nfs_mount_info *mount_info)
 		/* The VFS shouldn't apply the umask to mode bits. We will do
 		 * so ourselves when necessary.
 		 */
-		sb->s_flags |= SB_POSIXACL;
+		sb->s_flags |= MS_POSIXACL;
 		sb->s_time_gran = 1;
-		sb->s_export_op = &nfs_export_ops;
 	}
 
  	nfs_initialise_sb(sb);
@@ -2368,8 +2363,7 @@ EXPORT_SYMBOL_GPL(nfs_fill_super);
 /*
  * Finish setting up a cloned NFS2/3/4 superblock
  */
-static void nfs_clone_super(struct super_block *sb,
-			    struct nfs_mount_info *mount_info)
+void nfs_clone_super(struct super_block *sb, struct nfs_mount_info *mount_info)
 {
 	const struct super_block *old_sb = mount_info->cloned->sb;
 	struct nfs_server *server = NFS_SB(sb);
@@ -2380,13 +2374,12 @@ static void nfs_clone_super(struct super_block *sb,
 	sb->s_xattr = old_sb->s_xattr;
 	sb->s_op = old_sb->s_op;
 	sb->s_time_gran = 1;
-	sb->s_export_op = old_sb->s_export_op;
 
 	if (server->nfs_client->rpc_ops->version != 2) {
 		/* The VFS shouldn't apply the umask to mode bits. We will do
 		 * so ourselves when necessary.
 		 */
-		sb->s_flags |= SB_POSIXACL;
+		sb->s_flags |= MS_POSIXACL;
 	}
 
  	nfs_initialise_sb(sb);
@@ -2541,6 +2534,11 @@ static void nfs_get_cache_cookie(struct super_block *sb,
 }
 #endif
 
+static int nfs_bdi_register(struct nfs_server *server)
+{
+	return bdi_register_dev(&server->backing_dev_info, server->s_dev);
+}
+
 int nfs_set_sb_security(struct super_block *s, struct dentry *mntroot,
 			struct nfs_mount_info *mount_info)
 {
@@ -2565,25 +2563,10 @@ EXPORT_SYMBOL_GPL(nfs_set_sb_security);
 int nfs_clone_sb_security(struct super_block *s, struct dentry *mntroot,
 			  struct nfs_mount_info *mount_info)
 {
-	int error;
-	unsigned long kflags = 0, kflags_out = 0;
-
 	/* clone any lsm security options from the parent to the new sb */
 	if (d_inode(mntroot)->i_op != NFS_SB(s)->nfs_client->rpc_ops->dir_inode_ops)
 		return -ESTALE;
-
-	if (NFS_SB(s)->caps & NFS_CAP_SECURITY_LABEL)
-		kflags |= SECURITY_LSM_NATIVE_LABELS;
-
-	error = security_sb_clone_mnt_opts(mount_info->cloned->sb, s, kflags,
-			&kflags_out);
-	if (error)
-		return error;
-
-	if (NFS_SB(s)->caps & NFS_CAP_SECURITY_LABEL &&
-		!(kflags_out & SECURITY_LSM_NATIVE_LABELS))
-		NFS_SB(s)->caps &= ~NFS_CAP_SECURITY_LABEL;
-	return 0;
+	return security_sb_clone_mnt_opts(mount_info->cloned->sb, s);
 }
 EXPORT_SYMBOL_GPL(nfs_clone_sb_security);
 
@@ -2606,11 +2589,11 @@ struct dentry *nfs_fs_mount_common(struct nfs_server *server,
 
 	/* -o noac implies -o sync */
 	if (server->flags & NFS_MOUNT_NOAC)
-		sb_mntdata.mntflags |= SB_SYNCHRONOUS;
+		sb_mntdata.mntflags |= MS_SYNCHRONOUS;
 
 	if (mount_info->cloned != NULL && mount_info->cloned->sb != NULL)
-		if (mount_info->cloned->sb->s_flags & SB_SYNCHRONOUS)
-			sb_mntdata.mntflags |= SB_SYNCHRONOUS;
+		if (mount_info->cloned->sb->s_flags & MS_SYNCHRONOUS)
+			sb_mntdata.mntflags |= MS_SYNCHRONOUS;
 
 	/* Get a superblock - note that we may end up sharing one that already exists */
 	s = sget(nfs_mod->nfs_fs, compare_super, nfs_set_super, flags, &sb_mntdata);
@@ -2623,13 +2606,11 @@ struct dentry *nfs_fs_mount_common(struct nfs_server *server,
 		nfs_free_server(server);
 		server = NULL;
 	} else {
-		error = super_setup_bdi_name(s, "%u:%u", MAJOR(server->s_dev),
-					     MINOR(server->s_dev));
+		error = nfs_bdi_register(server);
 		if (error) {
 			mntroot = ERR_PTR(error);
 			goto error_splat_super;
 		}
-		s->s_bdi->ra_pages = server->rpages * NFS_MAX_READAHEAD;
 		server->super = s;
 	}
 
@@ -2649,7 +2630,7 @@ struct dentry *nfs_fs_mount_common(struct nfs_server *server,
 	if (error)
 		goto error_splat_root;
 
-	s->s_flags |= SB_ACTIVE;
+	s->s_flags |= MS_ACTIVE;
 
 out:
 	return mntroot;
@@ -2905,7 +2886,7 @@ static int param_set_portnr(const char *val, const struct kernel_param *kp)
 	if (!val)
 		return -EINVAL;
 	ret = kstrtoul(val, 0, &num);
-	if (ret || num > NFS_CALLBACK_MAXPORTNR)
+	if (ret == -EINVAL || num > NFS_CALLBACK_MAXPORTNR)
 		return -EINVAL;
 	*((unsigned int *)kp->arg) = num;
 	return 0;

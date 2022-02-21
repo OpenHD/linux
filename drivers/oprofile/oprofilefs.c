@@ -15,7 +15,7 @@
 #include <linux/oprofile.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "oprof.h"
 
@@ -137,9 +137,6 @@ static int __oprofilefs_create_file(struct dentry *root, char const *name,
 {
 	struct dentry *dentry;
 	struct inode *inode;
-
-	if (!root)
-		return -ENOMEM;
 
 	inode_lock(d_inode(root));
 	dentry = d_alloc_name(root, name);

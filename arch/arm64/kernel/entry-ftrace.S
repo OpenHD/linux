@@ -10,7 +10,6 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/assembler.h>
 #include <asm/ftrace.h>
 #include <asm/insn.h>
 
@@ -98,7 +97,8 @@
 ENTRY(_mcount)
 	mcount_enter
 
-	ldr_l	x2, ftrace_trace_function
+	adrp	x0, ftrace_trace_function
+	ldr	x2, [x0, #:lo12:ftrace_trace_function]
 	adr	x0, ftrace_stub
 	cmp	x0, x2			// if (ftrace_trace_function
 	b.eq	skip_ftrace_call	//     != ftrace_stub) {
@@ -107,18 +107,27 @@ ENTRY(_mcount)
 	mcount_get_lr	x1		//       function's lr (= parent's pc)
 	blr	x2			//   (*ftrace_trace_function)(pc, lr);
 
-skip_ftrace_call:			// }
-#ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	ldr_l	x2, ftrace_graph_return
+#ifndef CONFIG_FUNCTION_GRAPH_TRACER
+skip_ftrace_call:			//   return;
+	mcount_exit			// }
+#else
+	mcount_exit			//   return;
+					// }
+skip_ftrace_call:
+	adrp	x1, ftrace_graph_return
+	ldr	x2, [x1, #:lo12:ftrace_graph_return]
 	cmp	x0, x2			//   if ((ftrace_graph_return
 	b.ne	ftrace_graph_caller	//        != ftrace_stub)
 
-	ldr_l	x2, ftrace_graph_entry	//     || (ftrace_graph_entry
-	adr_l	x0, ftrace_graph_entry_stub //     != ftrace_graph_entry_stub))
+	adrp	x1, ftrace_graph_entry	//     || (ftrace_graph_entry
+	adrp	x0, ftrace_graph_entry_stub //     != ftrace_graph_entry_stub))
+	ldr	x2, [x1, #:lo12:ftrace_graph_entry]
+	add	x0, x0, #:lo12:ftrace_graph_entry_stub
 	cmp	x0, x2
 	b.ne	ftrace_graph_caller	//     ftrace_graph_caller();
-#endif /* CONFIG_FUNCTION_GRAPH_TRACER */
+
 	mcount_exit
+#endif /* CONFIG_FUNCTION_GRAPH_TRACER */
 ENDPROC(_mcount)
 
 #else /* CONFIG_DYNAMIC_FTRACE */

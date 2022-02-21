@@ -1,13 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * USB Serial Converter Generic functions
  *
  * Copyright (C) 2010 - 2013 Johan Hovold (jhovold@gmail.com)
  * Copyright (C) 1999 - 2002 Greg Kroah-Hartman (greg@kroah.com)
+ *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License version
+ *	2 as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/sysrq.h>
@@ -34,41 +36,13 @@ MODULE_PARM_DESC(product, "User specified USB idProduct");
 
 static struct usb_device_id generic_device_ids[2]; /* Initially all zeroes. */
 
-static int usb_serial_generic_probe(struct usb_serial *serial,
-					const struct usb_device_id *id)
-{
-	struct device *dev = &serial->interface->dev;
-
-	dev_info(dev, "The \"generic\" usb-serial driver is only for testing and one-off prototypes.\n");
-	dev_info(dev, "Tell linux-usb@vger.kernel.org to add your device to a proper driver.\n");
-
-	return 0;
-}
-
-static int usb_serial_generic_calc_num_ports(struct usb_serial *serial,
-					struct usb_serial_endpoints *epds)
-{
-	struct device *dev = &serial->interface->dev;
-	int num_ports;
-
-	num_ports = max(epds->num_bulk_in, epds->num_bulk_out);
-
-	if (num_ports == 0) {
-		dev_err(dev, "device has no bulk endpoints\n");
-		return -ENODEV;
-	}
-
-	return num_ports;
-}
-
-static struct usb_serial_driver usb_serial_generic_device = {
+struct usb_serial_driver usb_serial_generic_device = {
 	.driver = {
 		.owner =	THIS_MODULE,
 		.name =		"generic",
 	},
 	.id_table =		generic_device_ids,
-	.probe =		usb_serial_generic_probe,
-	.calc_num_ports =	usb_serial_generic_calc_num_ports,
+	.num_ports =		1,
 	.throttle =		usb_serial_generic_throttle,
 	.unthrottle =		usb_serial_generic_unthrottle,
 	.resume =		usb_serial_generic_resume,
@@ -175,6 +149,11 @@ retry:
 	i = (int)find_first_bit(&port->write_urbs_free,
 						ARRAY_SIZE(port->write_urbs));
 	spin_unlock_irqrestore(&port->lock, flags);
+
+	if ((i < 0) || (i >= ARRAY_SIZE(port->write_urbs))) {
+		dev_err_console(port, "%s - no bits are set\n", __func__);
+		return -EINVAL;
+	}
 
 	urb = port->write_urbs[i];
 	count = port->serial->type->prepare_write_buffer(port,

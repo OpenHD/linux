@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Standard Hot Plug Controller Driver
  *
@@ -8,6 +7,21 @@
  * Copyright (C) 2003-2004 Intel Corporation
  *
  * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or (at
+ * your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ * NON INFRINGEMENT.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Send feedback to <greg@kroah.com>, <kristen.c.accardi@intel.com>
  *
@@ -61,6 +75,22 @@ static struct hotplug_slot_ops shpchp_hotplug_slot_ops = {
 	.get_adapter_status =	get_adapter_status,
 };
 
+/**
+ * release_slot - free up the memory used by a slot
+ * @hotplug_slot: slot to free
+ */
+static void release_slot(struct hotplug_slot *hotplug_slot)
+{
+	struct slot *slot = hotplug_slot->private;
+
+	ctrl_dbg(slot->ctrl, "%s: physical_slot = %s\n",
+		 __func__, slot_name(slot));
+
+	kfree(slot->hotplug_slot->info);
+	kfree(slot->hotplug_slot);
+	kfree(slot);
+}
+
 static int init_slots(struct controller *ctrl)
 {
 	struct slot *slot;
@@ -109,6 +139,7 @@ static int init_slots(struct controller *ctrl)
 
 		/* register this slot with the hotplug pci core */
 		hotplug_slot->private = slot;
+		hotplug_slot->release = &release_slot;
 		snprintf(name, SLOT_NAME_SIZE, "%d", slot->number);
 		hotplug_slot->ops = &shpchp_hotplug_slot_ops;
 
@@ -154,9 +185,6 @@ void cleanup_slots(struct controller *ctrl)
 		cancel_delayed_work(&slot->work);
 		destroy_workqueue(slot->wq);
 		pci_hp_deregister(slot->hotplug_slot);
-		kfree(slot->hotplug_slot->info);
-		kfree(slot->hotplug_slot);
-		kfree(slot);
 	}
 }
 
@@ -256,20 +284,16 @@ static int get_adapter_status(struct hotplug_slot *hotplug_slot, u8 *value)
 	return 0;
 }
 
-static bool shpc_capable(struct pci_dev *bridge)
+static int is_shpc_capable(struct pci_dev *dev)
 {
-	/*
-	 * It is assumed that AMD GOLAM chips support SHPC but they do not
-	 * have SHPC capability.
-	 */
-	if (bridge->vendor == PCI_VENDOR_ID_AMD &&
-	    bridge->device == PCI_DEVICE_ID_AMD_GOLAM_7450)
-		return true;
-
-	if (pci_find_capability(bridge, PCI_CAP_ID_SHPC))
-		return true;
-
-	return false;
+	if (dev->vendor == PCI_VENDOR_ID_AMD &&
+	    dev->device == PCI_DEVICE_ID_AMD_GOLAM_7450)
+		return 1;
+	if (!pci_find_capability(dev, PCI_CAP_ID_SHPC))
+		return 0;
+	if (get_hp_hw_control_from_firmware(dev))
+		return 0;
+	return 1;
 }
 
 static int shpc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -277,16 +301,14 @@ static int shpc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int rc;
 	struct controller *ctrl;
 
-	if (!shpc_capable(pdev))
-		return -ENODEV;
-
-	if (acpi_get_hp_hw_control_from_firmware(pdev))
+	if (!is_shpc_capable(pdev))
 		return -ENODEV;
 
 	ctrl = kzalloc(sizeof(*ctrl), GFP_KERNEL);
-	if (!ctrl)
+	if (!ctrl) {
+		dev_err(&pdev->dev, "%s: Out of memory\n", __func__);
 		goto err_out_none;
-
+	}
 	INIT_LIST_HEAD(&ctrl->slot_list);
 
 	rc = shpc_init(ctrl, pdev);
@@ -308,7 +330,6 @@ static int shpc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (rc)
 		goto err_cleanup_slots;
 
-	pdev->shpc_managed = 1;
 	return 0;
 
 err_cleanup_slots:
@@ -325,13 +346,12 @@ static void shpc_remove(struct pci_dev *dev)
 {
 	struct controller *ctrl = pci_get_drvdata(dev);
 
-	dev->shpc_managed = 0;
 	shpchp_remove_ctrl_files(ctrl);
 	ctrl->hpc_ops->release_ctlr(ctrl);
 	kfree(ctrl);
 }
 
-static const struct pci_device_id shpcd_pci_tbl[] = {
+static struct pci_device_id shpcd_pci_tbl[] = {
 	{PCI_DEVICE_CLASS(((PCI_CLASS_BRIDGE_PCI << 8) | 0x00), ~0)},
 	{ /* end: all zeroes */ }
 };

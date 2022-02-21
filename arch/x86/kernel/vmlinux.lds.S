@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ld script for the x86 kernel
  *
@@ -25,7 +24,6 @@
 #include <asm/asm-offsets.h>
 #include <asm/thread_info.h>
 #include <asm/page_types.h>
-#include <asm/orc_lookup.h>
 #include <asm/cache.h>
 #include <asm/boot.h>
 
@@ -36,12 +34,12 @@ OUTPUT_FORMAT(CONFIG_OUTPUT_FORMAT, CONFIG_OUTPUT_FORMAT, CONFIG_OUTPUT_FORMAT)
 #ifdef CONFIG_X86_32
 OUTPUT_ARCH(i386)
 ENTRY(phys_startup_32)
-jiffies = jiffies_64;
 #else
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(phys_startup_64)
-jiffies_64 = jiffies;
 #endif
+
+jiffies = jiffies_64;
 
 #if defined(CONFIG_X86_64)
 /*
@@ -55,43 +53,16 @@ jiffies_64 = jiffies;
  * so we can enable protection checks as well as retain 2MB large page
  * mappings for kernel text.
  */
-#define X86_ALIGN_RODATA_BEGIN	. = ALIGN(HPAGE_SIZE);
+#define X64_ALIGN_RODATA_BEGIN	. = ALIGN(HPAGE_SIZE);
 
-#define X86_ALIGN_RODATA_END					\
+#define X64_ALIGN_RODATA_END					\
 		. = ALIGN(HPAGE_SIZE);				\
-		__end_rodata_hpage_align = .;			\
-		__end_rodata_aligned = .;
-
-#define ALIGN_ENTRY_TEXT_BEGIN	. = ALIGN(PMD_SIZE);
-#define ALIGN_ENTRY_TEXT_END	. = ALIGN(PMD_SIZE);
-
-/*
- * This section contains data which will be mapped as decrypted. Memory
- * encryption operates on a page basis. Make this section PMD-aligned
- * to avoid splitting the pages while mapping the section early.
- *
- * Note: We use a separate section so that only this section gets
- * decrypted to avoid exposing more than we wish.
- */
-#define BSS_DECRYPTED						\
-	. = ALIGN(PMD_SIZE);					\
-	__start_bss_decrypted = .;				\
-	*(.bss..decrypted);					\
-	. = ALIGN(PAGE_SIZE);					\
-	__start_bss_decrypted_unused = .;			\
-	. = ALIGN(PMD_SIZE);					\
-	__end_bss_decrypted = .;				\
+		__end_rodata_hpage_align = .;
 
 #else
 
-#define X86_ALIGN_RODATA_BEGIN
-#define X86_ALIGN_RODATA_END					\
-		. = ALIGN(PAGE_SIZE);				\
-		__end_rodata_aligned = .;
-
-#define ALIGN_ENTRY_TEXT_BEGIN
-#define ALIGN_ENTRY_TEXT_END
-#define BSS_DECRYPTED
+#define X64_ALIGN_RODATA_BEGIN
+#define X64_ALIGN_RODATA_END
 
 #endif
 
@@ -120,31 +91,20 @@ SECTIONS
 	/* Text and read-only data */
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
 		_text = .;
-		_stext = .;
 		/* bootstrapping code */
 		HEAD_TEXT
+		. = ALIGN(8);
+		_stext = .;
 		TEXT_TEXT
 		SCHED_TEXT
 		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
-		ALIGN_ENTRY_TEXT_BEGIN
 		ENTRY_TEXT
 		IRQENTRY_TEXT
-		ALIGN_ENTRY_TEXT_END
 		SOFTIRQENTRY_TEXT
 		*(.fixup)
 		*(.gnu.warning)
-
-#ifdef CONFIG_X86_64
-		. = ALIGN(PAGE_SIZE);
-		__entry_trampoline_start = .;
-		_entry_trampoline = .;
-		*(.entry_trampoline)
-		. = ALIGN(PAGE_SIZE);
-		__entry_trampoline_end = .;
-		ASSERT(. - _entry_trampoline == PAGE_SIZE, "entry trampoline is too big");
-#endif
 
 #ifdef CONFIG_RETPOLINE
 		__indirect_thunk_start = .;
@@ -162,9 +122,9 @@ SECTIONS
 
 	/* .text should occupy whole number of pages */
 	. = ALIGN(PAGE_SIZE);
-	X86_ALIGN_RODATA_BEGIN
+	X64_ALIGN_RODATA_BEGIN
 	RO_DATA(PAGE_SIZE)
-	X86_ALIGN_RODATA_END
+	X64_ALIGN_RODATA_END
 
 	/* Data */
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {
@@ -193,9 +153,6 @@ SECTIONS
 		_edata = .;
 	} :data
 
-	BUG_TABLE
-
-	ORC_UNWIND_TABLE
 
 	. = ALIGN(PAGE_SIZE);
 	__vvar_page = .;
@@ -220,7 +177,7 @@ SECTIONS
 		. = __vvar_beginning_hack + PAGE_SIZE;
 	} :data
 
-	. = ALIGN(__vvar_page + PAGE_SIZE, PAGE_SIZE);
+       . = ALIGN(__vvar_page + PAGE_SIZE, PAGE_SIZE);
 
 	/* Init code and data - will be freed after init */
 	. = ALIGN(PAGE_SIZE);
@@ -372,8 +329,8 @@ SECTIONS
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {
 		__bss_start = .;
 		*(.bss..page_aligned)
+		. = ALIGN(PAGE_SIZE);
 		*(BSS_MAIN)
-		BSS_DECRYPTED
 		. = ALIGN(PAGE_SIZE);
 		__bss_stop = .;
 	}
@@ -389,8 +346,8 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);		/* keep VO_INIT_SIZE page aligned */
 	_end = .;
 
-	STABS_DEBUG
-	DWARF_DEBUG
+        STABS_DEBUG
+        DWARF_DEBUG
 
 	/* Sections to be discarded */
 	DISCARDS

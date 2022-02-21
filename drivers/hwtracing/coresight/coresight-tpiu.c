@@ -1,8 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight Trace Port Interface Unit driver
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -161,8 +168,10 @@ static int tpiu_probe(struct amba_device *adev, const struct amba_id *id)
 	desc.pdata = pdata;
 	desc.dev = dev;
 	drvdata->csdev = coresight_register(&desc);
+	if (IS_ERR(drvdata->csdev))
+		return PTR_ERR(drvdata->csdev);
 
-	return PTR_ERR_OR_ZERO(drvdata->csdev);
+	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -191,19 +200,14 @@ static const struct dev_pm_ops tpiu_dev_pm_ops = {
 	SET_RUNTIME_PM_OPS(tpiu_runtime_suspend, tpiu_runtime_resume, NULL)
 };
 
-static const struct amba_id tpiu_ids[] = {
+static struct amba_id tpiu_ids[] = {
 	{
-		.id	= 0x000bb912,
-		.mask	= 0x000fffff,
+		.id	= 0x0003b912,
+		.mask	= 0x0003ffff,
 	},
 	{
 		.id	= 0x0004b912,
 		.mask	= 0x0007ffff,
-	},
-	{
-		/* Coresight SoC-600 */
-		.id	= 0x000bb9e7,
-		.mask	= 0x000fffff,
 	},
 	{ 0, 0},
 };

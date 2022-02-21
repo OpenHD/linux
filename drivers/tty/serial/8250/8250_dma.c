@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * 8250_dma.c - DMA Engine API support for 8250.c
  *
  * Copyright (C) 2013 Intel Corporation
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
@@ -68,14 +72,9 @@ int serial8250_tx_dma(struct uart_8250_port *p)
 	struct dma_async_tx_descriptor	*desc;
 	int ret;
 
-	if (dma->tx_running)
+	if (uart_tx_stopped(&p->port) || dma->tx_running ||
+	    uart_circ_empty(xmit))
 		return 0;
-
-	if (uart_tx_stopped(&p->port) || uart_circ_empty(xmit)) {
-		/* We have been called from __dma_tx_complete() */
-		serial8250_rpm_put_tx(p);
-		return 0;
-	}
 
 	dma->tx_size = CIRC_CNT_TO_END(xmit->head, xmit->tail, UART_XMIT_SIZE);
 

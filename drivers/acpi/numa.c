@@ -70,7 +70,7 @@ int acpi_map_pxm_to_node(int pxm)
 {
 	int node;
 
-	if (pxm < 0 || pxm >= MAX_PXM_DOMAINS || numa_off)
+	if (pxm < 0 || pxm >= MAX_PXM_DOMAINS)
 		return NUMA_NO_NODE;
 
 	node = pxm_to_node_map[pxm];
@@ -445,7 +445,7 @@ int __init acpi_numa_init(void)
 	 * So go over all cpu entries in SRAT to get apicid to node mapping.
 	 */
 
-	/* SRAT: System Resource Affinity Table */
+	/* SRAT: Static Resource Affinity Table */
 	if (!acpi_table_parse(ACPI_SIG_SRAT, acpi_parse_srat)) {
 		struct acpi_subtable_proc srat_proc[3];
 
@@ -462,7 +462,8 @@ int __init acpi_numa_init(void)
 					srat_proc, ARRAY_SIZE(srat_proc), 0);
 
 		cnt = acpi_table_parse_srat(ACPI_SRAT_TYPE_MEMORY_AFFINITY,
-					    acpi_parse_memory_affinity, 0);
+					    acpi_parse_memory_affinity,
+					    NR_NODE_MEMBLKS);
 	}
 
 	/* SLIT: System Locality Information Table */

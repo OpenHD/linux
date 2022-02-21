@@ -53,7 +53,7 @@
  * other sizes not listed here.   The .ind field is only used on MMUs that have
  * indirect page table entries.
  */
-#if defined(CONFIG_PPC_BOOK3E_MMU) || defined(CONFIG_PPC_8xx)
+#ifdef CONFIG_PPC_BOOK3E_MMU
 #ifdef CONFIG_PPC_FSL_BOOK3E
 struct mmu_psize_def mmu_psize_defs[MMU_PAGE_COUNT] = {
 	[MMU_PAGE_4K] = {
@@ -83,25 +83,6 @@ struct mmu_psize_def mmu_psize_defs[MMU_PAGE_COUNT] = {
 	[MMU_PAGE_1G] = {
 		.shift	= 30,
 		.enc	= BOOK3E_PAGESZ_1GB,
-	},
-};
-#elif defined(CONFIG_PPC_8xx)
-struct mmu_psize_def mmu_psize_defs[MMU_PAGE_COUNT] = {
-	/* we only manage 4k and 16k pages as normal pages */
-#ifdef CONFIG_PPC_4K_PAGES
-	[MMU_PAGE_4K] = {
-		.shift	= 12,
-	},
-#else
-	[MMU_PAGE_16K] = {
-		.shift	= 14,
-	},
-#endif
-	[MMU_PAGE_512K] = {
-		.shift	= 19,
-	},
-	[MMU_PAGE_8M] = {
-		.shift	= 23,
 	},
 };
 #else
@@ -388,10 +369,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		     unsigned long end)
 
 {
-	if (end - start == PAGE_SIZE && !(start & ~PAGE_MASK))
-		flush_tlb_page(vma, start);
-	else
-		flush_tlb_mm(vma->vm_mm);
+	flush_tlb_mm(vma->vm_mm);
 }
 EXPORT_SYMBOL(flush_tlb_range);
 

@@ -51,7 +51,7 @@ static int pn533_i2c_send_ack(struct pn533 *dev, gfp_t flags)
 {
 	struct pn533_i2c_phy *phy = dev->phy;
 	struct i2c_client *client = phy->i2c_dev;
-	static const u8 ack[6] = {0x00, 0x00, 0xff, 0x00, 0xff, 0x00};
+	u8 ack[6] = {0x00, 0x00, 0xff, 0x00, 0xff, 0x00};
 	/* spec 6.2.1.3:  Preamble, SoPC (2), ACK Code (2), Postamble */
 	int rc;
 
@@ -206,6 +206,14 @@ static int pn533_i2c_probe(struct i2c_client *client,
 	phy->i2c_dev = client;
 	i2c_set_clientdata(client, phy);
 
+	r = request_threaded_irq(client->irq, NULL, pn533_i2c_irq_thread_fn,
+				 IRQF_TRIGGER_FALLING |
+				 IRQF_SHARED | IRQF_ONESHOT,
+				 PN533_I2C_DRIVER_NAME, phy);
+
+	if (r < 0)
+		nfc_err(&client->dev, "Unable to register IRQ handler\n");
+
 	priv = pn533_register_device(PN533_DEVICE_PN532,
 				     PN533_NO_TYPE_B_PROTOCOLS,
 				     PN533_PROTO_REQ_ACK_RESP,
@@ -215,31 +223,15 @@ static int pn533_i2c_probe(struct i2c_client *client,
 
 	if (IS_ERR(priv)) {
 		r = PTR_ERR(priv);
-		return r;
+		goto err_register;
 	}
 
 	phy->priv = priv;
 
-	r = request_threaded_irq(client->irq, NULL, pn533_i2c_irq_thread_fn,
-				IRQF_TRIGGER_FALLING |
-				IRQF_SHARED | IRQF_ONESHOT,
-				PN533_I2C_DRIVER_NAME, phy);
-	if (r < 0) {
-		nfc_err(&client->dev, "Unable to register IRQ handler\n");
-		goto irq_rqst_err;
-	}
-
-	r = pn533_finalize_setup(priv);
-	if (r)
-		goto fn_setup_err;
-
 	return 0;
 
-fn_setup_err:
+err_register:
 	free_irq(client->irq, phy);
-
-irq_rqst_err:
-	pn533_unregister_device(phy->priv);
 
 	return r;
 }
@@ -264,7 +256,7 @@ static const struct of_device_id of_pn533_i2c_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_pn533_i2c_match);
 
-static const struct i2c_device_id pn533_i2c_id_table[] = {
+static struct i2c_device_id pn533_i2c_id_table[] = {
 	{ PN533_I2C_DRIVER_NAME, 0 },
 	{}
 };

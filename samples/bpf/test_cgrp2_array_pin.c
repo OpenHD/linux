@@ -14,7 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 
-#include <bpf/bpf.h>
+#include "libbpf.h"
 
 static void usage(void)
 {
@@ -85,9 +85,9 @@ int main(int argc, char **argv)
 		}
 	}
 
-	ret = bpf_map_update_elem(array_fd, &array_key, &cg2_fd, 0);
+	ret = bpf_update_elem(array_fd, &array_key, &cg2_fd, 0);
 	if (ret) {
-		perror("bpf_map_update_elem");
+		perror("bpf_update_elem");
 		goto out;
 	}
 

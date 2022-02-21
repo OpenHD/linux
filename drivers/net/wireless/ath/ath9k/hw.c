@@ -37,6 +37,39 @@ MODULE_DESCRIPTION("Support for Atheros 802.11n wireless LAN cards.");
 MODULE_SUPPORTED_DEVICE("Atheros 802.11n WLAN cards");
 MODULE_LICENSE("Dual BSD/GPL");
 
+u8 tx_power_man = 58; //manual power
+u8 cwmin_man = 7;
+u8 cwmax_man = 15;
+u8 aifs_man = 2;
+u8 cck_sifs_man = 10;
+u8 ofdm_sifs_man = 16;
+u8 slottime_man = 9;
+u8 thresh62_man = 28;
+
+module_param_named(txpower,tx_power_man,byte,0444);
+MODULE_PARM_DESC(txpower,"Manual TX power setting, default 58, max 63");
+
+module_param_named(cwmin,cwmin_man,byte,0444);
+MODULE_PARM_DESC(cwmin,"CWMIN setting, 0-255, default 7");
+
+module_param_named(cwmax,cwmax_man,byte,0444);
+MODULE_PARM_DESC(cwmax,"CWMAX setting, 0-255, default 15");
+
+module_param_named(aifs,aifs_man,byte,0444);
+MODULE_PARM_DESC(aifs,"AIFS setting, default 2");
+
+module_param_named(cck_sifs,cck_sifs_man,byte,0444);
+MODULE_PARM_DESC(cck_sifs,"CCK SIFS setting, default 10");
+
+module_param_named(ofdm_sifs,ofdm_sifs_man,byte,0444);
+MODULE_PARM_DESC(ofdm_sifs,"OFDM SIFS setting, default 16");
+
+module_param_named(slottime,slottime_man,byte,0444);
+MODULE_PARM_DESC(slottime,"Slottime setting, default 9");
+
+module_param_named(thresh62,thresh62_man,byte,0444);
+MODULE_PARM_DESC(thresh62,"CCA THRESH62 setting, default 28");
+
 static void ath9k_hw_set_clockrate(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
@@ -127,13 +160,13 @@ void ath9k_hw_read_array(struct ath_hw *ah, u32 array[][2], int size)
 	u32 *tmp_reg_list, *tmp_data;
 	int i;
 
-	tmp_reg_list = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
+	tmp_reg_list = kmalloc(size * sizeof(u32), GFP_KERNEL);
 	if (!tmp_reg_list) {
 		dev_err(ah->dev, "%s: tmp_reg_list: alloc filed\n", __func__);
 		return;
 	}
 
-	tmp_data = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
+	tmp_data = kmalloc(size * sizeof(u32), GFP_KERNEL);
 	if (!tmp_data) {
 		dev_err(ah->dev, "%s tmp_data: alloc filed\n", __func__);
 		goto error_tmp_data;
@@ -184,8 +217,7 @@ u16 ath9k_hw_computetxtime(struct ath_hw *ah,
 		break;
 	case WLAN_RC_PHY_OFDM:
 		if (ah->curchan && IS_CHAN_QUARTER_RATE(ah->curchan)) {
-			bitsPerSymbol =
-				((kbps >> 2) * OFDM_SYMBOL_TIME_QUARTER) / 1000;
+			bitsPerSymbol =	(kbps * OFDM_SYMBOL_TIME_QUARTER) / 1000;
 			numBits = OFDM_PLCP_BITS + (frameLen << 3);
 			numSymbols = DIV_ROUND_UP(numBits, bitsPerSymbol);
 			txTime = OFDM_SIFS_TIME_QUARTER
@@ -193,8 +225,7 @@ u16 ath9k_hw_computetxtime(struct ath_hw *ah,
 				+ (numSymbols * OFDM_SYMBOL_TIME_QUARTER);
 		} else if (ah->curchan &&
 			   IS_CHAN_HALF_RATE(ah->curchan)) {
-			bitsPerSymbol =
-				((kbps >> 1) * OFDM_SYMBOL_TIME_HALF) / 1000;
+			bitsPerSymbol =	(kbps * OFDM_SYMBOL_TIME_HALF) / 1000;
 			numBits = OFDM_PLCP_BITS + (frameLen << 3);
 			numSymbols = DIV_ROUND_UP(numBits, bitsPerSymbol);
 			txTime = OFDM_SIFS_TIME_HALF +
@@ -507,7 +538,7 @@ static void ath9k_hw_init_macaddr(struct ath_hw *ah)
 	ath_err(common, "eeprom contains invalid mac address: %pM\n",
 		common->macaddr);
 
-	eth_random_addr(common->macaddr);
+	random_ether_addr(common->macaddr);
 	ath_err(common, "random mac address will be used: %pM\n",
 		common->macaddr);
 
@@ -747,7 +778,7 @@ u32 ar9003_get_pll_sqsum_dvc(struct ath_hw *ah)
 		udelay(100);
 
 		if (WARN_ON_ONCE(i >= 100)) {
-			ath_err(common, "PLL4 measurement not done\n");
+			ath_err(common, "PLL4 meaurement not done\n");
 			break;
 		}
 
@@ -938,7 +969,6 @@ static void ath9k_hw_init_interrupt_masks(struct ath_hw *ah,
 		AR_IMR_RXERR |
 		AR_IMR_RXORN |
 		AR_IMR_BCNMISC;
-	u32 msi_cfg = 0;
 
 	if (AR_SREV_9340(ah) || AR_SREV_9550(ah) || AR_SREV_9531(ah) ||
 	    AR_SREV_9561(ah))
@@ -946,46 +976,28 @@ static void ath9k_hw_init_interrupt_masks(struct ath_hw *ah,
 
 	if (AR_SREV_9300_20_OR_LATER(ah)) {
 		imr_reg |= AR_IMR_RXOK_HP;
-		if (ah->config.rx_intr_mitigation) {
+		if (ah->config.rx_intr_mitigation)
 			imr_reg |= AR_IMR_RXINTM | AR_IMR_RXMINTR;
-			msi_cfg |= AR_INTCFG_MSI_RXINTM | AR_INTCFG_MSI_RXMINTR;
-		} else {
+		else
 			imr_reg |= AR_IMR_RXOK_LP;
-			msi_cfg |= AR_INTCFG_MSI_RXOK;
-		}
+
 	} else {
-		if (ah->config.rx_intr_mitigation) {
+		if (ah->config.rx_intr_mitigation)
 			imr_reg |= AR_IMR_RXINTM | AR_IMR_RXMINTR;
-			msi_cfg |= AR_INTCFG_MSI_RXINTM | AR_INTCFG_MSI_RXMINTR;
-		} else {
+		else
 			imr_reg |= AR_IMR_RXOK;
-			msi_cfg |= AR_INTCFG_MSI_RXOK;
-		}
 	}
 
-	if (ah->config.tx_intr_mitigation) {
+	if (ah->config.tx_intr_mitigation)
 		imr_reg |= AR_IMR_TXINTM | AR_IMR_TXMINTR;
-		msi_cfg |= AR_INTCFG_MSI_TXINTM | AR_INTCFG_MSI_TXMINTR;
-	} else {
+	else
 		imr_reg |= AR_IMR_TXOK;
-		msi_cfg |= AR_INTCFG_MSI_TXOK;
-	}
 
 	ENABLE_REGWRITE_BUFFER(ah);
 
 	REG_WRITE(ah, AR_IMR, imr_reg);
 	ah->imrs2_reg |= AR_IMR_S2_GTT;
 	REG_WRITE(ah, AR_IMR_S2, ah->imrs2_reg);
-
-	if (ah->msi_enabled) {
-		ah->msi_reg = REG_READ(ah, AR_PCIE_MSI);
-		ah->msi_reg |= AR_PCIE_MSI_HW_DBI_WR_EN;
-		ah->msi_reg &= AR_PCIE_MSI_HW_INT_PENDING_ADDR_MSI_64;
-		REG_WRITE(ah, AR_INTCFG, msi_cfg);
-		ath_dbg(ath9k_hw_common(ah), ANY,
-			"value of AR_INTCFG=0x%X, msi_cfg=0x%X\n",
-			REG_READ(ah, AR_INTCFG), msi_cfg);
-	}
 
 	if (!AR_SREV_9100(ah)) {
 		REG_WRITE(ah, AR_INTR_SYNC_CAUSE, 0xFFFFFFFF);
@@ -1052,7 +1064,7 @@ void ath9k_hw_init_global_settings(struct ath_hw *ah)
 	int acktimeout, ctstimeout, ack_offset = 0;
 	int slottime;
 	int sifstime;
-	int rx_lat = 0, tx_lat = 0, eifs = 0, ack_shift = 0;
+	int rx_lat = 0, tx_lat = 0, eifs = 0;
 	u32 reg;
 
 	ath_dbg(ath9k_hw_common(ah), RESET, "ah->misc_mode 0x%x\n",
@@ -1084,7 +1096,6 @@ void ath9k_hw_init_global_settings(struct ath_hw *ah)
 
 		sifstime = 32;
 		ack_offset = 16;
-		ack_shift = 3;
 		slottime = 13;
 	} else if (IS_CHAN_QUARTER_RATE(chan)) {
 		eifs = 340;
@@ -1095,7 +1106,6 @@ void ath9k_hw_init_global_settings(struct ath_hw *ah)
 
 		sifstime = 64;
 		ack_offset = 32;
-		ack_shift = 1;
 		slottime = 21;
 	} else {
 		if (AR_SREV_9287(ah) && AR_SREV_9287_13_OR_LATER(ah)) {
@@ -1113,7 +1123,8 @@ void ath9k_hw_init_global_settings(struct ath_hw *ah)
 	}
 
 	/* As defined by IEEE 802.11-2007 17.3.8.6 */
-	slottime += 3 * ah->coverage_class;
+//	slottime += 3 * ah->coverage_class;
+	slottime = slottime_man;
 	acktimeout = slottime + sifstime + ack_offset;
 	ctstimeout = acktimeout;
 
@@ -1152,10 +1163,6 @@ void ath9k_hw_init_global_settings(struct ath_hw *ah)
 		SM(tx_lat, AR_USEC_TX_LAT),
 		AR_USEC_TX_LAT | AR_USEC_RX_LAT | AR_USEC_USEC);
 
-	if (IS_CHAN_HALF_RATE(chan) || IS_CHAN_QUARTER_RATE(chan))
-		REG_RMW(ah, AR_TXSIFS,
-			sifstime | SM(ack_shift, AR_TXSIFS_ACK_SHIFT),
-			(AR_TXSIFS_TIME | AR_TXSIFS_ACK_SHIFT));
 }
 EXPORT_SYMBOL(ath9k_hw_init_global_settings);
 
@@ -1849,13 +1856,13 @@ fail:
 	return -EINVAL;
 }
 
-u32 ath9k_hw_get_tsf_offset(struct timespec64 *last, struct timespec64 *cur)
+u32 ath9k_hw_get_tsf_offset(struct timespec *last, struct timespec *cur)
 {
-	struct timespec64 ts;
+	struct timespec ts;
 	s64 usec;
 
 	if (!cur) {
-		ktime_get_raw_ts64(&ts);
+		getrawmonotonic(&ts);
 		cur = &ts;
 	}
 
@@ -1873,7 +1880,7 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	u32 saveLedState;
 	u32 saveDefAntenna;
 	u32 macStaId1;
-	struct timespec64 tsf_ts;
+	struct timespec tsf_ts;
 	u32 tsf_offset;
 	u64 tsf = 0;
 	int r;
@@ -1919,7 +1926,7 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	macStaId1 = REG_READ(ah, AR_STA_ID1) & AR_STA_ID1_BASE_RATE_11B;
 
 	/* Save TSF before chip reset, a cold reset clears it */
-	ktime_get_raw_ts64(&tsf_ts);
+	getrawmonotonic(&tsf_ts);
 	tsf = ath9k_hw_gettsf64(ah);
 
 	saveLedState = REG_READ(ah, AR_CFG_LED) &

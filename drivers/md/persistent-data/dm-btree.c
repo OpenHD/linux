@@ -272,12 +272,7 @@ int dm_btree_del(struct dm_btree_info *info, dm_block_t root)
 	int r;
 	struct del_stack *s;
 
-	/*
-	 * dm_btree_del() is called via an ioctl, as such should be
-	 * considered an FS op.  We can't recurse back into the FS, so we
-	 * allocate GFP_NOFS.
-	 */
-	s = kmalloc(sizeof(*s), GFP_NOFS);
+	s = kmalloc(sizeof(*s), GFP_NOIO);
 	if (!s)
 		return -ENOMEM;
 	s->info = info;
@@ -1133,17 +1128,6 @@ int dm_btree_cursor_next(struct dm_btree_cursor *c)
 	return r;
 }
 EXPORT_SYMBOL_GPL(dm_btree_cursor_next);
-
-int dm_btree_cursor_skip(struct dm_btree_cursor *c, uint32_t count)
-{
-	int r = 0;
-
-	while (count-- && !r)
-		r = dm_btree_cursor_next(c);
-
-	return r;
-}
-EXPORT_SYMBOL_GPL(dm_btree_cursor_skip);
 
 int dm_btree_cursor_get_value(struct dm_btree_cursor *c, uint64_t *key, void *value_le)
 {

@@ -256,7 +256,6 @@ int v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
 			kfree(vdev);
 			goto clean_up;
 		}
-		sd->devnode = vdev;
 #if defined(CONFIG_MEDIA_CONTROLLER)
 		sd->entity.info.dev.major = VIDEO_MAJOR;
 		sd->entity.info.dev.minor = vdev->minor;
@@ -267,14 +266,14 @@ int v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
 
 			link = media_create_intf_link(&sd->entity,
 						      &vdev->intf_devnode->intf,
-						      MEDIA_LNK_FL_ENABLED |
-						      MEDIA_LNK_FL_IMMUTABLE);
+						      MEDIA_LNK_FL_ENABLED);
 			if (!link) {
 				err = -ENOMEM;
 				goto clean_up;
 			}
 		}
 #endif
+		sd->devnode = vdev;
 	}
 	return 0;
 

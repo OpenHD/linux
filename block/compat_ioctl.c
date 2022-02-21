@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
 #include <linux/blktrace_api.h>
@@ -81,16 +80,19 @@ static int compat_hdio_getgeo(struct gendisk *disk, struct block_device *bdev,
 static int compat_hdio_ioctl(struct block_device *bdev, fmode_t mode,
 		unsigned int cmd, unsigned long arg)
 {
-	unsigned long __user *p;
+	mm_segment_t old_fs = get_fs();
+	unsigned long kval;
+	unsigned int __user *uvp;
 	int error;
 
-	p = compat_alloc_user_space(sizeof(unsigned long));
+	set_fs(KERNEL_DS);
 	error = __blkdev_driver_ioctl(bdev, mode,
-				cmd, (unsigned long)p);
+				cmd, (unsigned long)(&kval));
+	set_fs(old_fs);
+
 	if (error == 0) {
-		unsigned int __user *uvp = compat_ptr(arg);
-		unsigned long v;
-		if (get_user(v, p) || put_user(v, uvp))
+		uvp = compat_ptr(arg);
+		if (put_user(kval, uvp))
 			error = -EFAULT;
 	}
 	return error;
@@ -320,6 +322,7 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	struct block_device *bdev = inode->i_bdev;
 	struct gendisk *disk = bdev->bd_disk;
 	fmode_t mode = file->f_mode;
+	struct backing_dev_info *bdi;
 	loff_t size;
 	unsigned int max_sectors;
 
@@ -344,7 +347,7 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	case BLKALIGNOFF:
 		return compat_put_int(arg, bdev_alignment_offset(bdev));
 	case BLKDISCARDZEROES:
-		return compat_put_uint(arg, 0);
+		return compat_put_uint(arg, bdev_discard_zeroes_data(bdev));
 	case BLKFLSBUF:
 	case BLKROSET:
 	case BLKDISCARD:
@@ -355,8 +358,6 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	 * but we call blkdev_ioctl, which gets the lock for us
 	 */
 	case BLKRRPART:
-	case BLKREPORTZONE:
-	case BLKRESETZONE:
 		return blkdev_ioctl(bdev, mode, cmd,
 				(unsigned long)compat_ptr(arg));
 	case BLKBSZSET_32:
@@ -368,8 +369,9 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	case BLKFRAGET:
 		if (!arg)
 			return -EINVAL;
+		bdi = blk_get_backing_dev_info(bdev);
 		return compat_put_long(arg,
-			       (bdev->bd_bdi->ra_pages * PAGE_SIZE) / 512);
+				       (bdi->ra_pages * PAGE_SIZE) / 512);
 	case BLKROGET: /* compatible */
 		return compat_put_int(arg, bdev_read_only(bdev) != 0);
 	case BLKBSZGET_32: /* get the logical block size (cf. BLKSSZGET) */
@@ -387,7 +389,8 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	case BLKFRASET:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EACCES;
-		bdev->bd_bdi->ra_pages = (arg * 512) / PAGE_SIZE;
+		bdi = blk_get_backing_dev_info(bdev);
+		bdi->ra_pages = (arg * 512) / PAGE_SIZE;
 		return 0;
 	case BLKGETSIZE:
 		size = i_size_read(bdev->bd_inode);

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* pci_sun4v.c: SUN4V specific PCI controller support.
  *
  * Copyright (C) 2006, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -16,7 +15,7 @@
 #include <linux/export.h>
 #include <linux/log2.h>
 #include <linux/of_device.h>
-#include <asm/iommu-common.h>
+#include <linux/iommu-common.h>
 
 #include <asm/iommu.h>
 #include <asm/irq.h>
@@ -25,7 +24,6 @@
 
 #include "pci_impl.h"
 #include "iommu_common.h"
-#include "kernel.h"
 
 #include "pci_sun4v.h"
 
@@ -244,7 +242,6 @@ static void *dma_4v_alloc_coherent(struct device *dev, size_t size,
 	return ret;
 
 iommu_map_fail:
-	local_irq_restore(flags);
 	iommu_tbl_range_free(tbl, *dma_addrp, npages, IOMMU_ERROR_CODE);
 
 range_alloc_fail:
@@ -414,12 +411,11 @@ static dma_addr_t dma_4v_map_page(struct device *dev, struct page *page,
 bad:
 	if (printk_ratelimit())
 		WARN_ON(1);
-	return SPARC_MAPPING_ERROR;
+	return DMA_ERROR_CODE;
 
 iommu_map_fail:
-	local_irq_restore(flags);
 	iommu_tbl_range_free(tbl, bus_addr, npages, IOMMU_ERROR_CODE);
-	return SPARC_MAPPING_ERROR;
+	return DMA_ERROR_CODE;
 }
 
 static void dma_4v_unmap_page(struct device *dev, dma_addr_t bus_addr,
@@ -482,10 +478,11 @@ static int dma_4v_map_sg(struct device *dev, struct scatterlist *sglist,
 	BUG_ON(direction == DMA_NONE);
 
 	iommu = dev->archdata.iommu;
-	if (nelems == 0 || !iommu)
-		return 0;
 	atu = iommu->atu;
 
+	if (nelems == 0 || !iommu)
+		return 0;
+	
 	prot = HV_PCI_MAP_ATTR_READ;
 	if (direction != DMA_TO_DEVICE)
 		prot |= HV_PCI_MAP_ATTR_WRITE;
@@ -592,7 +589,7 @@ static int dma_4v_map_sg(struct device *dev, struct scatterlist *sglist,
 
 	if (outcount < incount) {
 		outs = sg_next(outs);
-		outs->dma_address = SPARC_MAPPING_ERROR;
+		outs->dma_address = DMA_ERROR_CODE;
 		outs->dma_length = 0;
 	}
 
@@ -609,7 +606,7 @@ iommu_map_failed:
 			iommu_tbl_range_free(tbl, vaddr, npages,
 					     IOMMU_ERROR_CODE);
 			/* XXX demap? XXX */
-			s->dma_address = SPARC_MAPPING_ERROR;
+			s->dma_address = DMA_ERROR_CODE;
 			s->dma_length = 0;
 		}
 		if (s == outs)
@@ -671,37 +668,13 @@ static void dma_4v_unmap_sg(struct device *dev, struct scatterlist *sglist,
 	local_irq_restore(flags);
 }
 
-static int dma_4v_supported(struct device *dev, u64 device_mask)
-{
-	struct iommu *iommu = dev->archdata.iommu;
-	u64 dma_addr_mask = iommu->dma_addr_mask;
-
-	if (device_mask > DMA_BIT_MASK(32)) {
-		if (iommu->atu)
-			dma_addr_mask = iommu->atu->dma_addr_mask;
-		else
-			return 0;
-	}
-
-	if ((device_mask & dma_addr_mask) == dma_addr_mask)
-		return 1;
-	return pci64_dma_supported(to_pci_dev(dev), device_mask);
-}
-
-static int dma_4v_mapping_error(struct device *dev, dma_addr_t dma_addr)
-{
-	return dma_addr == SPARC_MAPPING_ERROR;
-}
-
-static const struct dma_map_ops sun4v_dma_ops = {
+static struct dma_map_ops sun4v_dma_ops = {
 	.alloc				= dma_4v_alloc_coherent,
 	.free				= dma_4v_free_coherent,
 	.map_page			= dma_4v_map_page,
 	.unmap_page			= dma_4v_unmap_page,
 	.map_sg				= dma_4v_map_sg,
 	.unmap_sg			= dma_4v_unmap_sg,
-	.dma_supported			= dma_4v_supported,
-	.mapping_error			= dma_4v_mapping_error,
 };
 
 static void pci_sun4v_scan_bus(struct pci_pbm_info *pbm, struct device *parent)

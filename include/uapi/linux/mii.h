@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * linux/mii.h: definitions for MII-compatible transceivers
  * Originally drivers/net/sunhme.h.
@@ -136,7 +135,6 @@
 #define CTL1000_ENABLE_MASTER	0x1000
 
 /* 1000BASE-T Status register */
-#define LPA_1000MSFAIL		0x8000	/* Master/Slave resolution failure */
 #define LPA_1000LOCALRXOK	0x2000	/* Link partner local receiver status */
 #define LPA_1000REMRXOK		0x1000	/* Link partner remote receiver status */
 #define LPA_1000FULL		0x0800	/* Link partner 1000BASE-T full duplex */

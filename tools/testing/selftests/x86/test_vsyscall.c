@@ -33,9 +33,6 @@
 # endif
 #endif
 
-/* max length of lines in /proc/self/maps - anything longer is skipped here */
-#define MAPS_LINE_LEN 128
-
 static void sethandler(int sig, void (*handler)(int, siginfo_t *, void *),
 		       int flags)
 {
@@ -101,7 +98,7 @@ static int init_vsys(void)
 #ifdef __x86_64__
 	int nerrs = 0;
 	FILE *maps;
-	char line[MAPS_LINE_LEN];
+	char line[128];
 	bool found = false;
 
 	maps = fopen("/proc/self/maps", "r");
@@ -111,12 +108,10 @@ static int init_vsys(void)
 		return 0;
 	}
 
-	while (fgets(line, MAPS_LINE_LEN, maps)) {
+	while (fgets(line, sizeof(line), maps)) {
 		char r, x;
 		void *start, *end;
-		char name[MAPS_LINE_LEN];
-
-		/* sscanf() is safe here as strlen(name) >= strlen(line) */
+		char name[128];
 		if (sscanf(line, "%p-%p %c-%cp %*x %*x:%*x %*u %s",
 			   &start, &end, &r, &x, name) != 5)
 			continue;
@@ -211,7 +206,7 @@ static int check_gtod(const struct timeval *tv_sys1,
 	}
 
 	d1 = tv_diff(tv_other, tv_sys1);
-	d2 = tv_diff(tv_sys2, tv_other); 
+	d2 = tv_diff(tv_sys2, tv_other);
 	printf("\t%s time offsets: %lf %lf\n", which, d1, d2);
 
 	if (d1 < 0 || d2 < 0) {
@@ -450,7 +445,7 @@ static void sigtrap(int sig, siginfo_t *info, void *ctx_void)
 		num_vsyscall_traps++;
 }
 
-static int test_emulation(void)
+static int test_native_vsyscall(void)
 {
 	time_t tmp;
 	bool is_native;
@@ -458,7 +453,7 @@ static int test_emulation(void)
 	if (!vtime)
 		return 0;
 
-	printf("[RUN]\tchecking that vsyscalls are emulated\n");
+	printf("[RUN]\tchecking for native vsyscall\n");
 	sethandler(SIGTRAP, sigtrap, 0);
 	set_eflags(get_eflags() | X86_EFLAGS_TF);
 	vtime(&tmp);
@@ -474,12 +469,11 @@ static int test_emulation(void)
 	 */
 	is_native = (num_vsyscall_traps > 1);
 
-	printf("[%s]\tvsyscalls are %s (%d instructions in vsyscall page)\n",
-	       (is_native ? "FAIL" : "OK"),
+	printf("\tvsyscalls are %s (%d instructions in vsyscall page)\n",
 	       (is_native ? "native" : "emulated"),
 	       (int)num_vsyscall_traps);
 
-	return is_native;
+	return 0;
 }
 #endif
 
@@ -499,7 +493,7 @@ int main(int argc, char **argv)
 	nerrs += test_vsys_r();
 
 #ifdef __x86_64__
-	nerrs += test_emulation();
+	nerrs += test_native_vsyscall();
 #endif
 
 	return nerrs ? 1 : 0;

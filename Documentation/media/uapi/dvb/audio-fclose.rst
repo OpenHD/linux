@@ -2,14 +2,14 @@
 
 .. _audio_fclose:
 
-========================
-Digital TV audio close()
-========================
+=================
+DVB audio close()
+=================
 
 Name
 ----
 
-Digital TV audio close()
+DVB audio close()
 
 .. attention:: This ioctl is deprecated
 

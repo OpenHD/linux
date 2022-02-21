@@ -71,7 +71,7 @@ static struct pcistub_device *pcistub_device_alloc(struct pci_dev *dev)
 
 	dev_dbg(&dev->dev, "pcistub_device_alloc\n");
 
-	psdev = kzalloc(sizeof(*psdev), GFP_KERNEL);
+	psdev = kzalloc(sizeof(*psdev), GFP_ATOMIC);
 	if (!psdev)
 		return NULL;
 
@@ -365,7 +365,7 @@ static int pcistub_init_device(struct pci_dev *dev)
 	 * here and then to call kfree(pci_get_drvdata(psdev->dev)).
 	 */
 	dev_data = kzalloc(sizeof(*dev_data) +  strlen(DRV_NAME "[]")
-				+ strlen(pci_name(dev)) + 1, GFP_KERNEL);
+				+ strlen(pci_name(dev)) + 1, GFP_ATOMIC);
 	if (!dev_data) {
 		err = -ENOMEM;
 		goto out;
@@ -578,7 +578,7 @@ static int pcistub_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		}
 
 		if (!match) {
-			pci_dev_id = kmalloc(sizeof(*pci_dev_id), GFP_KERNEL);
+			pci_dev_id = kmalloc(sizeof(*pci_dev_id), GFP_ATOMIC);
 			if (!pci_dev_id) {
 				err = -ENOMEM;
 				goto out;
@@ -733,9 +733,16 @@ static pci_ers_result_t common_process(struct pcistub_device *psdev,
 	wmb();
 	notify_remote_via_irq(pdev->evtchn_irq);
 
+	/* Enable IRQ to signal "request done". */
+	xen_pcibk_lateeoi(pdev, 0);
+
 	ret = wait_event_timeout(xen_pcibk_aer_wait_queue,
 				 !(test_bit(_XEN_PCIB_active, (unsigned long *)
 				 &sh_info->flags)), 300*HZ);
+
+	/* Enable IRQ for pcifront request if not already active. */
+	if (!test_bit(_PDEVF_op_active, &pdev->flags))
+		xen_pcibk_lateeoi(pdev, 0);
 
 	if (!ret) {
 		if (test_bit(_XEN_PCIB_active,
@@ -749,13 +756,6 @@ static pci_ers_result_t common_process(struct pcistub_device *psdev,
 		}
 	}
 	clear_bit(_PCIB_op_pending, (unsigned long *)&pdev->flags);
-
-	if (test_bit(_XEN_PCIF_active,
-		(unsigned long *)&sh_info->flags)) {
-		dev_dbg(&psdev->dev->dev,
-			"schedule pci_conf service in " DRV_NAME "\n");
-		xen_pcibk_test_and_schedule_op(psdev->pdev);
-	}
 
 	res = (pci_ers_result_t)aer_op->err;
 	return res;
@@ -1150,7 +1150,7 @@ static int pcistub_reg_add(int domain, int bus, int slot, int func,
 	}
 	dev = psdev->dev;
 
-	field = kzalloc(sizeof(*field), GFP_KERNEL);
+	field = kzalloc(sizeof(*field), GFP_ATOMIC);
 	if (!field) {
 		err = -ENOMEM;
 		goto out;
@@ -1173,8 +1173,8 @@ out:
 	return err;
 }
 
-static ssize_t new_slot_store(struct device_driver *drv, const char *buf,
-			      size_t count)
+static ssize_t pcistub_slot_add(struct device_driver *drv, const char *buf,
+				size_t count)
 {
 	int domain, bus, slot, func;
 	int err;
@@ -1190,10 +1190,10 @@ out:
 		err = count;
 	return err;
 }
-static DRIVER_ATTR_WO(new_slot);
+static DRIVER_ATTR(new_slot, S_IWUSR, NULL, pcistub_slot_add);
 
-static ssize_t remove_slot_store(struct device_driver *drv, const char *buf,
-				 size_t count)
+static ssize_t pcistub_slot_remove(struct device_driver *drv, const char *buf,
+				   size_t count)
 {
 	int domain, bus, slot, func;
 	int err;
@@ -1209,9 +1209,9 @@ out:
 		err = count;
 	return err;
 }
-static DRIVER_ATTR_WO(remove_slot);
+static DRIVER_ATTR(remove_slot, S_IWUSR, NULL, pcistub_slot_remove);
 
-static ssize_t slots_show(struct device_driver *drv, char *buf)
+static ssize_t pcistub_slot_show(struct device_driver *drv, char *buf)
 {
 	struct pcistub_device_id *pci_dev_id;
 	size_t count = 0;
@@ -1232,9 +1232,9 @@ static ssize_t slots_show(struct device_driver *drv, char *buf)
 
 	return count;
 }
-static DRIVER_ATTR_RO(slots);
+static DRIVER_ATTR(slots, S_IRUSR, pcistub_slot_show, NULL);
 
-static ssize_t irq_handlers_show(struct device_driver *drv, char *buf)
+static ssize_t pcistub_irq_handler_show(struct device_driver *drv, char *buf)
 {
 	struct pcistub_device *psdev;
 	struct xen_pcibk_dev_data *dev_data;
@@ -1261,10 +1261,11 @@ static ssize_t irq_handlers_show(struct device_driver *drv, char *buf)
 	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
 	return count;
 }
-static DRIVER_ATTR_RO(irq_handlers);
+static DRIVER_ATTR(irq_handlers, S_IRUSR, pcistub_irq_handler_show, NULL);
 
-static ssize_t irq_handler_state_store(struct device_driver *drv,
-				       const char *buf, size_t count)
+static ssize_t pcistub_irq_handler_switch(struct device_driver *drv,
+					  const char *buf,
+					  size_t count)
 {
 	struct pcistub_device *psdev;
 	struct xen_pcibk_dev_data *dev_data;
@@ -1301,10 +1302,11 @@ out:
 		err = count;
 	return err;
 }
-static DRIVER_ATTR_WO(irq_handler_state);
+static DRIVER_ATTR(irq_handler_state, S_IWUSR, NULL,
+		   pcistub_irq_handler_switch);
 
-static ssize_t quirks_store(struct device_driver *drv, const char *buf,
-			    size_t count)
+static ssize_t pcistub_quirk_add(struct device_driver *drv, const char *buf,
+				 size_t count)
 {
 	int domain, bus, slot, func, reg, size, mask;
 	int err;
@@ -1322,7 +1324,7 @@ out:
 	return err;
 }
 
-static ssize_t quirks_show(struct device_driver *drv, char *buf)
+static ssize_t pcistub_quirk_show(struct device_driver *drv, char *buf)
 {
 	int count = 0;
 	unsigned long flags;
@@ -1365,10 +1367,11 @@ out:
 
 	return count;
 }
-static DRIVER_ATTR_RW(quirks);
+static DRIVER_ATTR(quirks, S_IRUSR | S_IWUSR, pcistub_quirk_show,
+		   pcistub_quirk_add);
 
-static ssize_t permissive_store(struct device_driver *drv, const char *buf,
-				size_t count)
+static ssize_t permissive_add(struct device_driver *drv, const char *buf,
+			      size_t count)
 {
 	int domain, bus, slot, func;
 	int err;
@@ -1429,7 +1432,8 @@ static ssize_t permissive_show(struct device_driver *drv, char *buf)
 	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
 	return count;
 }
-static DRIVER_ATTR_RW(permissive);
+static DRIVER_ATTR(permissive, S_IRUSR | S_IWUSR, permissive_show,
+		   permissive_add);
 
 static void pcistub_exit(void)
 {

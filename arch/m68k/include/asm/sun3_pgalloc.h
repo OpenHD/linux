@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /* sun3_pgalloc.h --
  * reorganization around 2.3.39, routines moved from sun3_pgtable.h
  *

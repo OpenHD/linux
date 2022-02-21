@@ -1483,6 +1483,7 @@ static int tegra124_usb3_port_enable(struct tegra_xusb_port *port)
 	struct tegra_xusb_padctl *padctl = port->padctl;
 	struct tegra_xusb_lane *lane = usb3->base.lane;
 	unsigned int index = port->index, offset;
+	int ret = 0;
 	u32 value;
 
 	value = padctl_readl(padctl, XUSB_PADCTL_SS_PORT_MAP);
@@ -1611,7 +1612,7 @@ static int tegra124_usb3_port_enable(struct tegra_xusb_port *port)
 	value &= ~XUSB_PADCTL_ELPG_PROGRAM_SSPX_ELPG_CLAMP_EN(index);
 	padctl_writel(padctl, value, XUSB_PADCTL_ELPG_PROGRAM);
 
-	return 0;
+	return ret;
 }
 
 static void tegra124_usb3_port_disable(struct tegra_xusb_port *port)

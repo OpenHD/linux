@@ -2,11 +2,10 @@
 
 .. _net:
 
-######################
-Digital TV Network API
-######################
-
-The Digital TV net device controls the mapping of data packages that are part
+###############
+DVB Network API
+###############
+The DVB net device controls the mapping of data packages that are part
 of a transport stream to be mapped into a virtual network interface,
 visible through the standard Linux network protocol stack.
 
@@ -29,13 +28,13 @@ header.
 
 .. _net_fcalls:
 
-Digital TV net Function Calls
-#############################
+######################
+DVB net Function Calls
+######################
 
 .. toctree::
     :maxdepth: 1
 
-    net-types
     net-add-if
     net-remove-if
     net-get-if

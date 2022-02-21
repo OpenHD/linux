@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 #define _HCI_HAL_INIT_C_
@@ -11,6 +19,8 @@
 #include <rtw_efuse.h>
 #include <fw.h>
 #include <rtl8188e_hal.h>
+#include <rtl8188e_led.h>
+#include <rtw_iol.h>
 #include <phy.h>
 
 #define		HAL_BB_ENABLE		1
@@ -327,7 +337,6 @@ static void _InitTransferPageSize(struct adapter *Adapter)
 	/*  Tx page size is always 128. */
 
 	u8 value8;
-
 	value8 = _PSRX(PBP_128) | _PSTX(PBP_128);
 	usb_write8(Adapter, REG_PBP, value8);
 }
@@ -553,6 +562,9 @@ static void InitUsbAggregationSetting(struct adapter *Adapter)
 
 	/*  Rx aggregation setting */
 	usb_AggSettingRxUpdate(Adapter);
+
+	/*  201/12/10 MH Add for USB agg mode dynamic switch. */
+	Adapter->HalData->UsbRxHighSpeedMode = false;
 }
 
 static void _InitBeaconParameters(struct adapter *Adapter)
@@ -591,6 +603,11 @@ static void _BBTurnOnBlock(struct adapter *Adapter)
 	phy_set_bb_reg(Adapter, rFPGA0_RFMOD, bCCKEn, 0x1);
 	phy_set_bb_reg(Adapter, rFPGA0_RFMOD, bOFDMEn, 0x1);
 }
+
+enum {
+	Antenna_Lfet = 1,
+	Antenna_Right = 2,
+};
 
 static void _InitAntenna_Selection(struct adapter *Adapter)
 {
@@ -977,21 +994,25 @@ u32 rtw_hal_inirp_init(struct adapter *Adapter)
 	RT_TRACE(_module_hci_hal_init_c_, _drv_info_,
 		 ("===> usb_inirp_init\n"));
 
+	precvpriv->ff_hwaddr = RECV_BULK_IN_ADDR;
+
 	/* issue Rx irp to receive data */
-	precvbuf = precvpriv->precv_buf;
+	precvbuf = (struct recv_buf *)precvpriv->precv_buf;
 	for (i = 0; i < NR_RECVBUFF; i++) {
-		if (usb_read_port(Adapter, RECV_BULK_IN_ADDR, precvbuf) == false) {
+		if (usb_read_port(Adapter, precvpriv->ff_hwaddr, 0, (unsigned char *)precvbuf) == false) {
 			RT_TRACE(_module_hci_hal_init_c_, _drv_err_, ("usb_rx_init: usb_read_port error\n"));
 			status = _FAIL;
 			goto exit;
 		}
 
 		precvbuf++;
+		precvpriv->free_recv_buf_queue_cnt--;
 	}
 
 exit:
 
 	RT_TRACE(_module_hci_hal_init_c_, _drv_info_, ("<=== usb_inirp_init\n"));
+
 
 	return status;
 }
@@ -1086,12 +1107,18 @@ static void _ReadPROMContent(
 	readAdapterInfo_8188EU(Adapter);
 }
 
+static void _ReadRFType(struct adapter *Adapter)
+{
+	Adapter->HalData->rf_chip = RF_6052;
+}
+
 void rtw_hal_read_chip_info(struct adapter *Adapter)
 {
 	unsigned long start = jiffies;
 
 	MSG_88E("====> %s\n", __func__);
 
+	_ReadRFType(Adapter);/* rf_chip -> _InitRFType() */
 	_ReadPROMContent(Adapter);
 
 	MSG_88E("<==== %s in %d ms\n", __func__,
@@ -1351,7 +1378,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 		if (*((u8 *)val)) { /* under sitesurvey */
 			/* config RCR to receive different BSSID & not to receive data frame */
 			u32 v = usb_read32(Adapter, REG_RCR);
-
 			v &= ~(RCR_CBSSID_BCN);
 			usb_write32(Adapter, REG_RCR, v);
 			/* reject all data frame */
@@ -1506,7 +1532,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 		{
 			u32 cmd;
 			u32 *cam_val = (u32 *)val;
-
 			usb_write32(Adapter, WCAMI, cam_val[0]);
 
 			cmd = CAM_POLLINIG | CAM_WRITE | cam_val[1];
@@ -1610,7 +1635,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	case HW_VAR_RXDMA_AGG_PG_TH:
 		{
 			u8 threshold = *((u8 *)val);
-
 			if (threshold == 0)
 				threshold = haldata->UsbRxAggPageCount;
 			usb_write8(Adapter, REG_RXDMA_AGG_PG_TH, threshold);
@@ -1632,7 +1656,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	case HW_VAR_H2C_FW_JOINBSSRPT:
 		{
 			u8 mstatus = (*(u8 *)val);
-
 			rtl8188e_set_FwJoinBssReport_cmd(Adapter, mstatus);
 		}
 		break;
@@ -1655,7 +1678,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	case HW_VAR_RPT_TIMER_SETTING:
 		{
 			u16 min_rpt_time = (*(u16 *)val);
-
 			ODM_RA_Set_TxRPT_Time(podmpriv, min_rpt_time);
 		}
 		break;
@@ -1712,7 +1734,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	case HW_VAR_TX_RPT_MAX_MACID:
 		{
 			u8 maxMacid = *val;
-
 			DBG_88E("### MacID(%d),Set Max Tx RPT MID(%d)\n", maxMacid, maxMacid+1);
 			usb_write8(Adapter, REG_TX_RPT_CTRL+1, maxMacid+1);
 		}
@@ -1734,13 +1755,15 @@ void rtw_hal_get_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	switch (variable) {
 	case HW_VAR_BASIC_RATE:
 		*((u16 *)(val)) = Adapter->HalData->BasicRateSet;
-		/* fall through */
 	case HW_VAR_TXPAUSE:
 		val[0] = usb_read8(Adapter, REG_TXPAUSE);
 		break;
 	case HW_VAR_BCN_VALID:
 		/* BCN_VALID, BIT16 of REG_TDECTRL = BIT0 of REG_TDECTRL+2 */
 		val[0] = (BIT(0) & usb_read8(Adapter, REG_TDECTRL+2)) ? true : false;
+		break;
+	case HW_VAR_RF_TYPE:
+		val[0] = RF_1T1R;
 		break;
 	case HW_VAR_FWLPS_RF_ON:
 		{
@@ -1751,7 +1774,6 @@ void rtw_hal_get_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 				val[0] = true;
 			} else {
 				u32 valRCR;
-
 				valRCR = usb_read32(Adapter, REG_RCR);
 				valRCR &= 0x00070000;
 				if (valRCR)
@@ -1797,7 +1819,6 @@ u8 rtw_hal_get_def_var(
 			struct mlme_priv *pmlmepriv = &Adapter->mlmepriv;
 			struct sta_priv *pstapriv = &Adapter->stapriv;
 			struct sta_info *psta;
-
 			psta = rtw_get_stainfo(pstapriv, pmlmepriv->cur_network.network.MacAddress);
 			if (psta)
 				*((int *)pValue) = psta->rssi_stat.UndecoratedSmoothedPWDB;
@@ -1824,21 +1845,18 @@ u8 rtw_hal_get_def_var(
 	case HAL_DEF_RA_DECISION_RATE:
 		{
 			u8 MacID = *((u8 *)pValue);
-
 			*((u8 *)pValue) = ODM_RA_GetDecisionRate_8188E(&haldata->odmpriv, MacID);
 		}
 		break;
 	case HAL_DEF_RA_SGI:
 		{
 			u8 MacID = *((u8 *)pValue);
-
 			*((u8 *)pValue) = ODM_RA_GetShortGI_8188E(&haldata->odmpriv, MacID);
 		}
 		break;
 	case HAL_DEF_PT_PWR_STATUS:
 		{
 			u8 MacID = *((u8 *)pValue);
-
 			*((u8 *)pValue) = ODM_RA_GetHwPwrStatus_8188E(&haldata->odmpriv, MacID);
 		}
 		break;
@@ -1848,7 +1866,6 @@ u8 rtw_hal_get_def_var(
 	case HW_DEF_RA_INFO_DUMP:
 		{
 			u8 entry_id = *((u8 *)pValue);
-
 			if (check_fwstate(&Adapter->mlmepriv, _FW_LINKED)) {
 				DBG_88E("============ RA status check ===================\n");
 				DBG_88E("Mac_id:%d , RateID = %d, RAUseRate = 0x%08x, RateSGI = %d, DecisionRate = 0x%02x ,PTStage = %d\n",
@@ -1864,7 +1881,6 @@ u8 rtw_hal_get_def_var(
 	case HW_DEF_ODM_DBG_FLAG:
 		{
 			struct odm_dm_struct *dm_ocm = &haldata->odmpriv;
-
 			pr_info("dm_ocm->DebugComponents = 0x%llx\n", dm_ocm->DebugComponents);
 		}
 		break;

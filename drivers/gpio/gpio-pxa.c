@@ -14,7 +14,7 @@
 #include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/err.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/gpio-pxa.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -241,18 +241,6 @@ int pxa_irq_to_gpio(int irq)
 	return irq_gpio0;
 }
 
-static bool pxa_gpio_has_pinctrl(void)
-{
-	switch (gpio_type) {
-	case PXA3XX_GPIO:
-	case MMP2_GPIO:
-		return false;
-
-	default:
-		return true;
-	}
-}
-
 static int pxa_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
 	struct pxa_gpio_chip *pchip = chip_to_pxachip(chip);
@@ -267,11 +255,9 @@ static int pxa_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 	unsigned long flags;
 	int ret;
 
-	if (pxa_gpio_has_pinctrl()) {
-		ret = pinctrl_gpio_direction_input(chip->base + offset);
-		if (ret)
-			return ret;
-	}
+	ret = pinctrl_gpio_direction_input(chip->base + offset);
+	if (!ret)
+		return 0;
 
 	spin_lock_irqsave(&gpio_lock, flags);
 
@@ -296,11 +282,9 @@ static int pxa_gpio_direction_output(struct gpio_chip *chip,
 
 	writel_relaxed(mask, base + (value ? GPSR_OFFSET : GPCR_OFFSET));
 
-	if (pxa_gpio_has_pinctrl()) {
-		ret = pinctrl_gpio_direction_output(chip->base + offset);
-		if (ret)
-			return ret;
-	}
+	ret = pinctrl_gpio_direction_output(chip->base + offset);
+	if (ret)
+		return ret;
 
 	spin_lock_irqsave(&gpio_lock, flags);
 
@@ -346,6 +330,16 @@ static int pxa_gpio_of_xlate(struct gpio_chip *gc,
 }
 #endif
 
+static int pxa_gpio_request(struct gpio_chip *chip, unsigned int offset)
+{
+	return pinctrl_request_gpio(chip->base + offset);
+}
+
+static void pxa_gpio_free(struct gpio_chip *chip, unsigned int offset)
+{
+	pinctrl_free_gpio(chip->base + offset);
+}
+
 static int pxa_init_gpio_chip(struct pxa_gpio_chip *pchip, int ngpio,
 			      struct device_node *np, void __iomem *regbase)
 {
@@ -364,12 +358,8 @@ static int pxa_init_gpio_chip(struct pxa_gpio_chip *pchip, int ngpio,
 	pchip->chip.set = pxa_gpio_set;
 	pchip->chip.to_irq = pxa_gpio_to_irq;
 	pchip->chip.ngpio = ngpio;
-
-	if (pxa_gpio_has_pinctrl()) {
-		pchip->chip.request = gpiochip_generic_request;
-		pchip->chip.free = gpiochip_generic_free;
-	}
-
+	pchip->chip.request = pxa_gpio_request;
+	pchip->chip.free = pxa_gpio_free;
 #ifdef CONFIG_OF_GPIO
 	pchip->chip.of_node = np;
 	pchip->chip.of_xlate = pxa_gpio_of_xlate;
@@ -461,9 +451,7 @@ static irqreturn_t pxa_gpio_demux_handler(int in_irq, void *d)
 			for_each_set_bit(n, &gedr, BITS_PER_LONG) {
 				loop = 1;
 
-				generic_handle_irq(
-					irq_find_mapping(pchip->irqdomain,
-							 gpio + n));
+				generic_handle_irq(gpio_to_irq(gpio + n));
 			}
 		}
 		handled += loop;
@@ -477,9 +465,9 @@ static irqreturn_t pxa_gpio_direct_handler(int in_irq, void *d)
 	struct pxa_gpio_chip *pchip = d;
 
 	if (in_irq == pchip->irq0) {
-		generic_handle_irq(irq_find_mapping(pchip->irqdomain, 0));
+		generic_handle_irq(gpio_to_irq(0));
 	} else if (in_irq == pchip->irq1) {
-		generic_handle_irq(irq_find_mapping(pchip->irqdomain, 1));
+		generic_handle_irq(gpio_to_irq(1));
 	} else {
 		pr_err("%s() unknown irq %d\n", __func__, in_irq);
 		return IRQ_NONE;
@@ -599,15 +587,21 @@ static int pxa_gpio_probe_dt(struct platform_device *pdev,
 			     struct pxa_gpio_chip *pchip)
 {
 	int nr_gpios;
+	const struct of_device_id *of_id =
+				of_match_device(pxa_gpio_dt_ids, &pdev->dev);
 	const struct pxa_gpio_id *gpio_id;
 
-	gpio_id = of_device_get_match_data(&pdev->dev);
+	if (!of_id || !of_id->data) {
+		dev_err(&pdev->dev, "Failed to find gpio controller\n");
+		return -EFAULT;
+	}
+	gpio_id = of_id->data;
 	gpio_type = gpio_id->type;
 
 	nr_gpios = gpio_id->gpio_nums;
 	pxa_last_gpio = nr_gpios - 1;
 
-	irq_base = devm_irq_alloc_descs(&pdev->dev, -1, 0, nr_gpios, 0);
+	irq_base = irq_alloc_descs(-1, 0, nr_gpios, 0);
 	if (irq_base < 0) {
 		dev_err(&pdev->dev, "Failed to allocate IRQ numbers\n");
 		return irq_base;
@@ -627,7 +621,7 @@ static int pxa_gpio_probe(struct platform_device *pdev)
 	struct pxa_gpio_platform_data *info;
 	void __iomem *gpio_reg_base;
 	int gpio, ret;
-	int irq0 = 0, irq1 = 0, irq_mux;
+	int irq0 = 0, irq1 = 0, irq_mux, gpio_offset = 0;
 
 	pchip = devm_kzalloc(&pdev->dev, sizeof(*pchip), GFP_KERNEL);
 	if (!pchip)
@@ -672,6 +666,9 @@ static int pxa_gpio_probe(struct platform_device *pdev)
 				     resource_size(res));
 	if (!gpio_reg_base)
 		return -EINVAL;
+
+	if (irq0 > 0)
+		gpio_offset = 2;
 
 	clk = clk_get(&pdev->dev, NULL);
 	if (IS_ERR(clk)) {

@@ -134,12 +134,16 @@ static int rcar_pwm_set_counter(struct rcar_pwm_chip *rp, int div, int duty_ns,
 
 static int rcar_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
 {
-	return pm_runtime_get_sync(chip->dev);
+	struct rcar_pwm_chip *rp = to_rcar_pwm_chip(chip);
+
+	return clk_prepare_enable(rp->clk);
 }
 
 static void rcar_pwm_free(struct pwm_chip *chip, struct pwm_device *pwm)
 {
-	pm_runtime_put(chip->dev);
+	struct rcar_pwm_chip *rp = to_rcar_pwm_chip(chip);
+
+	clk_disable_unprepare(rp->clk);
 }
 
 static int rcar_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
@@ -232,13 +236,14 @@ static int rcar_pwm_probe(struct platform_device *pdev)
 	rcar_pwm->chip.base = -1;
 	rcar_pwm->chip.npwm = 1;
 
+	pm_runtime_enable(&pdev->dev);
+
 	ret = pwmchip_add(&rcar_pwm->chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register PWM chip: %d\n", ret);
+		pm_runtime_disable(&pdev->dev);
 		return ret;
 	}
-
-	pm_runtime_enable(&pdev->dev);
 
 	return 0;
 }
@@ -246,10 +251,13 @@ static int rcar_pwm_probe(struct platform_device *pdev)
 static int rcar_pwm_remove(struct platform_device *pdev)
 {
 	struct rcar_pwm_chip *rcar_pwm = platform_get_drvdata(pdev);
+	int ret;
+
+	ret = pwmchip_remove(&rcar_pwm->chip);
 
 	pm_runtime_disable(&pdev->dev);
 
-	return pwmchip_remove(&rcar_pwm->chip);
+	return ret;
 }
 
 static const struct of_device_id rcar_pwm_of_table[] = {
@@ -258,52 +266,11 @@ static const struct of_device_id rcar_pwm_of_table[] = {
 };
 MODULE_DEVICE_TABLE(of, rcar_pwm_of_table);
 
-#ifdef CONFIG_PM_SLEEP
-static struct pwm_device *rcar_pwm_dev_to_pwm_dev(struct device *dev)
-{
-	struct rcar_pwm_chip *rcar_pwm = dev_get_drvdata(dev);
-	struct pwm_chip *chip = &rcar_pwm->chip;
-
-	return &chip->pwms[0];
-}
-
-static int rcar_pwm_suspend(struct device *dev)
-{
-	struct pwm_device *pwm = rcar_pwm_dev_to_pwm_dev(dev);
-
-	if (!test_bit(PWMF_REQUESTED, &pwm->flags))
-		return 0;
-
-	pm_runtime_put(dev);
-
-	return 0;
-}
-
-static int rcar_pwm_resume(struct device *dev)
-{
-	struct pwm_device *pwm = rcar_pwm_dev_to_pwm_dev(dev);
-
-	if (!test_bit(PWMF_REQUESTED, &pwm->flags))
-		return 0;
-
-	pm_runtime_get_sync(dev);
-
-	rcar_pwm_config(pwm->chip, pwm, pwm->state.duty_cycle,
-			pwm->state.period);
-	if (pwm_is_enabled(pwm))
-		rcar_pwm_enable(pwm->chip, pwm);
-
-	return 0;
-}
-#endif /* CONFIG_PM_SLEEP */
-static SIMPLE_DEV_PM_OPS(rcar_pwm_pm_ops, rcar_pwm_suspend, rcar_pwm_resume);
-
 static struct platform_driver rcar_pwm_driver = {
 	.probe = rcar_pwm_probe,
 	.remove = rcar_pwm_remove,
 	.driver = {
 		.name = "pwm-rcar",
-		.pm	= &rcar_pwm_pm_ops,
 		.of_match_table = of_match_ptr(rcar_pwm_of_table),
 	}
 };

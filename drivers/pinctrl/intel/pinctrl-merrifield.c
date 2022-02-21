@@ -1,16 +1,18 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Intel Merrifield SoC pinctrl driver
  *
  * Copyright (C) 2016, Intel Corporation
  * Author: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/bitops.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinconf-generic.h>
@@ -729,6 +731,10 @@ static int mrfld_config_set_pin(struct mrfld_pinctrl *mp, unsigned int pin,
 		mask |= BUFCFG_Px_EN_MASK | BUFCFG_PUPD_VAL_MASK;
 		bits |= BUFCFG_PU_EN;
 
+		/* Set default strength value in case none is given */
+		if (arg == 1)
+			arg = 20000;
+
 		switch (arg) {
 		case 50000:
 			bits |= BUFCFG_PUPD_VAL_50K << BUFCFG_PUPD_VAL_SHIFT;
@@ -748,6 +754,10 @@ static int mrfld_config_set_pin(struct mrfld_pinctrl *mp, unsigned int pin,
 	case PIN_CONFIG_BIAS_PULL_DOWN:
 		mask |= BUFCFG_Px_EN_MASK | BUFCFG_PUPD_VAL_MASK;
 		bits |= BUFCFG_PD_EN;
+
+		/* Set default strength value in case none is given */
+		if (arg == 1)
+			arg = 20000;
 
 		switch (arg) {
 		case 50000:
@@ -815,51 +825,10 @@ static int mrfld_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 	return 0;
 }
 
-static int mrfld_config_group_get(struct pinctrl_dev *pctldev,
-				  unsigned int group, unsigned long *config)
-{
-	const unsigned int *pins;
-	unsigned int npins;
-	int ret;
-
-	ret = mrfld_get_group_pins(pctldev, group, &pins, &npins);
-	if (ret)
-		return ret;
-
-	ret = mrfld_config_get(pctldev, pins[0], config);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-static int mrfld_config_group_set(struct pinctrl_dev *pctldev,
-				  unsigned int group, unsigned long *configs,
-				  unsigned int num_configs)
-{
-	const unsigned int *pins;
-	unsigned int npins;
-	int i, ret;
-
-	ret = mrfld_get_group_pins(pctldev, group, &pins, &npins);
-	if (ret)
-		return ret;
-
-	for (i = 0; i < npins; i++) {
-		ret = mrfld_config_set(pctldev, pins[i], configs, num_configs);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static const struct pinconf_ops mrfld_pinconf_ops = {
 	.is_generic = true,
 	.pin_config_get = mrfld_config_get,
 	.pin_config_set = mrfld_config_set,
-	.pin_config_group_get = mrfld_config_group_get,
-	.pin_config_group_set = mrfld_config_group_set,
 };
 
 static const struct pinctrl_desc mrfld_pinctrl_desc = {
@@ -929,17 +898,10 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct acpi_device_id mrfld_acpi_table[] = {
-	{ "INTC1002" },
-	{ }
-};
-MODULE_DEVICE_TABLE(acpi, mrfld_acpi_table);
-
 static struct platform_driver mrfld_pinctrl_driver = {
 	.probe = mrfld_pinctrl_probe,
 	.driver = {
 		.name = "pinctrl-merrifield",
-		.acpi_match_table = mrfld_acpi_table,
 	},
 };
 

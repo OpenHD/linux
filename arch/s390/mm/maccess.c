@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Access kernel memory without faulting -- s390 specific implementation.
  *

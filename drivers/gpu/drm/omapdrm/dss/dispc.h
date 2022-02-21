@@ -1,6 +1,9 @@
 /*
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ * linux/drivers/video/omap2/dss/dispc.h
+ *
+ * Copyright (C) 2011 Texas Instruments
  * Author: Archit Taneja <archit@ti.com>
+ *
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -350,7 +353,7 @@ static inline u16 DISPC_CPR_COEF_B(enum omap_channel channel)
 }
 
 /* DISPC overlay register base addresses */
-static inline u16 DISPC_OVL_BASE(enum omap_plane_id plane)
+static inline u16 DISPC_OVL_BASE(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -370,7 +373,7 @@ static inline u16 DISPC_OVL_BASE(enum omap_plane_id plane)
 }
 
 /* DISPC overlay register offsets */
-static inline u16 DISPC_BA0_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_BA0_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -386,7 +389,7 @@ static inline u16 DISPC_BA0_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_BA1_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_BA1_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -402,7 +405,7 @@ static inline u16 DISPC_BA1_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_BA0_UV_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_BA0_UV_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -422,7 +425,7 @@ static inline u16 DISPC_BA0_UV_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_BA1_UV_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_BA1_UV_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -442,7 +445,7 @@ static inline u16 DISPC_BA1_UV_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_POS_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_POS_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -457,7 +460,7 @@ static inline u16 DISPC_POS_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_SIZE_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_SIZE_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -473,7 +476,7 @@ static inline u16 DISPC_SIZE_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ATTR_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ATTR_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -490,7 +493,7 @@ static inline u16 DISPC_ATTR_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ATTR2_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ATTR2_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -510,7 +513,7 @@ static inline u16 DISPC_ATTR2_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_FIFO_THRESH_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_FIFO_THRESH_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -527,7 +530,7 @@ static inline u16 DISPC_FIFO_THRESH_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_FIFO_SIZE_STATUS_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_FIFO_SIZE_STATUS_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -544,7 +547,7 @@ static inline u16 DISPC_FIFO_SIZE_STATUS_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ROW_INC_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ROW_INC_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -561,7 +564,7 @@ static inline u16 DISPC_ROW_INC_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_PIX_INC_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_PIX_INC_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -578,7 +581,7 @@ static inline u16 DISPC_PIX_INC_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_WINDOW_SKIP_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_WINDOW_SKIP_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -594,7 +597,7 @@ static inline u16 DISPC_WINDOW_SKIP_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_TABLE_BA_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_TABLE_BA_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -610,7 +613,7 @@ static inline u16 DISPC_TABLE_BA_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_FIR_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_FIR_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -628,7 +631,7 @@ static inline u16 DISPC_FIR_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_FIR2_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_FIR2_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -648,7 +651,7 @@ static inline u16 DISPC_FIR2_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_PIC_SIZE_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_PIC_SIZE_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -667,7 +670,7 @@ static inline u16 DISPC_PIC_SIZE_OFFSET(enum omap_plane_id plane)
 }
 
 
-static inline u16 DISPC_ACCU0_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ACCU0_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -685,7 +688,7 @@ static inline u16 DISPC_ACCU0_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ACCU2_0_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ACCU2_0_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -705,7 +708,7 @@ static inline u16 DISPC_ACCU2_0_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ACCU1_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ACCU1_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -723,7 +726,7 @@ static inline u16 DISPC_ACCU1_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_ACCU2_1_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_ACCU2_1_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -744,7 +747,7 @@ static inline u16 DISPC_ACCU2_1_OFFSET(enum omap_plane_id plane)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_H_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_H_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -763,7 +766,7 @@ static inline u16 DISPC_FIR_COEF_H_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_H2_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_H2_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -784,7 +787,7 @@ static inline u16 DISPC_FIR_COEF_H2_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_HV_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_HV_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -803,7 +806,7 @@ static inline u16 DISPC_FIR_COEF_HV_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_HV2_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_HV2_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -824,7 +827,7 @@ static inline u16 DISPC_FIR_COEF_HV2_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4,} */
-static inline u16 DISPC_CONV_COEF_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_CONV_COEF_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -842,7 +845,7 @@ static inline u16 DISPC_CONV_COEF_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_V_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_V_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -862,7 +865,7 @@ static inline u16 DISPC_FIR_COEF_V_OFFSET(enum omap_plane_id plane, u16 i)
 }
 
 /* coef index i = {0, 1, 2, 3, 4, 5, 6, 7} */
-static inline u16 DISPC_FIR_COEF_V2_OFFSET(enum omap_plane_id plane, u16 i)
+static inline u16 DISPC_FIR_COEF_V2_OFFSET(enum omap_plane plane, u16 i)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -882,7 +885,7 @@ static inline u16 DISPC_FIR_COEF_V2_OFFSET(enum omap_plane_id plane, u16 i)
 	}
 }
 
-static inline u16 DISPC_PRELOAD_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_PRELOAD_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:
@@ -899,7 +902,7 @@ static inline u16 DISPC_PRELOAD_OFFSET(enum omap_plane_id plane)
 	}
 }
 
-static inline u16 DISPC_MFLAG_THRESHOLD_OFFSET(enum omap_plane_id plane)
+static inline u16 DISPC_MFLAG_THRESHOLD_OFFSET(enum omap_plane plane)
 {
 	switch (plane) {
 	case OMAP_DSS_GFX:

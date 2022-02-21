@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/mount.h>
 #include <linux/seq_file.h>
 #include <linux/poll.h>
@@ -17,7 +16,7 @@ struct mnt_namespace {
 	u64 event;
 	unsigned int		mounts; /* # of mounts in the namespace */
 	unsigned int		pending_mounts;
-} __randomize_layout;
+};
 
 struct mnt_pcp {
 	int mnt_count;
@@ -61,7 +60,7 @@ struct mount {
 	struct hlist_node mnt_mp_list;	/* list mounts with the same mountpoint */
 	struct list_head mnt_umounting; /* list entry for umount propagation */
 #ifdef CONFIG_FSNOTIFY
-	struct fsnotify_mark_connector __rcu *mnt_fsnotify_marks;
+	struct hlist_head mnt_fsnotify_marks;
 	__u32 mnt_fsnotify_mask;
 #endif
 	int mnt_id;			/* mount identifier */
@@ -70,7 +69,7 @@ struct mount {
 	struct hlist_head mnt_pins;
 	struct fs_pin mnt_umount;
 	struct dentry *mnt_ex_mountpoint;
-} __randomize_layout;
+};
 
 #define MNT_NS_INTERNAL ERR_PTR(-EINVAL) /* distinct from any mnt_namespace */
 
@@ -94,12 +93,6 @@ extern struct mount *__lookup_mnt(struct vfsmount *, struct dentry *);
 
 extern int __legitimize_mnt(struct vfsmount *, unsigned);
 extern bool legitimize_mnt(struct vfsmount *, unsigned);
-
-static inline bool __path_is_mountpoint(const struct path *path)
-{
-	struct mount *m = __lookup_mnt(path->mnt, path->dentry);
-	return m && likely(!(m->mnt.mnt_flags & MNT_SYNC_UMOUNT));
-}
 
 extern void __detach_mounts(struct dentry *dentry);
 

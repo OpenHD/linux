@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_RCULIST_H
 #define _LINUX_RCULIST_H
 
@@ -46,17 +45,19 @@ static inline void INIT_LIST_HEAD_RCU(struct list_head *list)
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
  */
+#ifndef CONFIG_DEBUG_LIST
 static inline void __list_add_rcu(struct list_head *new,
 		struct list_head *prev, struct list_head *next)
 {
-	if (!__list_add_valid(new, prev, next))
-		return;
-
 	new->next = next;
 	new->prev = prev;
 	rcu_assign_pointer(list_next_rcu(prev), new);
 	next->prev = new;
 }
+#else
+void __list_add_rcu(struct list_head *new,
+		    struct list_head *prev, struct list_head *next);
+#endif
 
 /**
  * list_add_rcu - add a new entry to rcu-protected list
@@ -275,9 +276,9 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * primitives such as list_add_rcu() as long as it's guarded by rcu_read_lock().
  */
 #define list_entry_rcu(ptr, type, member) \
-	container_of(READ_ONCE(ptr), type, member)
+	container_of(lockless_dereference(ptr), type, member)
 
-/*
+/**
  * Where are list_empty_rcu() and list_first_entry_rcu()?
  *
  * Implementing those functions following their counterparts list_empty() and
@@ -368,7 +369,7 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * example is when items are added to the list, but never deleted.
  */
 #define list_entry_lockless(ptr, type, member) \
-	container_of((typeof(ptr))READ_ONCE(ptr), type, member)
+	container_of((typeof(ptr))lockless_dereference(ptr), type, member)
 
 /**
  * list_for_each_entry_lockless - iterate over rcu list of given type
@@ -396,42 +397,12 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * @member:	the name of the list_head within the struct.
  *
  * Continue to iterate over list of given type, continuing after
- * the current position which must have been in the list when the RCU read
- * lock was taken.
- * This would typically require either that you obtained the node from a
- * previous walk of the list in the same RCU read-side critical section, or
- * that you held some sort of non-RCU reference (such as a reference count)
- * to keep the node alive *and* in the list.
- *
- * This iterator is similar to list_for_each_entry_from_rcu() except
- * this starts after the given position and that one starts at the given
- * position.
+ * the current position.
  */
 #define list_for_each_entry_continue_rcu(pos, head, member) 		\
 	for (pos = list_entry_rcu(pos->member.next, typeof(*pos), member); \
 	     &pos->member != (head);	\
 	     pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
-
-/**
- * list_for_each_entry_from_rcu - iterate over a list from current point
- * @pos:	the type * to use as a loop cursor.
- * @head:	the head for your list.
- * @member:	the name of the list_node within the struct.
- *
- * Iterate over the tail of a list starting from a given position,
- * which must have been in the list when the RCU read lock was taken.
- * This would typically require either that you obtained the node from a
- * previous walk of the list in the same RCU read-side critical section, or
- * that you held some sort of non-RCU reference (such as a reference count)
- * to keep the node alive *and* in the list.
- *
- * This iterator is similar to list_for_each_entry_continue_rcu() except
- * this starts from the given position and that one starts from the position
- * after the given position.
- */
-#define list_for_each_entry_from_rcu(pos, head, member)			\
-	for (; &(pos)->member != (head);					\
-		pos = list_entry_rcu(pos->member.next, typeof(*(pos)), member))
 
 /**
  * hlist_del_rcu - deletes entry from hash list without re-initialization
@@ -540,8 +511,7 @@ static inline void hlist_add_tail_rcu(struct hlist_node *n,
 {
 	struct hlist_node *i, *last = NULL;
 
-	/* Note: write side code, so rcu accessors are not needed. */
-	for (i = h->first; i; i = i->next)
+	for (i = hlist_first_rcu(h); i; i = hlist_next_rcu(i))
 		last = i;
 
 	if (last) {

@@ -274,11 +274,11 @@ int snd_hdac_bus_parse_capabilities(struct hdac_bus *bus)
 	unsigned int offset;
 	unsigned int counter = 0;
 
-	offset = snd_hdac_chip_readw(bus, LLCH);
+	offset = snd_hdac_chip_readl(bus, LLCH);
 
 	/* Lets walk the linked capabilities list */
 	do {
-		cur_cap = _snd_hdac_chip_readl(bus, offset);
+		cur_cap = _snd_hdac_chip_read(l, bus, offset);
 
 		dev_dbg(bus->dev, "Capability version: 0x%x\n",
 			(cur_cap & AZX_CAP_HDR_VER_MASK) >> AZX_CAP_HDR_VER_OFF);
@@ -321,8 +321,7 @@ int snd_hdac_bus_parse_capabilities(struct hdac_bus *bus)
 			break;
 
 		default:
-			dev_err(bus->dev, "Unknown capability %d\n", cur_cap);
-			cur_cap = 0;
+			dev_dbg(bus->dev, "Unknown capability %d\n", cur_cap);
 			break;
 		}
 
@@ -385,7 +384,7 @@ void snd_hdac_bus_exit_link_reset(struct hdac_bus *bus)
 EXPORT_SYMBOL_GPL(snd_hdac_bus_exit_link_reset);
 
 /* reset codec link */
-int snd_hdac_bus_reset_link(struct hdac_bus *bus, bool full_reset)
+static int azx_reset(struct hdac_bus *bus, bool full_reset)
 {
 	if (!full_reset)
 		goto skip_reset;
@@ -410,7 +409,7 @@ int snd_hdac_bus_reset_link(struct hdac_bus *bus, bool full_reset)
  skip_reset:
 	/* check to see if controller is ready */
 	if (!snd_hdac_chip_readb(bus, GCTL)) {
-		dev_dbg(bus->dev, "controller not ready!\n");
+		dev_dbg(bus->dev, "azx_reset: controller not ready!\n");
 		return -EBUSY;
 	}
 
@@ -425,7 +424,6 @@ int snd_hdac_bus_reset_link(struct hdac_bus *bus, bool full_reset)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_hdac_bus_reset_link);
 
 /* enable interrupts */
 static void azx_int_enable(struct hdac_bus *bus)
@@ -480,7 +478,7 @@ bool snd_hdac_bus_init_chip(struct hdac_bus *bus, bool full_reset)
 		return false;
 
 	/* reset controller */
-	snd_hdac_bus_reset_link(bus, full_reset);
+	azx_reset(bus, full_reset);
 
 	/* clear interrupts */
 	azx_int_clear(bus);

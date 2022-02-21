@@ -244,7 +244,7 @@ static void cdv_intel_lvds_restore(struct drm_connector *connector)
 {
 }
 
-static enum drm_mode_status cdv_intel_lvds_mode_valid(struct drm_connector *connector,
+static int cdv_intel_lvds_mode_valid(struct drm_connector *connector,
 			      struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
@@ -284,7 +284,8 @@ static bool cdv_intel_lvds_mode_fixup(struct drm_encoder *encoder,
 			    head) {
 		if (tmp_encoder != encoder
 		    && tmp_encoder->crtc == encoder->crtc) {
-			pr_err("Can't enable LVDS and another encoder on the same pipe\n");
+			printk(KERN_ERR "Can't enable LVDS and another "
+			       "encoder on the same pipe\n");
 			return false;
 		}
 	}
@@ -383,6 +384,19 @@ static void cdv_intel_lvds_mode_set(struct drm_encoder *encoder,
 		pfit_control |= PANEL_8TO6_DITHER_ENABLE;
 
 	REG_WRITE(PFIT_CONTROL, pfit_control);
+}
+
+/**
+ * Detect the LVDS connection.
+ *
+ * This always returns CONNECTOR_STATUS_CONNECTED.
+ * This connector should only have
+ * been set up if the LVDS was actually connected anyway.
+ */
+static enum drm_connector_status cdv_intel_lvds_detect(
+				struct drm_connector *connector, bool force)
+{
+	return connector_status_connected;
 }
 
 /**
@@ -507,6 +521,7 @@ static const struct drm_connector_helper_funcs
 
 static const struct drm_connector_funcs cdv_intel_lvds_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
+	.detect = cdv_intel_lvds_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.set_property = cdv_intel_lvds_set_property,
 	.destroy = cdv_intel_lvds_destroy,
@@ -758,13 +773,13 @@ out:
 
 failed_find:
 	mutex_unlock(&dev->mode_config.mutex);
-	pr_err("Failed find\n");
+	printk(KERN_ERR "Failed find\n");
 	psb_intel_i2c_destroy(gma_encoder->ddc_bus);
 failed_ddc:
-	pr_err("Failed DDC\n");
+	printk(KERN_ERR "Failed DDC\n");
 	psb_intel_i2c_destroy(gma_encoder->i2c_bus);
 failed_blc_i2c:
-	pr_err("Failed BLC\n");
+	printk(KERN_ERR "Failed BLC\n");
 	drm_encoder_cleanup(encoder);
 	drm_connector_cleanup(connector);
 	kfree(lvds_priv);

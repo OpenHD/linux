@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This file contains code to reset and initialize USB host controllers.
  * Some of it includes work-arounds for PCI hardware and BIOS quirks.
@@ -18,7 +17,7 @@
 #include <linux/dmi.h>
 #include "pci-quirks.h"
 #include "xhci-ext-caps.h"
-#include <soc/bcm2835/raspberrypi-firmware.h>
+
 
 #define UHCI_USBLEGSUP		0xc0		/* legacy support */
 #define UHCI_USBCMD		0		/* command register */
@@ -65,23 +64,6 @@
 #define	AB_DATA(addr)		((addr) + 0x04)
 #define	AX_INDXC		0x30
 #define	AX_DATAC		0x34
-
-#define PT_ADDR_INDX		0xE8
-#define PT_READ_INDX		0xE4
-#define PT_SIG_1_ADDR		0xA520
-#define PT_SIG_2_ADDR		0xA521
-#define PT_SIG_3_ADDR		0xA522
-#define PT_SIG_4_ADDR		0xA523
-#define PT_SIG_1_DATA		0x78
-#define PT_SIG_2_DATA		0x56
-#define PT_SIG_3_DATA		0x34
-#define PT_SIG_4_DATA		0x12
-#define PT4_P1_REG		0xB521
-#define PT4_P2_REG		0xB522
-#define PT2_P1_REG		0xD520
-#define PT2_P2_REG		0xD521
-#define PT1_P1_REG		0xD522
-#define PT1_P2_REG		0xD523
 
 #define	NB_PCIE_INDX_ADDR	0xe0
 #define	NB_PCIE_INDX_DATA	0xe4
@@ -537,124 +519,6 @@ void usb_amd_dev_put(void)
 EXPORT_SYMBOL_GPL(usb_amd_dev_put);
 
 /*
- * Check if port is disabled in BIOS on AMD Promontory host.
- * BIOS Disabled ports may wake on connect/disconnect and need
- * driver workaround to keep them disabled.
- * Returns true if port is marked disabled.
- */
-bool usb_amd_pt_check_port(struct device *device, int port)
-{
-	unsigned char value, port_shift;
-	struct pci_dev *pdev;
-	u16 reg;
-
-	pdev = to_pci_dev(device);
-	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_1_ADDR);
-
-	pci_read_config_byte(pdev, PT_READ_INDX, &value);
-	if (value != PT_SIG_1_DATA)
-		return false;
-
-	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_2_ADDR);
-
-	pci_read_config_byte(pdev, PT_READ_INDX, &value);
-	if (value != PT_SIG_2_DATA)
-		return false;
-
-	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_3_ADDR);
-
-	pci_read_config_byte(pdev, PT_READ_INDX, &value);
-	if (value != PT_SIG_3_DATA)
-		return false;
-
-	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_4_ADDR);
-
-	pci_read_config_byte(pdev, PT_READ_INDX, &value);
-	if (value != PT_SIG_4_DATA)
-		return false;
-
-	/* Check disabled port setting, if bit is set port is enabled */
-	switch (pdev->device) {
-	case 0x43b9:
-	case 0x43ba:
-	/*
-	 * device is AMD_PROMONTORYA_4(0x43b9) or PROMONTORYA_3(0x43ba)
-	 * PT4_P1_REG bits[7..1] represents USB2.0 ports 6 to 0
-	 * PT4_P2_REG bits[6..0] represents ports 13 to 7
-	 */
-		if (port > 6) {
-			reg = PT4_P2_REG;
-			port_shift = port - 7;
-		} else {
-			reg = PT4_P1_REG;
-			port_shift = port + 1;
-		}
-		break;
-	case 0x43bb:
-	/*
-	 * device is AMD_PROMONTORYA_2(0x43bb)
-	 * PT2_P1_REG bits[7..5] represents USB2.0 ports 2 to 0
-	 * PT2_P2_REG bits[5..0] represents ports 9 to 3
-	 */
-		if (port > 2) {
-			reg = PT2_P2_REG;
-			port_shift = port - 3;
-		} else {
-			reg = PT2_P1_REG;
-			port_shift = port + 5;
-		}
-		break;
-	case 0x43bc:
-	/*
-	 * device is AMD_PROMONTORYA_1(0x43bc)
-	 * PT1_P1_REG[7..4] represents USB2.0 ports 3 to 0
-	 * PT1_P2_REG[5..0] represents ports 9 to 4
-	 */
-		if (port > 3) {
-			reg = PT1_P2_REG;
-			port_shift = port - 4;
-		} else {
-			reg = PT1_P1_REG;
-			port_shift = port + 4;
-		}
-		break;
-	default:
-		return false;
-	}
-	pci_write_config_word(pdev, PT_ADDR_INDX, reg);
-	pci_read_config_byte(pdev, PT_READ_INDX, &value);
-
-	return !(value & BIT(port_shift));
-}
-EXPORT_SYMBOL_GPL(usb_amd_pt_check_port);
-
-/* The VL805 firmware may either be loaded from an EEPROM or by the BIOS into
- * memory. If run from memory it must be reloaded after a PCI fundmental reset.
- * The Raspberry Pi firmware acts as the BIOS in this case.
- */
-static void usb_vl805_init(struct pci_dev *pdev)
-{
-#if IS_ENABLED(CONFIG_RASPBERRYPI_FIRMWARE)
-	struct rpi_firmware *fw;
-	struct {
-		u32 dev_addr;
-	} packet;
-	int ret;
-
-	fw = rpi_firmware_get(NULL);
-	if (!fw)
-		return;
-
-	packet.dev_addr = (pdev->bus->number << 20) |
-		(PCI_SLOT(pdev->devfn) << 15) | (PCI_FUNC(pdev->devfn) << 12);
-
-	dev_dbg(&pdev->dev, "RPI_FIRMWARE_NOTIFY_XHCI_RESET %x", packet.dev_addr);
-	ret = rpi_firmware_property(fw, RPI_FIRMWARE_NOTIFY_XHCI_RESET,
-			&packet, sizeof(packet));
-#endif
-}
-
-/*
  * Make sure the controller is completely inactive, unable to
  * generate interrupts or do DMA.
  */
@@ -984,7 +848,7 @@ static void quirk_usb_disable_ehci(struct pci_dev *pdev)
 			ehci_bios_handoff(pdev, op_reg_base, cap, offset);
 			break;
 		case 0: /* Illegal reserved cap, set cap=0 so we exit */
-			cap = 0; /* fall through */
+			cap = 0; /* then fallthrough... */
 		default:
 			dev_warn(&pdev->dev,
 				 "EHCI: unrecognized capability %02x\n",
@@ -1236,9 +1100,6 @@ static void quirk_usb_handoff_xhci(struct pci_dev *pdev)
 hc_init:
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL)
 		usb_enable_intel_xhci_ports(pdev);
-
-	if (pdev->vendor == PCI_VENDOR_ID_VIA && pdev->device == 0x3483)
-		usb_vl805_init(pdev);
 
 	op_reg_base = base + XHCI_HC_LENGTH(readl(base));
 

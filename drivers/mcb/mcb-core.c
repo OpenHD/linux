@@ -418,22 +418,6 @@ void mcb_bus_add_devices(const struct mcb_bus *bus)
 EXPORT_SYMBOL_GPL(mcb_bus_add_devices);
 
 /**
- * mcb_get_resource() - get a resource for a mcb device
- * @dev: the mcb device
- * @type: the type of resource
- */
-struct resource *mcb_get_resource(struct mcb_device *dev, unsigned int type)
-{
-	if (type == IORESOURCE_MEM)
-		return &dev->mem;
-	else if (type == IORESOURCE_IRQ)
-		return &dev->irq;
-	else
-		return NULL;
-}
-EXPORT_SYMBOL_GPL(mcb_get_resource);
-
-/**
  * mcb_request_mem() - Request memory
  * @dev: The @mcb_device the memory is for
  * @name: The name for the memory reference.
@@ -476,9 +460,7 @@ EXPORT_SYMBOL_GPL(mcb_release_mem);
 
 static int __mcb_get_irq(struct mcb_device *dev)
 {
-	struct resource *irq;
-
-	irq = mcb_get_resource(dev, IORESOURCE_IRQ);
+	struct resource *irq = &dev->irq;
 
 	return irq->start;
 }

@@ -124,7 +124,7 @@ static	int ti_tscadc_probe(struct platform_device *pdev)
 	struct ti_tscadc_dev	*tscadc;
 	struct resource		*res;
 	struct clk		*clk;
-	struct device_node	*node;
+	struct device_node	*node = pdev->dev.of_node;
 	struct mfd_cell		*cell;
 	struct property         *prop;
 	const __be32            *cur;
@@ -169,9 +169,10 @@ static	int ti_tscadc_probe(struct platform_device *pdev)
 
 	/* Allocate memory for device */
 	tscadc = devm_kzalloc(&pdev->dev, sizeof(*tscadc), GFP_KERNEL);
-	if (!tscadc)
+	if (!tscadc) {
+		dev_err(&pdev->dev, "failed to allocate memory.\n");
 		return -ENOMEM;
-
+	}
 	tscadc->dev = &pdev->dev;
 
 	err = platform_get_irq(pdev, 0);
@@ -182,7 +183,6 @@ static	int ti_tscadc_probe(struct platform_device *pdev)
 		tscadc->irq = err;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	tscadc->tscadc_phys_base = res->start;
 	tscadc->tscadc_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(tscadc->tscadc_base))
 		return PTR_ERR(tscadc->tscadc_base);

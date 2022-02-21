@@ -1,4 +1,4 @@
-/*
+/**
  * Driver for Zarlink zl10036 DVB-S silicon tuner
  *
  * Copyright (C) 2006 Tino Reichardt
@@ -12,6 +12,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  **
  * The data sheet for this tuner can be found at:
@@ -81,8 +85,8 @@ static int zl10036_read_status_reg(struct zl10036_state *state)
 	deb_i2c("R(status): %02x  [FL=%d]\n", status,
 		(status & STATUS_FL) ? 1 : 0);
 	if (status & STATUS_POR)
-		deb_info("%s: Power-On-Reset bit enabled - need to initialize the tuner\n",
-			 __func__);
+		deb_info("%s: Power-On-Reset bit enabled - "
+			"need to initialize the tuner\n", __func__);
 
 	return status;
 }
@@ -130,12 +134,14 @@ static int zl10036_write(struct zl10036_state *state, u8 buf[], u8 count)
 	return 0;
 }
 
-static void zl10036_release(struct dvb_frontend *fe)
+static int zl10036_release(struct dvb_frontend *fe)
 {
 	struct zl10036_state *state = fe->tuner_priv;
 
 	fe->tuner_priv = NULL;
 	kfree(state);
+
+	return 0;
 }
 
 static int zl10036_sleep(struct dvb_frontend *fe)
@@ -157,7 +163,7 @@ static int zl10036_sleep(struct dvb_frontend *fe)
 	return ret;
 }
 
-/*
+/**
  * register map of the ZL10036/ZL10038
  *
  * reg[default] content
@@ -219,7 +225,7 @@ static int zl10036_set_bandwidth(struct zl10036_state *state, u32 fbw)
 	if (fbw <= 28820) {
 		br = _BR_MAXIMUM;
 	} else {
-		/*
+		/**
 		 *  f(bw)=34,6MHz f(xtal)=10.111MHz
 		 *  br = (10111/34600) * 63 * 1/K = 14;
 		 */
@@ -311,11 +317,11 @@ static int zl10036_set_params(struct dvb_frontend *fe)
 
 	/* ensure correct values
 	 * maybe redundant as core already checks this */
-	if ((frequency < fe->ops.info.frequency_min_hz / kHz)
-	||  (frequency > fe->ops.info.frequency_max_hz / kHz))
+	if ((frequency < fe->ops.info.frequency_min)
+	||  (frequency > fe->ops.info.frequency_max))
 		return -EINVAL;
 
-	/*
+	/**
 	 * alpha = 1.35 for dvb-s
 	 * fBW = (alpha*symbolrate)/(2*0.8)
 	 * 1.35 / (2*0.8) = 27 / 32
@@ -443,8 +449,8 @@ static int zl10036_init(struct dvb_frontend *fe)
 static const struct dvb_tuner_ops zl10036_tuner_ops = {
 	.info = {
 		.name = "Zarlink ZL10036",
-		.frequency_min_hz =  950 * MHz,
-		.frequency_max_hz = 2175 * MHz
+		.frequency_min = 950000,
+		.frequency_max = 2175000
 	},
 	.init = zl10036_init,
 	.release = zl10036_release,

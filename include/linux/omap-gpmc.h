@@ -25,44 +25,28 @@ struct gpmc_nand_ops {
 
 struct gpmc_nand_regs;
 
-struct gpmc_onenand_info {
-	bool sync_read;
-	bool sync_write;
-	int burst_len;
-};
-
 #if IS_ENABLED(CONFIG_OMAP_GPMC)
 struct gpmc_nand_ops *gpmc_omap_get_nand_ops(struct gpmc_nand_regs *regs,
 					     int cs);
-/**
- * gpmc_omap_onenand_set_timings - set optimized sync timings.
- * @cs:      Chip Select Region
- * @freq:    Chip frequency
- * @latency: Burst latency cycle count
- * @info:    Structure describing parameters used
- *
- * Sets optimized timings for the @cs region based on @freq and @latency.
- * Updates the @info structure based on the GPMC settings.
- */
-int gpmc_omap_onenand_set_timings(struct device *dev, int cs, int freq,
-				  int latency,
-				  struct gpmc_onenand_info *info);
-
 #else
 static inline struct gpmc_nand_ops *gpmc_omap_get_nand_ops(struct gpmc_nand_regs *regs,
 							   int cs)
 {
 	return NULL;
 }
+#endif /* CONFIG_OMAP_GPMC */
 
-static inline
-int gpmc_omap_onenand_set_timings(struct device *dev, int cs, int freq,
-				  int latency,
-				  struct gpmc_onenand_info *info)
+/*--------------------------------*/
+
+/* deprecated APIs */
+#if IS_ENABLED(CONFIG_OMAP_GPMC)
+void gpmc_update_nand_reg(struct gpmc_nand_regs *reg, int cs);
+#else
+static inline void gpmc_update_nand_reg(struct gpmc_nand_regs *reg, int cs)
 {
-	return -EINVAL;
 }
 #endif /* CONFIG_OMAP_GPMC */
+/*--------------------------------*/
 
 extern int gpmc_calc_timings(struct gpmc_timings *gpmc_t,
 			     struct gpmc_settings *gpmc_s,
@@ -91,6 +75,17 @@ extern void omap3_gpmc_restore_context(void);
 struct gpmc_timings;
 struct omap_nand_platform_data;
 struct omap_onenand_platform_data;
+
+#if IS_ENABLED(CONFIG_MTD_NAND_OMAP2)
+extern int gpmc_nand_init(struct omap_nand_platform_data *d,
+			  struct gpmc_timings *gpmc_t);
+#else
+static inline int gpmc_nand_init(struct omap_nand_platform_data *d,
+				 struct gpmc_timings *gpmc_t)
+{
+	return 0;
+}
+#endif
 
 #if IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
 extern int gpmc_onenand_init(struct omap_onenand_platform_data *d);

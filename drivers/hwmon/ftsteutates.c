@@ -60,7 +60,7 @@
 
 static const unsigned short normal_i2c[] = { 0x73, I2C_CLIENT_END };
 
-static const struct i2c_device_id fts_id[] = {
+static struct i2c_device_id fts_id[] = {
 	{ "ftsteutates", 0 },
 	{ }
 };
@@ -435,7 +435,6 @@ clear_temp_alarm(struct device *dev, struct device_attribute *devattr,
 		goto error;
 
 	data->valid = false;
-	ret = count;
 error:
 	mutex_unlock(&data->update_lock);
 	return ret;
@@ -509,7 +508,6 @@ clear_fan_alarm(struct device *dev, struct device_attribute *devattr,
 		goto error;
 
 	data->valid = false;
-	ret = count;
 error:
 	mutex_unlock(&data->update_lock);
 	return ret;

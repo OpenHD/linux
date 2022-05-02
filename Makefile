@@ -20,7 +20,7 @@ $(foreach overlay,$(KERNEL_OVERLAYS),$(eval $(value set_srctree_overlay)))
 VERSION = 4
 PATCHLEVEL = 9
 SUBLEVEL = 253
-EXTRAVERSION =
+EXTRAVERSION = OpenHD-2.1
 NAME = Roaring Lionus
 
 # *DOCUMENTATION*

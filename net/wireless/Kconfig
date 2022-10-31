@@ -70,7 +70,8 @@ config CFG80211_DEVELOPER_WARNINGS
 
 config CFG80211_CERTIFICATION_ONUS
 	bool "cfg80211 certification onus"
-	default y
+	depends on EXPERT
+	default n
 	help
 	  You should disable this option unless you are both capable
 	  and willing to ensure your system will remain regulatory

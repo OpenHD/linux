@@ -2958,7 +2958,7 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 	struct ieee80211_channel *channel;
 	int chan_pwr, new_pwr;
 	u16 ctl = NO_CTL;
-	pr_emerg("ath9k_hw_apply_txpower: begin\n");
+	pr_emerg("OpenHD:ath9k_hw_apply_txpower: begin\n");
 
 	if (!chan)
 		return;
@@ -2970,7 +2970,7 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 	chan_pwr = min_t(int, channel->max_power * 2, MAX_COMBINED_POWER);
 	new_pwr = min_t(int, chan_pwr, reg->power_limit);
 
-	pr_emerg("ath9k_hw_apply_txpower: chan_pwr:%d, new_pwr%d\n",chan_pwr,new_pwr);
+	pr_emerg("OpenHD:ath9k_hw_apply_txpower: chan_pwr:%d, new_pwr%d\n",chan_pwr,new_pwr);
 
 	ah->eep_ops->set_txpower(ah, chan, ctl,
 				 get_antenna_gain(ah, chan), new_pwr, test);

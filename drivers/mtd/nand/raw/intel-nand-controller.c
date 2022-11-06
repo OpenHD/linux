@@ -16,7 +16,6 @@
 #include <linux/mtd/rawnand.h>
 #include <linux/mtd/nand.h>
 
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -581,7 +580,6 @@ static int ebu_nand_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct ebu_nand_controller *ebu_host;
-	struct device_node *chip_np;
 	struct nand_chip *nand;
 	struct mtd_info *mtd;
 	struct resource *res;
@@ -606,12 +604,7 @@ static int ebu_nand_probe(struct platform_device *pdev)
 	if (IS_ERR(ebu_host->hsnand))
 		return PTR_ERR(ebu_host->hsnand);
 
-	chip_np = of_get_next_child(dev->of_node, NULL);
-	if (!chip_np)
-		return dev_err_probe(dev, -EINVAL,
-				     "Could not find child node for the NAND chip\n");
-
-	ret = of_property_read_u32(chip_np, "reg", &cs);
+	ret = device_property_read_u32(dev, "reg", &cs);
 	if (ret) {
 		dev_err(dev, "failed to get chip select: %d\n", ret);
 		return ret;
@@ -667,7 +660,7 @@ static int ebu_nand_probe(struct platform_device *pdev)
 	writel(ebu_host->cs[cs].addr_sel | EBU_ADDR_MASK(5) | EBU_ADDR_SEL_REGEN,
 	       ebu_host->ebu + EBU_ADDR_SEL(cs));
 
-	nand_set_flash_node(&ebu_host->chip, chip_np);
+	nand_set_flash_node(&ebu_host->chip, dev->of_node);
 
 	mtd = nand_to_mtd(&ebu_host->chip);
 	if (!mtd->name) {
@@ -723,6 +716,7 @@ static int ebu_nand_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id ebu_nand_match[] = {
+	{ .compatible = "intel,nand-controller" },
 	{ .compatible = "intel,lgm-ebunand" },
 	{}
 };

@@ -422,7 +422,7 @@ int drmm_connector_init(struct drm_device *dev,
 	if (drm_WARN_ON(dev, funcs && funcs->destroy))
 		return -EINVAL;
 
-	ret = __drm_connector_init(dev, connector, funcs, connector_type, ddc);
+	ret = __drm_connector_init(dev, connector, funcs, connector_type, NULL);
 	if (ret)
 		return ret;
 

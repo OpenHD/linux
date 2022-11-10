@@ -1549,7 +1549,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 	u32 qnum;
 	int r;
 
-	pr_notice("OpenHD:ath9k_hw_channel_change: begin\n");
+	//pr_notice("OpenHD:ath9k_hw_channel_change: begin\n");
 
 	if (pCap->hw_caps & ATH9K_HW_CAP_FCC_BAND_SWITCH) {
 		u32 flags_diff = chan->channelFlags ^ ah->curchan->channelFlags;
@@ -1582,7 +1582,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 			return false;
 		}
 	}
-	pr_notice("OpenHD:ath9k_hw_channel_change: A\n");
+	//pr_notice("OpenHD:ath9k_hw_channel_change: A\n");
 
 	ath9k_hw_set_channel_regs(ah, chan);
 
@@ -1609,7 +1609,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 		ah->ah_flags &= ~AH_FASTCC;
 	}
 
-	pr_notice("OpenHD:ath9k_hw_channel_change: end\n");
+	pr_notice("OpenHD:ath9k_hw_channel_change: end, channel:%d\n",(int)chan->channel);
 
 	return true;
 }

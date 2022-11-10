@@ -45,6 +45,7 @@ static inline int ath9k_hw_calibrate(struct ath_hw *ah,
 				     struct ath9k_channel *chan,
 				     u8 rxchainmask, bool longcal)
 {
+	pr_emerg("OpenHD:ath9k_hw_calibrate\n");
 	return ath9k_hw_ops(ah)->calibrate(ah, chan, rxchainmask, longcal);
 }
 
@@ -140,12 +141,14 @@ static inline bool ath9k_hw_detect_bb_hang(struct ath_hw *ah)
 static inline int ath9k_hw_rf_set_freq(struct ath_hw *ah,
 				       struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_rf_set_freq\n");
 	return ath9k_hw_private_ops(ah)->rf_set_freq(ah, chan);
 }
 
 static inline void ath9k_hw_spur_mitigate_freq(struct ath_hw *ah,
 					       struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_rf_set_freq\n");
 	ath9k_hw_private_ops(ah)->spur_mitigate_freq(ah, chan);
 }
 
@@ -153,6 +156,7 @@ static inline bool ath9k_hw_set_rf_regs(struct ath_hw *ah,
 					struct ath9k_channel *chan,
 					u16 modesIndex)
 {
+	pr_emerg("OpenHD:ath9k_hw_set_rf_regs\n");
 	if (!ath9k_hw_private_ops(ah)->set_rf_regs)
 		return true;
 
@@ -162,18 +166,21 @@ static inline bool ath9k_hw_set_rf_regs(struct ath_hw *ah,
 static inline void ath9k_hw_init_bb(struct ath_hw *ah,
 				    struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_init_bb\n");
 	return ath9k_hw_private_ops(ah)->init_bb(ah, chan);
 }
 
 static inline void ath9k_hw_set_channel_regs(struct ath_hw *ah,
 					     struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_set_channel_regs\n");
 	return ath9k_hw_private_ops(ah)->set_channel_regs(ah, chan);
 }
 
 static inline int ath9k_hw_process_ini(struct ath_hw *ah,
 					struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_process_ini\n");
 	return ath9k_hw_private_ops(ah)->process_ini(ah, chan);
 }
 
@@ -188,6 +195,7 @@ static inline void ath9k_olc_init(struct ath_hw *ah)
 static inline void ath9k_hw_set_rfmode(struct ath_hw *ah,
 				       struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_set_rfmode\n");
 	return ath9k_hw_private_ops(ah)->set_rfmode(ah, chan);
 }
 
@@ -199,6 +207,7 @@ static inline void ath9k_hw_mark_phy_inactive(struct ath_hw *ah)
 static inline void ath9k_hw_set_delta_slope(struct ath_hw *ah,
 					    struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_set_delta_slope\n");
 	return ath9k_hw_private_ops(ah)->set_delta_slope(ah, chan);
 }
 
@@ -235,6 +244,7 @@ static inline void ath9k_hw_do_getnf(struct ath_hw *ah,
 static inline bool ath9k_hw_init_cal(struct ath_hw *ah,
 				     struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_init_cal\n");
 	return ath9k_hw_private_ops(ah)->init_cal(ah, chan);
 }
 
@@ -248,6 +258,7 @@ static inline int ath9k_hw_fast_chan_change(struct ath_hw *ah,
 					    struct ath9k_channel *chan,
 					    u8 *ini_reloaded)
 {
+	pr_emerg("OpenHD:ath9k_hw_fast_chan_change\n");
 	return ath9k_hw_private_ops(ah)->fast_chan_change(ah, chan,
 							  ini_reloaded);
 }
@@ -268,6 +279,7 @@ static inline void ath9k_hw_init_cal_settings(struct ath_hw *ah)
 static inline u32 ath9k_hw_compute_pll_control(struct ath_hw *ah,
 					       struct ath9k_channel *chan)
 {
+	pr_emerg("OpenHD:ath9k_hw_compute_pll_control\n");
 	return ath9k_hw_private_ops(ah)->compute_pll_control(ah, chan);
 }
 

@@ -1609,7 +1609,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 		ah->ah_flags &= ~AH_FASTCC;
 	}
 
-	pr_emerg("OpenHD:ath9k_hw_channel_change: begin\n");
+	pr_emerg("OpenHD:ath9k_hw_channel_change: end\n");
 
 	return true;
 }

@@ -148,7 +148,7 @@ static inline int ath9k_hw_rf_set_freq(struct ath_hw *ah,
 static inline void ath9k_hw_spur_mitigate_freq(struct ath_hw *ah,
 					       struct ath9k_channel *chan)
 {
-	pr_notice("OpenHD:ath9k_hw_rf_set_freq\n");
+	pr_notice("OpenHD:ath9k_hw_spur_mitigate_freq\n");
 	ath9k_hw_private_ops(ah)->spur_mitigate_freq(ah, chan);
 }
 

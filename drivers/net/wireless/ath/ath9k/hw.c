@@ -1549,7 +1549,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 	u32 qnum;
 	int r;
 
-	pr_emerg("OpenHD:ath9k_hw_channel_change: begin\n");
+	pr_notice("OpenHD:ath9k_hw_channel_change: begin\n");
 
 	if (pCap->hw_caps & ATH9K_HW_CAP_FCC_BAND_SWITCH) {
 		u32 flags_diff = chan->channelFlags ^ ah->curchan->channelFlags;
@@ -1582,7 +1582,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 			return false;
 		}
 	}
-	pr_emerg("OpenHD:ath9k_hw_channel_change: A\n");
+	pr_notice("OpenHD:ath9k_hw_channel_change: A\n");
 
 	ath9k_hw_set_channel_regs(ah, chan);
 
@@ -1609,7 +1609,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 		ah->ah_flags &= ~AH_FASTCC;
 	}
 
-	pr_emerg("OpenHD:ath9k_hw_channel_change: end\n");
+	pr_notice("OpenHD:ath9k_hw_channel_change: end\n");
 
 	return true;
 }
@@ -2963,7 +2963,7 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 	struct ieee80211_channel *channel;
 	int chan_pwr, new_pwr;
 	u16 ctl = NO_CTL;
-	//pr_emerg("OpenHD:ath9k_hw_apply_txpower: begin\n");
+	//pr_notice("OpenHD:ath9k_hw_apply_txpower: begin\n");
 
 	if (!chan)
 		return;
@@ -2975,7 +2975,7 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 	chan_pwr = min_t(int, channel->max_power * 2, MAX_COMBINED_POWER);
 	new_pwr = min_t(int, chan_pwr, reg->power_limit);
 
-	pr_emerg("OpenHD:ath9k_hw_apply_txpower: chan_pwr:%d, new_pwr%d\n",chan_pwr,new_pwr);
+	pr_notice("OpenHD:ath9k_hw_apply_txpower: chan_pwr:%d, new_pwr%d\n",chan_pwr,new_pwr);
 
 	ah->eep_ops->set_txpower(ah, chan, ctl,
 				 get_antenna_gain(ah, chan), new_pwr, test);

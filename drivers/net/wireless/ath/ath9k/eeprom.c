@@ -445,6 +445,8 @@ void ath9k_hw_update_regulatory_maxpower(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
 	struct ath_regulatory *regulatory = ath9k_hw_regulatory(ah);
+	pr_notice("OpenHD:ath9k_hw_update_regulatory_maxpower current alpha2[%c%c] max_power_level:%d current_rd:%d power_limit:%d \n",
+		  regulatory->alpha2[0],regulatory->alpha2[1],(int)regulatory->max_power_level,(int)current_rd,(int)regulatory->power_limit);
 
 	switch (ar5416_get_ntxchains(ah->txchainmask)) {
 	case 1:

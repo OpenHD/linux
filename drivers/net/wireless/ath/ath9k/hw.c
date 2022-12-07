@@ -2986,6 +2986,7 @@ void ath9k_hw_set_txpowerlimit(struct ath_hw *ah, u32 limit, bool test)
 	struct ath_regulatory *reg = ath9k_hw_regulatory(ah);
 	struct ath9k_channel *chan = ah->curchan;
 	struct ieee80211_channel *channel = chan->chan;
+	pr_notice("OpenHD:ath9k_hw_set_txpowerlimit: limit %d\n",(int)limit);
 
 	reg->power_limit = min_t(u32, limit, MAX_COMBINED_POWER);
 	if (test)

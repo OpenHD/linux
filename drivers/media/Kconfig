@@ -202,6 +202,14 @@ menu "Video4Linux options"
 source "drivers/media/v4l2-core/Kconfig"
 endmenu
 
+config VIDEO_LOOPBACK
+	tristate
+	depends on MEDIA_SUPPORT
+	depends on MEDIA_CAMERA_SUPPORT || MEDIA_ANALOG_TV_SUPPORT || MEDIA_RADIO_SUPPORT || MEDIA_SDR_SUPPORT
+	default y
+
+source "drivers/media/v4l2loopback/Kconfig"
+
 menu "Media controller options"
 	visible if MEDIA_CONTROLLER
 

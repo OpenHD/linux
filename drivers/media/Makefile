@@ -18,12 +18,8 @@ ifeq ($(CONFIG_MEDIA_CONTROLLER),y)
 endif
 
 obj-$(CONFIG_VIDEO_DEV) += v4l2-core/
-<<<<<<< HEAD
-obj-$(CONFIG_DVB_CORE) += dvb-core/
-=======
 obj-$(CONFIG_VIDEO_LOOPBACK) += v4l2loopback/
 obj-$(CONFIG_DVB_CORE)  += dvb-core/
->>>>>>> 1eb8379ad993 (add loopback support)
 
 # There are both core and drivers at RC subtree - merge before drivers
 obj-y += rc/

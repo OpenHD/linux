@@ -703,7 +703,8 @@ Params: swap_lr                 Reverse the channel allocation, which will also
                                 nothing on BCM2711 (default off)
         pins_12_13              Select GPIOs 12 & 13 (default)
         pins_18_19              Select GPIOs 18 & 19
-        pins_40_41              Select GPIOs 40 & 41
+        pins_40_41              Select GPIOs 40 & 41 (not available on CM4, used
+                                for other purposes)
         pins_40_45              Select GPIOs 40 & 45 (don't use on BCM2711 - the
                                 pins are on different controllers)
 
@@ -1039,9 +1040,11 @@ Params: dr_mode                 Dual role mode: "host", "peripheral" or "otg"
 
 
 Name:   edt-ft5406
-Info:   Overlay for the EDT FT5406 touchscreen on the CSI/DSI I2C interface.
+Info:   Overlay for the EDT FT5406 touchscreen.
         This works with the Raspberry Pi 7" touchscreen when not being polled
         by the firmware.
+        By default the overlay uses the i2c_csi_dsi I2C interface, but this
+        can be overridden
         You MUST use either "disable_touchscreen=1" or "ignore_lcd=1" in
         config.txt to stop the firmware polling the touchscreen.
 Load:   dtoverlay=edt-ft5406,<param>=<val>
@@ -1050,6 +1053,19 @@ Params: sizex                   Touchscreen size x (default 800)
         invx                    Touchscreen inverted x axis
         invy                    Touchscreen inverted y axis
         swapxy                  Touchscreen swapped x y axis
+        i2c0                    Choose the I2C0 bus on GPIOs 0&1
+        i2c1                    Choose the I2C1 bus on GPIOs 2&3
+        i2c3                    Choose the I2C3 bus (configure with the i2c3
+                                overlay - BCM2711 only)
+        i2c4                    Choose the I2C4 bus (configure with the i2c4
+                                overlay - BCM2711 only)
+        i2c5                    Choose the I2C5 bus (configure with the i2c5
+                                overlay - BCM2711 only)
+        i2c6                    Choose the I2C6 bus (configure with the i2c6
+                                overlay - BCM2711 only)
+        addr                    Sets the address for the touch controller. Note
+                                that the device must be configured to use the
+                                specified address.
 
 
 Name:   enc28j60
@@ -1784,10 +1800,10 @@ Params: addr                    Sets the address for the fan controller. Note
         i2c3                    Choose the I2C3 bus (configure with the i2c3
                                 overlay - BCM2711 only)
 
-        i2c4                    Choose the I2C3 bus (configure with the i2c3
+        i2c4                    Choose the I2C4 bus (configure with the i2c4
                                 overlay - BCM2711 only)
 
-        i2c5                    Choose the I2C5 bus (configure with the i2c4
+        i2c5                    Choose the I2C5 bus (configure with the i2c5
                                 overlay - BCM2711 only)
 
         i2c6                    Choose the I2C6 bus (configure with the i2c6
@@ -1956,13 +1972,15 @@ Params: abx80x                  Select one of the ABx80x family:
                                 "schottky" (ABx80x and RV1805 only)
 
         trickle-resistor-ohms   Resistor value for trickle charge (DS1339,
-                                ABx80x, RV1805, RV3028)
+                                ABx80x, BQ32000, RV1805, RV3028, RV3032)
+
+        trickle-voltage-mv      Charge pump voltage for trickle charge (RV3032)
 
         wakeup-source           Specify that the RTC can be used as a wakeup
                                 source
 
         backup-switchover-mode  Backup power supply switch mode. Must be 0 for
-                                off or 1 for Vdd < VBackup (RV3028 only)
+                                off or 1 for Vdd < VBackup (RV3028, RV3032)
 
 
 Name:   i2c-rtc-gpio
@@ -2026,13 +2044,15 @@ Params: abx80x                  Select one of the ABx80x family:
                                 "schottky" (ABx80x and RV1805 only)
 
         trickle-resistor-ohms   Resistor value for trickle charge (DS1339,
-                                ABx80x, RV1805, RV3028)
+                                ABx80x, BQ32000, RV1805, RV3028, RV3032)
+
+        trickle-voltage-mv      Charge pump voltage for trickle charge (RV3032)
 
         wakeup-source           Specify that the RTC can be used as a wakeup
                                 source
 
         backup-switchover-mode  Backup power supply switch mode. Must be 0 for
-                                off or 1 for Vdd < VBackup (RV3028 only)
+                                off or 1 for Vdd < VBackup (RV3028, RV3032)
 
         i2c_gpio_sda            GPIO used for I2C data (default "23")
 
@@ -2047,8 +2067,8 @@ Info:   Adds support for a number of I2C barometric pressure, temperature,
         light level and chemical sensors on i2c_arm
 Load:   dtoverlay=i2c-sensor,<param>=<val>
 Params: addr                    Set the address for the BH1750, BME280, BME680,
-                                BMP280, CCS811, DS1621, HDC100X, JC42, LM75,
-                                MCP980x, MPU6050, MPU9250, MS5637, MS5803,
+                                BMP280, BMP380, CCS811, DS1621, HDC100X, JC42,
+                                LM75, MCP980x, MPU6050, MPU9250, MS5637, MS5803,
                                 MS5805, MS5837, MS8607, SHT3x or TMP102
 
         aht10                   Select the Aosong AHT10 temperature and humidity
@@ -2068,6 +2088,9 @@ Params: addr                    Set the address for the BH1750, BME280, BME680,
         bmp180                  Select the Bosch Sensortronic BMP180
 
         bmp280                  Select the Bosch Sensortronic BMP280
+                                Valid addresses 0x76-0x77, default 0x76
+
+        bmp380                  Select the Bosch Sensortronic BMP380
                                 Valid addresses 0x76-0x77, default 0x76
 
         bno055                  Select the Bosch Sensortronic BNO055 IMU
@@ -2557,9 +2580,11 @@ Name:   jedec-spi-nor
 Info:   Adds support for JEDEC-compliant SPI NOR flash devices.  (Note: The
         "jedec,spi-nor" kernel driver was formerly known as "m25p80".)
 Load:   dtoverlay=jedec-spi-nor,<param>=<val>
-Params: flash-spi<n>-<m>        Enables flash device on SPI<n>, CS#<m>.
-        flash-fastr-spi<n>-<m>  Enables flash device with fast read capability
-                                on SPI<n>, CS#<m>.
+Params: spi<n>-<m>              Enable flash device on SPI<n>, CS#<m>
+        fastr                   Add fast read capability to the flash device
+        speed                   Maximum SPI frequency (Hz)
+        flash-spi<n>-<m>        Same as spi<n>-<m> (deprecated)
+        flash-fastr-spi<n>-<m>  Same as spi<n>->m>,fastr (deprecated)
 
 
 Name:   justboom-both
@@ -3219,6 +3244,9 @@ Params: speed                   Display SPI bus speed
         debug                   Debug output level {0-7}
 
         xohms                   Touchpanel sensitivity (X-plate resistance)
+
+        drm                     Select the DRM/KMS driver instead of the FBTFT
+                                one
 
 
 Name:   piscreen2r

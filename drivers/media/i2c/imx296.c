@@ -20,6 +20,10 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
+static int trigger_mode;
+module_param(trigger_mode, int, 0644);
+MODULE_PARM_DESC(trigger_mode, "Set trigger mode: 0=default, 1=XTRIG");
+
 #define IMX296_PIXEL_ARRAY_WIDTH			1456
 #define IMX296_PIXEL_ARRAY_HEIGHT			1088
 
@@ -645,6 +649,12 @@ static int imx296_stream_on(struct imx296 *sensor)
 
 	imx296_write(sensor, IMX296_CTRL00, 0, &ret);
 	usleep_range(2000, 5000);
+
+	if (trigger_mode == 1) {
+		imx296_write(sensor, IMX296_CTRL0B, IMX296_CTRL0B_TRIGEN, &ret);
+		imx296_write(sensor, IMX296_LOWLAGTRG,  IMX296_LOWLAGTRG_FAST, &ret);
+	}
+
 	imx296_write(sensor, IMX296_CTRL0A, 0, &ret);
 
 	/* vflip and hflip cannot change during streaming */
@@ -745,12 +755,14 @@ static int imx296_enum_frame_size(struct v4l2_subdev *sd,
 {
 	const struct imx296 *sensor = to_imx296(sd);
 	const struct v4l2_mbus_framefmt *format;
-	/* Binning only works on the mono sensor variant */
-	unsigned int max_index = sensor->mono ? 2 : 1;
 
 	format = v4l2_subdev_get_pad_format(sd, state, fse->pad);
 
-	if (fse->index >= max_index || fse->code != imx296_mbus_code(sensor))
+	/*
+	 * Binning does not seem to work on either mono or colour sensor
+	 * variants. Disable enumerating the binned frame size for now.
+	 */
+	if (fse->index >= 1 || fse->code != imx296_mbus_code(sensor))
 		return -EINVAL;
 
 	fse->min_width = IMX296_PIXEL_ARRAY_WIDTH / (fse->index + 1);
@@ -781,32 +793,8 @@ static int imx296_set_format(struct v4l2_subdev *sd,
 	crop = v4l2_subdev_get_pad_crop(sd, state, fmt->pad);
 	format = v4l2_subdev_get_pad_format(sd, state, fmt->pad);
 
-	/*
-	 * Binning is only allowed when cropping is disabled according to the
-	 * documentation. This should be double-checked.
-	 */
-	if (crop->width == IMX296_PIXEL_ARRAY_WIDTH &&
-	    crop->height == IMX296_PIXEL_ARRAY_HEIGHT) {
-		unsigned int width;
-		unsigned int height;
-		unsigned int hratio;
-		unsigned int vratio;
-
-		/* Clamp the width and height to avoid dividing by zero. */
-		width = clamp_t(unsigned int, fmt->format.width,
-				crop->width / 2, crop->width);
-		height = clamp_t(unsigned int, fmt->format.height,
-				 crop->height / 2, crop->height);
-
-		hratio = DIV_ROUND_CLOSEST(crop->width, width);
-		vratio = DIV_ROUND_CLOSEST(crop->height, height);
-
-		format->width = crop->width / hratio;
-		format->height = crop->height / vratio;
-	} else {
-		format->width = crop->width;
-		format->height = crop->height;
-	}
+	format->width = crop->width;
+	format->height = crop->height;
 
 	imx296_setup_hblank(sensor, format->width);
 
@@ -1043,6 +1031,8 @@ static int imx296_identify_model(struct imx296 *sensor)
 			"failed to get sensor out of standby (%d)\n", ret);
 		return ret;
 	}
+
+	usleep_range(2000, 5000);
 
 	ret = imx296_read(sensor, IMX296_SENSOR_INFO);
 	if (ret < 0) {

@@ -255,13 +255,6 @@ static const struct vc_image_format *vc4_get_vc_image_fmt(u32 drm_format)
 /* The firmware delivers a vblank interrupt to us through the SMI
  * hardware, which has only this one register.
  */
-#define SMICS 0x0
-#define SMIDSW0 0x14
-#define SMIDSW1 0x1C
-#define SMICS_INTERRUPTS (BIT(9) | BIT(10) | BIT(11))
-
-/* Flag to denote that the firmware is giving multiple display callbacks */
-#define SMI_NEW 0xabcd0000
 
 #define vc4_crtc vc4_kms_crtc
 #define to_vc4_crtc to_vc4_kms_crtc
@@ -528,7 +521,7 @@ static int vc4_plane_to_mb(struct drm_plane *plane,
 			   struct drm_plane_state *state)
 {
 	struct drm_framebuffer *fb = state->fb;
-	struct drm_gem_dma_object *bo = drm_fb_dma_get_gem_obj(fb, 0);
+	struct drm_gem_dma_object *bo;
 	const struct drm_format_info *drm_fmt = fb->format;
 	const struct vc_image_format *vc_fmt =
 					vc4_get_vc_image_fmt(drm_fmt->format);
@@ -552,6 +545,7 @@ static int vc4_plane_to_mb(struct drm_plane *plane,
 					state->normalized_zpos : -127;
 	mb->plane.num_planes = num_planes;
 	mb->plane.is_vu = vc_fmt->is_vu;
+	bo = drm_fb_dma_get_gem_obj(fb, 0);
 	mb->plane.planes[0] = bo->dma_addr + fb->offsets[0];
 
 	rotation = drm_rotation_simplify(state->rotation,
@@ -572,11 +566,14 @@ static int vc4_plane_to_mb(struct drm_plane *plane,
 		/* Makes assumptions on the stride for the chroma planes as we
 		 * can't easily plumb in non-standard pitches.
 		 */
+		bo = drm_fb_dma_get_gem_obj(fb, 1);
 		mb->plane.planes[1] = bo->dma_addr + fb->offsets[1];
-		if (num_planes > 2)
+		if (num_planes > 2) {
+			bo = drm_fb_dma_get_gem_obj(fb, 2);
 			mb->plane.planes[2] = bo->dma_addr + fb->offsets[2];
-		else
+		} else {
 			mb->plane.planes[2] = 0;
+		}
 
 		/* Special case the YUV420 with U and V as line interleaved
 		 * planes as we have special handling for that case.
@@ -666,8 +663,8 @@ static int vc4_plane_to_mb(struct drm_plane *plane,
 	return 0;
 }
 
-static int vc4_plane_atomic_check(struct drm_plane *plane,
-				  struct drm_atomic_state *state)
+static int vc4_fkms_plane_atomic_check(struct drm_plane *plane,
+				       struct drm_atomic_state *state)
 {
 	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
 										 plane);
@@ -724,7 +721,7 @@ static int vc4_plane_atomic_async_check(struct drm_plane *plane,
 }
 
 /* Called during init to allocate the plane's atomic state. */
-static void vc4_plane_reset(struct drm_plane *plane)
+static void vc4_fkms_plane_reset(struct drm_plane *plane)
 {
 	struct vc4_plane_state *vc4_state;
 
@@ -784,7 +781,7 @@ static bool vc4_fkms_format_mod_supported(struct drm_plane *plane,
 	}
 }
 
-static struct drm_plane_state *vc4_plane_duplicate_state(struct drm_plane *plane)
+static struct drm_plane_state *vc4_fkms_plane_duplicate_state(struct drm_plane *plane)
 {
 	struct vc4_plane_state *vc4_state;
 
@@ -805,8 +802,8 @@ static const struct drm_plane_funcs vc4_plane_funcs = {
 	.disable_plane = drm_atomic_helper_disable_plane,
 	.destroy = vc4_plane_destroy,
 	.set_property = NULL,
-	.reset = vc4_plane_reset,
-	.atomic_duplicate_state = vc4_plane_duplicate_state,
+	.reset = vc4_fkms_plane_reset,
+	.atomic_duplicate_state = vc4_fkms_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
 	.format_mod_supported = vc4_fkms_format_mod_supported,
 };
@@ -814,7 +811,7 @@ static const struct drm_plane_funcs vc4_plane_funcs = {
 static const struct drm_plane_helper_funcs vc4_plane_helper_funcs = {
 	.prepare_fb = drm_gem_plane_helper_prepare_fb,
 	.cleanup_fb = NULL,
-	.atomic_check = vc4_plane_atomic_check,
+	.atomic_check = vc4_fkms_plane_atomic_check,
 	.atomic_update = vc4_plane_atomic_update,
 	.atomic_disable = vc4_plane_atomic_disable,
 	.atomic_async_check = vc4_plane_atomic_async_check,
@@ -1217,16 +1214,13 @@ static irqreturn_t vc4_crtc_irq_handler(int irq, void *data)
 {
 	struct vc4_crtc **crtc_list = data;
 	int i;
-	u32 stat = readl(crtc_list[0]->regs + SMICS);
 	irqreturn_t ret = IRQ_NONE;
 	u32 chan;
+	if (1) {
 
-	if (stat & SMICS_INTERRUPTS) {
-		writel(0, crtc_list[0]->regs + SMICS);
+		chan = 0;
 
-		chan = readl(crtc_list[0]->regs + SMIDSW0);
-
-		if ((chan & 0xFFFF0000) != SMI_NEW) {
+		if (1) {
 			/* Older firmware. Treat the one interrupt as vblank/
 			 * complete for all crtcs.
 			 */
@@ -1237,7 +1231,7 @@ static irqreturn_t vc4_crtc_irq_handler(int irq, void *data)
 			}
 		} else {
 			if (chan & 1) {
-				writel(SMI_NEW, crtc_list[0]->regs + SMIDSW0);
+				//writel(SMI_NEW, crtc_list[0]->regs + SMIDSW0);
 				if (crtc_list[0]->vblank_enabled)
 					drm_crtc_handle_vblank(&crtc_list[0]->base);
 				vc4_crtc_handle_page_flip(crtc_list[0]);
@@ -1245,10 +1239,10 @@ static irqreturn_t vc4_crtc_irq_handler(int irq, void *data)
 
 			if (crtc_list[1]) {
 				/* Check for the secondary display too */
-				chan = readl(crtc_list[0]->regs + SMIDSW1);
+				//chan = readl(crtc_list[0]->regs + SMIDSW1);
 
 				if (chan & 1) {
-					writel(SMI_NEW, crtc_list[0]->regs + SMIDSW1);
+					//writel(SMI_NEW, crtc_list[0]->regs + SMIDSW1);
 
 					if (crtc_list[1]->vblank_enabled)
 						drm_crtc_handle_vblank(&crtc_list[1]->base);
@@ -1988,7 +1982,7 @@ static int vc4_fkms_bind(struct device *dev, struct device *master, void *data)
 		if (IS_ERR(crtc_list[0]->regs))
 			DRM_ERROR("Oh dear, failed to map registers\n");
 
-		writel(0, crtc_list[0]->regs + SMICS);
+		//writel(0, crtc_list[0]->regs + SMICS);
 		ret = devm_request_irq(dev, platform_get_irq(pdev, 0),
 				       vc4_crtc_irq_handler, 0,
 				       "vc4 firmware kms", crtc_list);

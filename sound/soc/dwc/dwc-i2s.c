@@ -165,29 +165,31 @@ static void i2s_start(struct dw_i2s_dev *dev,
 	i2s_write_reg(dev->i2s_base, CER, 1);
 }
 
-static void i2s_stop(struct dw_i2s_dev *dev,
-		struct snd_pcm_substream *substream)
+static void i2s_pause(struct dw_i2s_dev *dev, struct snd_pcm_substream *substream)
 {
 
 	i2s_clear_irqs(dev, substream->stream);
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		i2s_write_reg(dev->i2s_base, ITER, 0);
-	else
-		i2s_write_reg(dev->i2s_base, IRER, 0);
 
 	i2s_disable_irqs(dev, substream->stream, 8);
 
 	if (!dev->active) {
 		i2s_write_reg(dev->i2s_base, CER, 0);
-		i2s_write_reg(dev->i2s_base, IER, 0);
+		/* Keep the device enabled until the shutdown - do not clear IER */
 	}
+}
+
+static void i2s_stop(struct dw_i2s_dev *dev, struct snd_pcm_substream *substream)
+{
+	i2s_clear_irqs(dev, substream->stream);
+
+	i2s_disable_irqs(dev, substream->stream, 8);
 }
 
 static void dw_i2s_config(struct dw_i2s_dev *dev, int stream)
 {
-	u32 ch_reg;
 	struct i2s_clk_config_data *config = &dev->config;
-
+	u32 ch_reg;
+	u32 dmacr = 0;
 
 	i2s_disable_channels(dev, stream);
 
@@ -198,15 +200,22 @@ static void dw_i2s_config(struct dw_i2s_dev *dev, int stream)
 			i2s_write_reg(dev->i2s_base, TFCR(ch_reg),
 				      dev->fifo_th - 1);
 			i2s_write_reg(dev->i2s_base, TER(ch_reg), 1);
+			dmacr |= (DMACR_DMAEN_TXCH0 << ch_reg);
 		} else {
 			i2s_write_reg(dev->i2s_base, RCR(ch_reg),
 				      dev->xfer_resolution);
 			i2s_write_reg(dev->i2s_base, RFCR(ch_reg),
 				      dev->fifo_th - 1);
 			i2s_write_reg(dev->i2s_base, RER(ch_reg), 1);
+			dmacr |= (DMACR_DMAEN_RXCH0 << ch_reg);
 		}
-
 	}
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dmacr |= DMACR_DMAEN_TX;
+	else if (stream == SNDRV_PCM_STREAM_CAPTURE)
+		dmacr |= DMACR_DMAEN_RX;
+
+	i2s_write_reg(dev->i2s_base, DMACR, dmacr);
 }
 
 static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
@@ -214,23 +223,34 @@ static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
 {
 	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(dai);
 	struct i2s_clk_config_data *config = &dev->config;
+	union dw_i2s_snd_dma_data *dma_data = NULL;
 	int ret;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dma_data = &dev->play_dma_data;
+	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		dma_data = &dev->capture_dma_data;
+	else
+		return -1;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		config->data_width = 16;
+		dma_data->dt.addr_width = 2;
 		dev->ccr = 0x00;
 		dev->xfer_resolution = 0x02;
 		break;
 
 	case SNDRV_PCM_FORMAT_S24_LE:
 		config->data_width = 24;
+		dma_data->dt.addr_width = 4;
 		dev->ccr = 0x08;
 		dev->xfer_resolution = 0x04;
 		break;
 
 	case SNDRV_PCM_FORMAT_S32_LE:
 		config->data_width = 32;
+		dma_data->dt.addr_width = 4;
 		dev->ccr = 0x10;
 		dev->xfer_resolution = 0x05;
 		break;
@@ -281,6 +301,55 @@ static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int dw_i2s_startup(struct snd_pcm_substream *substream,
+			  struct snd_soc_dai *cpu_dai)
+{
+	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(cpu_dai);
+	union dw_i2s_snd_dma_data *dma_data = NULL;
+	u32 dmacr;
+
+	dev_dbg(dev->dev, "%s(%s)\n", __func__, substream->name);
+	if (!(dev->capability & DWC_I2S_RECORD) &&
+	    substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		return -EINVAL;
+
+	if (!(dev->capability & DWC_I2S_PLAY) &&
+	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		return -EINVAL;
+
+	dw_i2s_config(dev, substream->stream);
+	dmacr = i2s_read_reg(dev->i2s_base, DMACR);
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dma_data = &dev->play_dma_data;
+	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		dma_data = &dev->capture_dma_data;
+
+	snd_soc_dai_set_dma_data(cpu_dai, substream, (void *)dma_data);
+	i2s_write_reg(dev->i2s_base, DMACR, dmacr);
+
+	return 0;
+}
+
+static void dw_i2s_shutdown(struct snd_pcm_substream *substream,
+			    struct snd_soc_dai *dai)
+{
+	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(dai);
+
+	dev_dbg(dev->dev, "%s(%s)\n", __func__, substream->name);
+	i2s_disable_channels(dev, substream->stream);
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		i2s_write_reg(dev->i2s_base, ITER, 0);
+	else
+		i2s_write_reg(dev->i2s_base, IRER, 0);
+
+	i2s_disable_irqs(dev, substream->stream, 8);
+
+	if (!dev->active) {
+		i2s_write_reg(dev->i2s_base, CER, 0);
+		i2s_write_reg(dev->i2s_base, IER, 0);
+	}
+}
+
 static int dw_i2s_prepare(struct snd_pcm_substream *substream,
 			  struct snd_soc_dai *dai)
 {
@@ -308,9 +377,12 @@ static int dw_i2s_trigger(struct snd_pcm_substream *substream,
 		i2s_start(dev, substream);
 		break;
 
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		dev->active--;
+		i2s_pause(dev, substream);
+		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		dev->active--;
 		i2s_stop(dev, substream);
 		break;
@@ -351,11 +423,45 @@ static int dw_i2s_set_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
 	return ret;
 }
 
+static int dw_i2s_set_bclk_ratio(struct snd_soc_dai *cpu_dai,
+				 unsigned int ratio)
+{
+	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(cpu_dai);
+	struct i2s_clk_config_data *config = &dev->config;
+
+	dev_dbg(dev->dev, "%s(%d)\n", __func__, ratio);
+	if (ratio < config->data_width * 2)
+		return -EINVAL;
+
+	switch (ratio) {
+	case 32:
+		dev->ccr = 0x00;
+		break;
+
+	case 48:
+		dev->ccr = 0x08;
+		break;
+
+	case 64:
+		dev->ccr = 0x10;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	i2s_write_reg(dev->i2s_base, CCR, dev->ccr);
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops dw_i2s_dai_ops = {
 	.hw_params	= dw_i2s_hw_params,
+	.startup	= dw_i2s_startup,
+	.shutdown	= dw_i2s_shutdown,
 	.prepare	= dw_i2s_prepare,
 	.trigger	= dw_i2s_trigger,
 	.set_fmt	= dw_i2s_set_fmt,
+	.set_bclk_ratio	= dw_i2s_set_bclk_ratio,
 };
 
 #ifdef CONFIG_PM
@@ -448,9 +554,9 @@ static const u32 bus_widths[COMP_MAX_DATA_WIDTH] = {
 static const u32 formats[COMP_MAX_WORDSIZE] = {
 	SNDRV_PCM_FMTBIT_S16_LE,
 	SNDRV_PCM_FMTBIT_S16_LE,
-	SNDRV_PCM_FMTBIT_S24_LE,
-	SNDRV_PCM_FMTBIT_S24_LE,
-	SNDRV_PCM_FMTBIT_S32_LE,
+	SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S16_LE,
+	SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S16_LE,
+	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S16_LE,
 	0,
 	0,
 	0

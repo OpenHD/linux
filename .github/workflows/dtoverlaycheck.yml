@@ -32,9 +32,9 @@ jobs:
 
     - name: overlaycheck
       run: |
-        git clone -b 1b61d601e4e161c78e9f1460b411372018d9b4ef https://github.com/raspberrypi/utils ${{env.UTILS_DIR}}
+        git clone  https://github.com/raspberrypi/utils ${{env.UTILS_DIR}}
         cd ${{env.UTILS_DIR}}
-        echo "hello world"
+        git checkout 1b61d601e4e161c78e9f1460b411372018d9b4ef
         pwd
         mkdir build
         cd build

@@ -46,7 +46,6 @@
 	};
 
 	midi-uart2 {
-		bcm2835;
 		bcm2711;
 	};
 
@@ -55,7 +54,6 @@
 	};
 
 	midi-uart4 {
-		bcm2835;
 		bcm2711;
 	};
 
